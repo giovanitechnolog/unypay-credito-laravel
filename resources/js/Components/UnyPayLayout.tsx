@@ -29,7 +29,7 @@ const NAV_SECTIONS = [
     label: "SISTEMA",
     items: [
       { href: "/serasa", label: "Monitor Serasa", icon: Shield },
-      { href: "/audit",  label: "Auditoria",      icon: ClipboardList },
+      //{ href: "/audit",  label: "Auditoria",      icon: ClipboardList },
     ],
   },
 ];

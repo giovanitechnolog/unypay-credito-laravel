@@ -8,6 +8,7 @@ use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\LancamentosController;
 use App\Http\Controllers\IpcaController;
 use App\Http\Controllers\SimulatorController;
+use App\Http\Controllers\SerasaController;
 
 
 // Rota principal apontando para o Controller que calcula as finanças
@@ -64,3 +65,10 @@ Route::post('/api/ipca/sync', [IpcaController::class, 'syncBCB'])->name('ipca.sy
     Route::post('/api/simulator/save', [SimulatorController::class, 'save'])->name('simulator.save');
     Route::delete('/api/simulator/{id}', [SimulatorController::class, 'delete'])->name('simulator.delete');
     Route::post('/api/simulator/{id}/convert', [SimulatorController::class, 'convertToContract'])->name('simulator.convert');
+
+    Route::get('/serasa', [SerasaController::class, 'index'])->name('serasa.index');
+    
+    // Processamentos de background da API
+    Route::post('/api/serasa/apontamento', [SerasaController::class, 'store'])->name('serasa.store');
+    Route::put('/api/serasa/apontamento/{id}/regularizar', [SerasaController::class, 'regularizar'])->name('serasa.regularizar');
+    Route::post('/api/serasa/consultar/{clientId}', [SerasaController::class, 'consultar'])->name('serasa.consultar');
