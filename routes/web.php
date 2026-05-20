@@ -7,6 +7,7 @@ use App\Http\Controllers\ClientController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\LancamentosController;
 use App\Http\Controllers\IpcaController;
+use App\Http\Controllers\SimulatorController;
 
 
 // Rota principal apontando para o Controller que calcula as finanças
@@ -54,3 +55,12 @@ Route::post('/api/ipca/upsert', [IpcaController::class, 'upsert'])->name('ipca.u
 
 // API: Dispara o consumo em tempo real do Banco Central do Brasil
 Route::post('/api/ipca/sync', [IpcaController::class, 'syncBCB'])->name('ipca.sync');
+
+    Route::get('/simulador', [SimulatorController::class, 'index'])->name('simulator.index');
+    
+    Route::get('/simulacoes', [SimulatorController::class, 'history'])->name('simulator.history'); 
+    
+    // APIs de execução em background
+    Route::post('/api/simulator/save', [SimulatorController::class, 'save'])->name('simulator.save');
+    Route::delete('/api/simulator/{id}', [SimulatorController::class, 'delete'])->name('simulator.delete');
+    Route::post('/api/simulator/{id}/convert', [SimulatorController::class, 'convertToContract'])->name('simulator.convert');

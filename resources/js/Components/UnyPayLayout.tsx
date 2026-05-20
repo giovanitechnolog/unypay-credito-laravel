@@ -21,7 +21,7 @@ const NAV_SECTIONS = [
     label: "FINANCEIRO",
     items: [
       { href: "/ipca",        label: "Tabela IPCA",     icon: TrendingUp },
-      { href: "/simulator",   label: "Simulador",       icon: Calculator },
+      { href: "/simulador",   label: "Simulador",       icon: Calculator },
       { href: "/simulacoes",  label: "Hist. Simulações", icon: History },
     ],
   },
