@@ -1,0 +1,550 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* @custom-variant dark (&:is(.dark *)); */
+
+/* ─── Fontes SIGx: IBM Plex Sans + IBM Plex Mono ──────────────────────────── */
+/* Carregadas via index.html */
+
+/* ─── Variáveis CSS — idênticas ao SIGx ──────────────────────────────────── */
+:root {
+  --radius: .4rem;
+  --background: oklch(97.5% .002 240);
+  --foreground: oklch(18% .02 240);
+  --card: oklch(100% 0 0);
+  --card-foreground: oklch(18% .02 240);
+  --popover: oklch(100% 0 0);
+  --popover-foreground: oklch(18% .02 240);
+  --primary: oklch(32% .09 240);
+  --primary-foreground: oklch(98% 0 0);
+  --secondary: oklch(94% .005 240);
+  --secondary-foreground: oklch(32% .09 240);
+  --muted: oklch(94% .005 240);
+  --muted-foreground: oklch(52% .02 240);
+  --accent: oklch(94% .005 240);
+  --accent-foreground: oklch(18% .02 240);
+  --destructive: oklch(57.7% .245 27.325);
+  --destructive-foreground: oklch(98.5% 0 0);
+  --border: oklch(88% .008 240);
+  --input: oklch(88% .008 240);
+  --ring: oklch(52% .14 240);
+
+  /* Sidebar — exato do SIGx */
+  --sidebar: oklch(22% .06 240);
+  --sidebar-foreground: oklch(88% .02 240);
+  --sidebar-primary: oklch(55% .18 240);
+  --sidebar-primary-foreground: oklch(98% 0 0);
+  --sidebar-accent: oklch(30% .07 240);
+  --sidebar-accent-foreground: oklch(95% .01 240);
+  --sidebar-border: oklch(30% .06 240);
+  --sidebar-ring: oklch(55% .18 240);
+
+  /* Tabela — cabeçalho exato do SIGx */
+  --table-header-bg: rgb(30, 58, 95);
+  --table-header-color: rgb(255, 255, 255);
+  --table-header-font-size: 10px;
+
+  /* Cores funcionais */
+  --color-green: oklch(55% .18 145);
+  --color-red: oklch(57.7% .245 27.325);
+  --color-orange: oklch(65% .2 50);
+  --color-blue: oklch(55% .18 240);
+  --color-purple: oklch(55% .2 290);
+  --color-teal: oklch(55% .15 185);
+
+  /* Charts */
+  --chart-1: oklch(55% .18 240);
+  --chart-2: oklch(55% .18 145);
+  --chart-3: oklch(65% .2 50);
+  --chart-4: oklch(57.7% .245 27.325);
+  --chart-5: oklch(55% .2 290);
+}
+
+/* ─── Base ───────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  margin: 0;
+  line-height: 1.5;
+}
+
+code, kbd, samp, pre, .font-mono {
+  font-family: "IBM Plex Mono", monospace;
+}
+
+/* ─── Flex fix ───────────────────────────────────────────────────────────── */
+.flex { min-width: 0; min-height: 0; }
+
+/* ─── Scrollbar — igual ao SIGx ─────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: oklch(80% .01 240); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: oklch(65% .02 240); }
+
+/* ─── Animations ─────────────────────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fadeIn 0.15s ease-out; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.animate-spin { animation: spin 0.8s linear infinite; }
+
+/* ─── Button active ──────────────────────────────────────────────────────── */
+button:active:not(:disabled) {
+  transform: scale(0.97);
+  transition: transform 100ms ease-out;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   COMPONENTES SIGX
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Sidebar ────────────────────────────────────────────────────────────── */
+.sigx-sidebar {
+  background: var(--sidebar);
+  width: 220px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+.sigx-sidebar-logo {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--sidebar-border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sigx-sidebar-section {
+  padding: 14px 16px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: oklch(55% .04 240);
+}
+.sigx-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 16px;
+  color: var(--sidebar-foreground);
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+  text-decoration: none;
+  border-left: 3px solid transparent;
+}
+.sigx-sidebar-item:hover {
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+}
+.sigx-sidebar-item.active {
+  background: var(--sidebar-accent);
+  color: white;
+  font-weight: 600;
+  border-left-color: var(--sidebar-primary);
+}
+.sigx-sidebar-footer {
+  margin-top: auto;
+  padding: 12px 16px;
+  border-top: 1px solid var(--sidebar-border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ─── Header ─────────────────────────────────────────────────────────────── */
+.sigx-header {
+  background: white;
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.sigx-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  font-family: "IBM Plex Sans", sans-serif;
+}
+.sigx-breadcrumb a {
+  color: var(--color-blue);
+  text-decoration: none;
+  font-weight: 500;
+}
+.sigx-breadcrumb a:hover { text-decoration: underline; }
+
+/* ─── Tabs ───────────────────────────────────────────────────────────────── */
+.sigx-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: white;
+  padding: 0 20px;
+  overflow-x: auto;
+}
+.sigx-tab {
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: all 0.1s;
+  white-space: nowrap;
+  font-family: "IBM Plex Sans", sans-serif;
+}
+.sigx-tab:hover { color: var(--foreground); }
+.sigx-tab.active {
+  color: var(--foreground);
+  border-bottom-color: var(--table-header-bg);
+  font-weight: 600;
+}
+
+/* ─── KPI Cards ──────────────────────────────────────────────────────────── */
+.kpi-card {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  position: relative;
+}
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.kpi-card.blue::before   { background: var(--color-blue); }
+.kpi-card.orange::before { background: var(--color-orange); }
+.kpi-card.green::before  { background: var(--color-green); }
+.kpi-card.red::before    { background: var(--color-red); }
+.kpi-card.purple::before { background: var(--color-purple); }
+.kpi-card.teal::before   { background: var(--color-teal); }
+.kpi-card.dark::before   { background: var(--table-header-bg); }
+
+/* ─── Table — cabeçalho FIXO (sticky) ───────────────────────────────────── */
+.sigx-table-wrapper {
+  overflow: auto;
+  max-height: calc(100vh - 280px);
+  position: relative;
+}
+.sigx-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  font-family: "IBM Plex Sans", sans-serif;
+}
+
+/* Cabeçalho fixo ao rolar */
+.sigx-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--table-header-bg);
+  color: var(--table-header-color);
+  font-size: var(--table-header-font-size);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 7px 10px;
+  white-space: nowrap;
+  border-bottom: 1px solid oklch(40% .07 240);
+  border-right: 1px solid oklch(40% .07 240);
+  font-family: "IBM Plex Sans", sans-serif;
+}
+.sigx-table thead tr:first-child th {
+  top: 0;
+  z-index: 21;
+}
+.sigx-table thead tr:nth-child(2) th {
+  top: 28px;
+  z-index: 20;
+  background: oklch(25% .07 240);
+}
+
+/* Grupos de colunas */
+.sigx-table .group-header {
+  text-align: center;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+}
+.sigx-table .group-id     { background: var(--table-header-bg); }
+.sigx-table .group-fin    { background: oklch(35% .14 240); }
+.sigx-table .group-status { background: oklch(30% .12 145); }
+.sigx-table .group-taxas  { background: oklch(30% .12 290); }
+.sigx-table .group-price  { background: oklch(30% .1 50); }
+.sigx-table .group-acoes  { background: oklch(28% .04 240); }
+
+.sigx-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid oklch(93% .005 240);
+  white-space: nowrap;
+  vertical-align: middle;
+  font-family: "IBM Plex Sans", sans-serif;
+}
+.sigx-table tbody tr:hover { background: oklch(96% .01 240); }
+.sigx-table tbody tr:nth-child(even) { background: oklch(98% .001 240); }
+.sigx-table tbody tr:nth-child(even):hover { background: oklch(96% .01 240); }
+
+/* Tfoot */
+.sigx-table tfoot td {
+  background: oklch(92% .005 240);
+  font-weight: 700;
+  border-top: 2px solid var(--border);
+  padding: 7px 10px;
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+}
+
+/* ─── Badges ─────────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  font-family: "IBM Plex Sans", sans-serif;
+  letter-spacing: 0.02em;
+}
+.badge-ativo        { background: oklch(92% .08 145); color: oklch(35% .15 145); }
+.badge-inadimplente { background: oklch(92% .08 27);  color: oklch(40% .2 27); }
+.badge-quitado      { background: oklch(92% .06 240); color: oklch(35% .15 240); }
+.badge-renegociado  { background: oklch(92% .08 290); color: oklch(35% .15 290); }
+.badge-pj           { background: oklch(92% .08 75);  color: oklch(40% .15 75); }
+.badge-pf           { background: oklch(92% .06 210); color: oklch(35% .15 210); }
+.badge-vencido      { background: oklch(92% .08 27);  color: oklch(40% .2 27); }
+.badge-avencer      { background: oklch(92% .06 240); color: oklch(35% .15 240); }
+.badge-pago         { background: oklch(92% .08 145); color: oklch(35% .15 145); }
+
+/* ─── Inputs ─────────────────────────────────────────────────────────────── */
+.sigx-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius);
+  font-size: 13px;
+  background: white;
+  color: var(--foreground);
+  transition: border-color 0.1s, box-shadow 0.1s;
+  outline: none;
+  font-family: "IBM Plex Sans", sans-serif;
+}
+.sigx-input:focus {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 2px oklch(52% .14 240 / 15%);
+}
+.sigx-input[type="number"] { font-family: "IBM Plex Mono", monospace; }
+.sigx-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+  font-family: "IBM Plex Sans", sans-serif;
+}
+
+/* ─── Buttons ────────────────────────────────────────────────────────────── */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  background: var(--table-header-bg);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s;
+  white-space: nowrap;
+  font-family: "IBM Plex Sans", sans-serif;
+}
+.btn-primary:hover { background: oklch(28% .09 240); }
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  background: white;
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+  white-space: nowrap;
+  font-family: "IBM Plex Sans", sans-serif;
+}
+.btn-secondary:hover { background: var(--secondary); border-color: oklch(75% .01 240); }
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+  border: none;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: "IBM Plex Sans", sans-serif;
+}
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: white;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.btn-icon:hover { background: var(--secondary); color: var(--foreground); }
+
+/* ─── Cards ──────────────────────────────────────────────────────────────── */
+.sigx-card {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.sigx-card-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.sigx-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--foreground);
+  font-family: "IBM Plex Sans", sans-serif;
+}
+
+/* ─── Modal ──────────────────────────────────────────────────────────────── */
+.sigx-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: oklch(0% 0 0 / 50%);
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 32px 16px;
+  overflow-y: auto;
+}
+.sigx-modal {
+  background: white;
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 760px;
+  box-shadow: 0 20px 60px oklch(0% 0 0 / 20%);
+  animation: fadeIn 0.12s ease-out;
+}
+.sigx-modal-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.sigx-modal-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--foreground);
+  font-family: "IBM Plex Sans", sans-serif;
+}
+.sigx-modal-body { padding: 18px 20px; }
+.sigx-modal-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ─── Section headers (tabela de detalhes) ───────────────────────────────── */
+.section-header {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: white;
+  padding: 5px 12px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  font-family: "IBM Plex Sans", sans-serif;
+}
+
+/* ─── Form grids ─────────────────────────────────────────────────────────── */
+.form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.form-grid-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; }
+.col-span-2 { grid-column: span 2; }
+.col-span-3 { grid-column: span 3; }
+.col-span-4 { grid-column: span 4; }
+@media (max-width: 640px) {
+  .form-grid-2, .form-grid-3, .form-grid-4 { grid-template-columns: 1fr; }
+  .col-span-2, .col-span-3, .col-span-4 { grid-column: span 1; }
+}
+
+/* ─── Money values ───────────────────────────────────────────────────────── */
+.money-pos { color: var(--color-green); font-weight: 600; font-family: "IBM Plex Mono", monospace; }
+.money-neg { color: var(--color-red);   font-weight: 600; font-family: "IBM Plex Mono", monospace; }
+.money-neu { color: var(--foreground);  font-weight: 600; font-family: "IBM Plex Mono", monospace; }
+.mono      { font-family: "IBM Plex Mono", monospace; }
+
+/* ─── Price table specific ───────────────────────────────────────────────── */
+.price-table-wrapper {
+  overflow: auto;
+  max-height: 500px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.price-table-wrapper .sigx-table thead th {
+  background: oklch(30% .1 50);
+}
+.price-table-wrapper .sigx-table thead tr:nth-child(2) th {
+  background: oklch(25% .08 50);
+  top: 28px;
+}
+
+/* ─── Divider ────────────────────────────────────────────────────────────── */
+.divider { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
