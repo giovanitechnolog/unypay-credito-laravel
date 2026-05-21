@@ -1,0 +1,188 @@
+h2. Data 21/05/2026:
+
+h3. O que foi feito:
+
+* Implementação completa da feature de importação automática de planilhas de carteira (.xlsx / .xls / .csv) no UnyPay® Crédito.
+* Instalação do pacote *maatwebsite/excel ^3.1* (Laravel Excel) via composer e publicação do config padrão em "config/excel.php".
+* Habilitação da extensão *ext-zip* no PHP 8.3 do Laragon ("C:\laragon\bin\php\php-8.3.30-Win32-vs16-x64\php.ini") - exigência do phpoffice/phpspreadsheet.
+* Criação da tabela "contract_imports" para tracking de cada importação (status, contadores, JSON de erros, timestamps de início/fim).
+* Implementação dos helpers de normalização ("SpreadsheetSanitizer") para tratar dados sujos da planilha: datas em múltiplos formatos, decimais BR/EN, taxas como fração ou percentual, SIM/NÃO, "Base multa" pt-BR para enum, status de parcela pt-BR para enum, inferência PF/PJ pelo nome da razão social.
+* Criação do "ContractImportRegistry" (singleton via container) que carrega o mapa code -> contractId entre as duas abas e acumula contadores/erros para resumo final.
+* Implementação do importador multi-aba ("CarteiraContratosImport") que processa APENAS as abas "Regras_Contratuais" e "Base_Parcelas", ignorando as demais 16 abas da planilha (Dashboard, Auditoria, abas individuais por contrato).
+* Sheet "RegrasContratuaisSheet": upsert do Client por nome exato, "updateOrCreate" do Contract usando coluna "Aba" como code único, atomicidade por linha via "DB::transaction".
+* Sheet "BaseParcelasSheet": match do contractId pelo cache do Registry (fallback no banco), exclusão das parcelas antigas no primeiro encontro do contrato (cenário de reimport), insert das Installments e criação automática de Payment quando "Status origem=Pago" e "Total pago origem > 0". Suporte a "WithChunkReading(500)" para escalar.
+* Resiliência: linhas órfãs (sem contrato pai) são logadas e descartadas sem derrubar o batch. "SkipsOnError + SkipsOnFailure" implementados em ambas as sheets.
+* Job "ImportContractsSpreadsheetJob" para execução em background com timeout=1800s. Ao final, recalcula automaticamente "installmentCount", "installmentAmount" e "firstDueDate" de cada contrato afetado a partir das parcelas recém-inseridas (dados que a planilha não traz nas Regras_Contratuais).
+* Endpoint dry-run "POST /sys/importar/contratos/validar" que executa toda a normalização SEM persistir no banco, retornando contadores e erros previstos.
+* Página interna "ContractImporter.tsx" em "/sys/importar/importar-contratos" com fluxo completo: dropzone (drag-and-drop ou clique), botão Validar, botão Importar, barra de progresso, polling de status a cada 2s, painel de erros com tabela expansível e histórico das últimas 10 importações. Layout usa UnyPayLayout (sidebar) mas SEM link no menu (ferramenta oculta).
+* Banner de advertência no topo da página alertando que é uma "Ferramenta interna - área restrita".
+* Mudança de "QUEUE_CONNECTION=database" para "QUEUE_CONNECTION=sync" no .env para simplificar o uso interno (job roda dentro da própria requisição POST, sem precisar manter queue worker rodando em paralelo).
+* Smoke test executado com sucesso usando a planilha real "UnyPay_Calculo_Clientes_Atrasados_Principal.xlsx" do cliente: 10 contratos, 6 clientes, 259 parcelas e 54 pagamentos importados em 1.45s, com zero erros e zero linhas ignoradas.
+* Smoke test de idempotência: reimportar a mesma planilha resulta em "contractsUpdated=10, contractsCreated=0" e delta zero no banco (parcelas antigas excluídas e re-inseridas limpas via cascade).
+
+h3. O que falta fazer:
+
+* Encapsular o grupo de rotas "/sys/importar/*" em "->middleware('auth')" quando o módulo de login do sistema estiver habilitado (TODO comentado já está no routes/web.php).
+* Resolver os 5 advisories de segurança reportados pelo "composer audit" em 4 pacotes (provavelmente do phpoffice/phpspreadsheet 1.30.4 e dependências legadas).
+* (Opcional) Evoluir a estratégia de upsert de Client de match exato para match por nome normalizado (Str::ascii + collapse) quando aparecerem variações de grafia entre importações.
+* (Opcional) Adicionar autenticação básica (token via .env ou middleware customizado) na rota oculta caso ela passe a ser usada por mais pessoas além dos administradores.
+
+h3. Empecilhos:
+
+* O PowerShell do Windows tinha PHP 8.2.30 como padrão no PATH, mas o projeto exige "php ^8.3" via composer.json. Foi necessário promover o PHP 8.3.30 do Laragon no PATH da sessão: "$env:PATH = 'C:\laragon\bin\php\php-8.3.30-Win32-vs16-x64;' + $env:PATH".
+* A extensão "ext-zip" estava desabilitada no php.ini do PHP 8.3 do Laragon, bloqueando a instalação do "phpoffice/phpspreadsheet". Foi necessário descomentar a linha "extension=zip" no php.ini.
+* O "composer dev" no PowerShell não conseguiu subir o queue worker corretamente porque o "npx concurrently" tem dificuldade de propagar o PATH alterado para os subprocessos. Solução adotada: mudar para QUEUE_CONNECTION=sync, eliminando a dependência do worker.
+* Bug encontrado e corrigido no "SpreadsheetSanitizer::inferPersonType": o padrão regex usava "/" como delimitador e tinha "s/a" entre os patterns, causando "preg_match(): Unknown modifier 'a'" e impedindo a criação de 4 contratos no primeiro teste real. Substituído o delimitador para "#".
+* Bug encontrado e corrigido no "ContractImportRegistry::bind": em modo dry-run todos os contratos recebiam id=0 como sentinela, fazendo o "touchedContracts" do summary mostrar sempre 1 em vez do total. Tratamento adicionado para usar o code como chave única quando contractId=0.
+
+h3. Arquivos Alterados:
+
+|_.nomeDoArquivo|_.Documentação|_.O que foi feito|_.Codigo Morto|_.SQL|_.Iniset|_.Arquivo Alterado?|
+| composer.json | Adicionada dependência "maatwebsite/excel ^3.1" no bloco require | Inclusão da biblioteca de leitura/escrita de planilhas Excel | NA | NA | NA | SIM |
+| composer.lock | Lockfile regenerado pelo composer | Travamento das versões: maatwebsite/excel 3.1.69, phpoffice/phpspreadsheet 1.30.4, markbaker/matrix, markbaker/complex, maennchen/zipstream-php, ezyang/htmlpurifier, composer/pcre, composer/semver | NA | NA | NA | SIM |
+| .env | "QUEUE_CONNECTION=database" trocado por "QUEUE_CONNECTION=sync" | Job de importação passa a rodar dentro da própria request HTTP, sem necessidade de queue worker em paralelo | NA | NA | NA | SIM |
+| config/excel.php | Config padrão do maatwebsite/excel publicado via "vendor:publish" | Defaults usados: chunk_size=1000, connection=null (default Laravel) | NA | NA | NA | SIM |
+| routes/web.php | Adicionadas 4 rotas internas no grupo prefix("sys/importar") e import do controller | GET importar-contratos (renderiza Inertia), POST contratos/validar (dry-run), POST contratos (upload+importação), GET contratos/status/{import} (polling) | NA | NA | NA | SIM |
+| database/migrations/2026_05_21_120000_create_contract_imports_table.php | Migration nova: cria tabela "contract_imports" para tracking de cada importação | Colunas: id, userId, originalFilename, storedPath, status enum, totais, contadores, errorsJson, summaryJson, startedAt, finishedAt, createdAt, updatedAt | NA | CREATE TABLE contract_imports | NA | SIM (NOVO) |
+| app/Models/ContractImport.php | Model Eloquent que mapeia a tabela contract_imports | Fillable, casts (JSON e datetime), constantes de status, helper isFinished() | NA | NA | NA | SIM (NOVO) |
+| app/Support/SpreadsheetSanitizer.php | Helpers puros de normalização (sem efeitos colaterais, testáveis isoladamente) | Métodos: toDecimal, toRate, toDate, toBool, mapPenaltyBase, mapInstallmentStatus, normalizeName, inferPersonType, isMeaninglessRow | NA | NA | NA | SIM (NOVO) |
+| app/Support/ContractImportRegistry.php | Registry compartilhado entre as sheets do import multi-aba | Cache code->contractId, contadores agregados, log de erros/skips, gestão de parcelas limpas para reimport | NA | NA | NA | SIM (NOVO) |
+| app/Imports/CarteiraContratosImport.php | Importador guarda-chuva, implementa WithMultipleSheets | Mapeia "Regras_Contratuais" para RegrasContratuaisSheet e "Base_Parcelas" para BaseParcelasSheet, ignorando as demais 16 abas | NA | NA | NA | SIM (NOVO) |
+| app/Imports/Sheets/RegrasContratuaisSheet.php | Sheet que processa a aba de contratos (headingRow=3, startRow=4) | OnEachRow + transação por linha, upsert de Client por nome, updateOrCreate de Contract por code | NA | INSERT/UPDATE em clients e contracts | NA | SIM (NOVO) |
+| app/Imports/Sheets/BaseParcelasSheet.php | Sheet que processa a aba de parcelas com WithChunkReading(500) | Match do contractId pelo Registry, delete idempotente das parcelas antigas, insert de Installment e Payment quando aplicável | NA | DELETE/INSERT em installments e payments | NA | SIM (NOVO) |
+| app/Jobs/ImportContractsSpreadsheetJob.php | Job ShouldQueue que executa o import multi-aba e recalcula stats | Atualiza status do ContractImport, executa Excel::import, roda recalculateContractStats() ao final | NA | UPDATE em contracts (installmentCount, installmentAmount, firstDueDate) | NA | SIM (NOVO) |
+| app/Http/Controllers/ContractImportController.php | Controller com 4 actions | page() renderiza Inertia, validateSpreadsheet() dry-run síncrono, store() upload+dispatch, status() endpoint JSON para polling | NA | INSERT em contract_imports | NA | SIM (NOVO) |
+| resources/js/Pages/ContractImporter.tsx | Página Inertia/React da ferramenta interna | Dropzone com drag-and-drop, botões Validar/Importar, barra de progresso, polling, painel de erros expansível, histórico das últimas 10 importações | NA | NA | NA | SIM (NOVO) |
+
+h2. Banco de Dados:
+
+h3. Criação/Replicação
+
+|_.Tabela|_.Funções|_.Jobs|_.Procedure|
+| contract_imports | NA | App\Jobs\ImportContractsSpreadsheetJob | NA |
+| contracts | NA | NA | NA |
+| clients | NA | NA | NA |
+| installments | NA | NA | NA |
+| payments | NA | NA | NA |
+
+h3. Telas de Cadastro e Alteração
+
+|_.Data Cadastro|_.Usuario Cadastro|_.Data Ação|_.Usuario Ação|
+| 21/05/2026 | Sistema (via importação automática) | 21/05/2026 | Sistema (via importação automática) |
+
+==============================================================================
+
+h2. Como usar a ferramenta de Importação de Planilha
+
+h3. Pré-requisitos do ambiente
+
+* PHP 8.3 ou superior no PATH (no Laragon: "C:\laragon\bin\php\php-8.3.30-Win32-vs16-x64").
+* Extensão "ext-zip" habilitada no php.ini.
+* Servidor Laravel rodando ("php artisan serve" - costuma subir em 127.0.0.1:8001 quando 8000 está bloqueada pelo Windows).
+* Vite dev server rodando ("npm run dev") para os assets do Inertia/React.
+* Variável QUEUE_CONNECTION=sync no .env (já configurado).
+
+h3. Estrutura esperada da planilha
+
+A planilha do cliente DEVE conter pelo menos duas abas com os nomes exatos:
+
+* *"Regras_Contratuais"* - dados de identificação dos contratos
+** Cabeçalho na linha 3, dados a partir da linha 4
+** Colunas esperadas (na ordem ou em qualquer ordem, o sistema lê pelo nome do header):
+*** "Aba" - identificador único do contrato (será gravado como contracts.code)
+*** "Cliente" - nome do cliente (será criado ou reaproveitado)
+*** "Contrato" - nome descritivo do contrato
+*** "Credor" - razão social do credor
+*** "Data contrato" - aceita formato YYYY-MM-DD, DD/MM/YYYY ou serial Excel
+*** "Valor contrato" - aceita "R$ 1.234,56", "1234,56", "1234.56" ou número puro
+*** "Juros mora a.m." - aceita "2,00%", "2%" ou 0.02 (fração)
+*** "Multa" - mesmo formato dos juros
+*** "Base multa" - aceita "Parcela", "Contrato" ou "Débito atualizado"
+*** "Honorários" - taxa percentual
+*** "Venc. antecipado" - "SIM" ou "NÃO"
+*** "Regra/Cláusula atraso" - texto livre
+*** "Garantias" - texto livre com fiadores e garantias reais
+*** "Fonte" - nome do arquivo PDF original
+*** "Validado?" - "SIM" ou "NÃO"
+* *"Base_Parcelas"* - cronograma de parcelas
+** Cabeçalho na linha 3, dados a partir da linha 4
+** Colunas esperadas:
+*** "Aba origem" - referencia o "Aba" da Regras_Contratuais (chave de match)
+*** "Parcela" - número sequencial
+*** "Valor parcela" - decimal
+*** "Vencimento origem" - data
+*** "Status origem" - "Pago", "Vencido", "A vencer" ou "Pago parcial"
+*** "Total pago origem" - valor pago (se houver)
+*** "Data pagamento origem" - data do pagamento (se houver)
+*** "Observação" - texto livre
+
+As demais abas (Parametros, IPCA, Dashboard, Auditoria, abas individuais por contrato como "BeloSanta1", etc.) são *ignoradas automaticamente* - não precisam ser removidas.
+
+h3. Passo a passo de uso
+
+# Acesse a URL oculta diretamente no navegador: *http://127.0.0.1:8001/sys/importar/importar-contratos*
+## A URL não está linkada no menu lateral - apenas quem souber pode acessar.
+# Na tela "Importador de Planilha", você verá:
+## Banner amarelo no topo alertando que é "área restrita".
+## Card 1: zona de upload (arraste a planilha ou clique para escolher).
+## Card 2: botões "Validar antes de importar" e "Importar agora".
+## Card de histórico no rodapé com as últimas 10 importações.
+# *Selecione o arquivo* (.xlsx, .xls ou .csv, até 50 MB) arrastando para o dropzone ou clicando.
+# Clique em *"Validar antes de importar"* (RECOMENDADO).
+## O sistema executa todo o pipeline em modo dry-run (NADA é gravado no banco).
+## Em 1-2 segundos aparece o painel "Resultado da validação" com os contadores: contratos que SERIAM criados/atualizados, clientes, parcelas, pagamentos, ignorados, erros.
+## Se houver erros, eles aparecem em uma tabela expansível com: aba, linha da planilha, tipo (erro/ignorada) e mensagem.
+# Conferindo que está OK, clique em *"Importar agora"*.
+## O sistema faz o upload do arquivo para storage/app/private/contract-imports/.
+## Cria o registro em "contract_imports" e dispara o Job (em sync mode, executa imediatamente).
+## A tela exibe a barra de progresso e contadores em tempo real (polling a cada 2s no endpoint /status/{id}).
+## Quando terminar, aparece toast verde "Importação concluída" e o resumo final.
+# Confira o resultado:
+## Vá para o menu *Contratos* (/contracts) - os novos contratos estarão na lista.
+## Vá para o menu *Clientes* (/clients) - os clientes criados estarão lá.
+## Clique no olhinho de um contrato para ver as parcelas vinculadas.
+
+h3. Comportamento de reimportação
+
+* Se você importar a MESMA planilha duas vezes:
+** Os contratos existentes (matched por "code") são *atualizados* (não duplicados).
+** As parcelas antigas do contrato são *excluídas e reinseridas* limpas no primeiro encontro do contrato durante a importação atual (via CASCADE também apaga os payments antigos).
+** Clientes existentes (matched por nome exato) são *reaproveitados*, nenhum cliente duplicado é criado.
+* O resumo mostrará "contractsCreated=0, contractsUpdated=N" indicando atualização.
+
+h3. Comportamento em caso de erro
+
+* Linhas com dados inválidos (data inválida, valor negativo, parcela número 0, etc.) são *logadas e descartadas individualmente* - não derrubam o batch.
+* Linhas da Base_Parcelas que referenciam um "Aba origem" sem contrato correspondente são *ignoradas com aviso* (registrar em errorsJson com severity=skipped).
+* O job tem timeout de 30 minutos - planilhas com até ~50.000 parcelas devem rodar bem dentro disso.
+* Se o job falhar completamente (exceção fatal), o status do contract_imports vira "failed" e a mensagem é salva em errorsJson.
+
+h3. Recuperação após falha
+
+* Para reimportar do zero, primeiro limpe os dados da importação anterior:
+
+bc.. -- Limpar dados de uma importação específica
+DELETE FROM payments WHERE installmentId IN (SELECT id FROM installments WHERE contractId IN (SELECT id FROM contracts WHERE code IN ('Codigo1', 'Codigo2')));
+DELETE FROM installments WHERE contractId IN (SELECT id FROM contracts WHERE code IN ('Codigo1', 'Codigo2'));
+DELETE FROM contracts WHERE code IN ('Codigo1', 'Codigo2');
+
+p. * Ou para limpar TUDO (apenas em ambiente de desenvolvimento):
+
+bc.. DELETE FROM payments;
+DELETE FROM installments;
+DELETE FROM contracts;
+DELETE FROM clients;
+DELETE FROM contract_imports;
+
+p. * Em seguida, importe novamente pelo navegador.
+
+h3. Onde os arquivos ficam armazenados
+
+* Planilhas enviadas: "storage/app/private/contract-imports/{hash}.xlsx" (não vão para o /public, ficam protegidas).
+* Logs de aplicação: "storage/logs/laravel.log" (busque por "[ImportJob]" ou "Import Regras_Contratuais" / "Import Base_Parcelas").
+* Histórico das importações: tabela "contract_imports" no banco (consultável via SQL ou pela própria tela /sys/importar/importar-contratos).
+
+h3. Restrições de acesso atuais
+
+* A URL "/sys/importar/importar-contratos" *não está protegida por autenticação* nesta versão - depende apenas de não estar linkada no menu para ficar oculta de usuários comuns.
+* Quando o módulo de autenticação for habilitado, basta envelopar o grupo de rotas em "->middleware('auth')" no arquivo "routes/web.php" (o comentário já está lá indicando onde adicionar).
