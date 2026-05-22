@@ -9,6 +9,7 @@ use App\Http\Controllers\LancamentosController;
 use App\Http\Controllers\IpcaController;
 use App\Http\Controllers\SimulatorController;
 use App\Http\Controllers\SerasaController;
+use App\Http\Controllers\ContractImportController;
 
 
 // Rota principal apontando para o Controller que calcula as finanças
@@ -72,3 +73,24 @@ Route::post('/api/ipca/sync', [IpcaController::class, 'syncBCB'])->name('ipca.sy
     Route::post('/api/serasa/apontamento', [SerasaController::class, 'store'])->name('serasa.store');
     Route::put('/api/serasa/apontamento/{id}/regularizar', [SerasaController::class, 'regularizar'])->name('serasa.regularizar');
     Route::post('/api/serasa/consultar/{clientId}', [SerasaController::class, 'consultar'])->name('serasa.consultar');
+
+// ============================================================================
+// FERRAMENTA INTERNA: Importador de planilha de contratos (rota oculta)
+// ----------------------------------------------------------------------------
+// Não há link no menu — o acesso é por URL direta. Quando o módulo de login
+// for habilitado, basta encapsular o grupo abaixo em ->middleware('auth')
+// (ou em uma policy específica de administrador).
+// ============================================================================
+Route::prefix('sys/importar')->group(function () {
+    Route::get('importar-contratos', [ContractImportController::class, 'page'])
+        ->name('contracts.importer');
+
+    Route::post('contratos/validar', [ContractImportController::class, 'validateSpreadsheet'])
+        ->name('contracts.importer.validate');
+
+    Route::post('contratos', [ContractImportController::class, 'store'])
+        ->name('contracts.importer.store');
+
+    Route::get('contratos/status/{import}', [ContractImportController::class, 'status'])
+        ->name('contracts.importer.status');
+});
