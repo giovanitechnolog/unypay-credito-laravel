@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, usePage } from "@inertiajs/react"; // Mudamos para os hooks do Inertia
+import { Link, router, usePage } from "@inertiajs/react"; // Mudamos para os hooks do Inertia
 import {
   LayoutDashboard, List, Users, FileText, Calculator,
   TrendingUp, ClipboardList, LogOut, Menu, Bell,
@@ -81,8 +81,7 @@ export default function UnyPayLayout({ children }: { children: React.ReactNode }
   };
 
   const logout = () => {
-      // Cria uma requisição POST para a rota de logout padrão do Laravel quando ativarmos a autenticação
-      console.log('Executar Logout via Laravel');
+    router.post('/logout');
   };
 
   const breadcrumb = getBreadcrumb(url);
