@@ -400,22 +400,21 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
   const footerBg = "#1e2139";
 
   // ── Estilos sticky derivados (header e cell) ─────────────────────────────
-  const headerStickyStyle = (left: number, isLastIdCol: boolean): React.CSSProperties => ({
+  // Sem sombras na fronteira: o usuário pediu remoção da separação visual.
+  const headerStickyStyle = (left: number, _isLastIdCol: boolean): React.CSSProperties => ({
     ...thBase,
     position: "sticky",
     top: 28,
     left,
     zIndex: 12,
-    boxShadow: isLastIdCol ? "2px 0 4px rgba(0,0,0,0.06)" : undefined,
   });
 
-  const cellStickyStyle = (left: number, bg: string, isLastIdCol: boolean): React.CSSProperties => ({
+  const cellStickyStyle = (left: number, bg: string, _isLastIdCol: boolean): React.CSSProperties => ({
     ...tdBase,
     position: "sticky",
     left,
     zIndex: 4,
     background: bg,
-    boxShadow: isLastIdCol ? "2px 0 4px rgba(0,0,0,0.05)" : undefined,
   });
 
   return (
@@ -432,14 +431,14 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
               <RefreshCw size={12}/> Sincronizar IPCA
             </button>
             <Link href="/contracts">
-              <button style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:5, border:"none", background:"#374151", color:"white", fontSize:11, fontWeight:600, cursor:"pointer" }}>
+              <button style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:5, border:"1px solid #d1d5db", background:"white", color:"#374151", fontSize:11, fontWeight:500, cursor:"pointer" }}>
                 <Plus size={12}/> Novo
               </button>
             </Link>
-            <button onClick={() => alert("Geração de PDF acionada.")} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:5, border:"none", background:"#dc2626", color:"white", fontSize:11, fontWeight:600, cursor:"pointer" }}>
+            <button onClick={() => alert("Geração de PDF acionada.")} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:5, border:"none", background:"#991b1b", color:"white", fontSize:11, fontWeight:600, cursor:"pointer" }}>
               <FileText size={12}/> Relatório PDF
             </button>
-            <button onClick={() => alert("Geração de XLS acionada.")} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:5, border:"none", background:"#059669", color:"white", fontSize:11, fontWeight:600, cursor:"pointer" }}>
+            <button onClick={() => alert("Geração de XLS acionada.")} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:5, border:"none", background:"#1e3a8a", color:"white", fontSize:11, fontWeight:600, cursor:"pointer" }}>
               <Download size={12}/> Exportar Excel
             </button>
           </div>
@@ -602,7 +601,7 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
                         ...thGroup,
                         background: meta.bg,
                         color: meta.color,
-                        ...(stickyLeft ? { left: 0, zIndex: 32, boxShadow: "2px 0 4px rgba(0,0,0,0.06)" } : {}),
+                        ...(stickyLeft ? { left: 0, zIndex: 32 } : {}),
                       }}
                     >
                       {meta.label}
@@ -730,7 +729,6 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
               <tfoot>
                 <tr style={{ background: footerBg }}>
                   {visibleOrdered.map((col) => {
-                    const isLastIdCol = col.id === lastIdColumnId;
                     const isSticky = col.sticky != null;
                     const align = col.align;
 
@@ -753,7 +751,6 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
                             position: "sticky",
                             left: leftOffset,
                             zIndex: 6,
-                            boxShadow: isLastIdCol ? "2px 0 4px rgba(0,0,0,0.15)" : undefined,
                           }}
                         >
                           {renderFooterCell(col)}

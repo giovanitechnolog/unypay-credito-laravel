@@ -51,9 +51,13 @@ const tdCenter: React.CSSProperties = { ...tdBase, textAlign: "center" };
 // largura da coluna especial de chevron
 const CHEVRON_WIDTH = 28;
 
+const PAGE_SIZES = [20, 50, 100];
+
 export default function Payments({ contracts, interestData, filters }: any) {
   const [search, setSearch] = useState(filters?.search || "");
   const [statusFilter, setStatusFilter] = useState(filters?.statusFilter || "Todos");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [schedule, setSchedule] = useState<any>(null);
   const [schedLoading, setSchedLoading] = useState(false);
@@ -104,6 +108,7 @@ export default function Payments({ contracts, interestData, filters }: any) {
   }, [expandedId, baseDate]);
 
   const handleFilterChange = (newSearch: string, newStatus: string) => {
+    setPage(1);
     router.get("/payments", { search: newSearch, statusFilter: newStatus }, { preserveState: true, replace: true });
   };
 
@@ -238,6 +243,14 @@ export default function Payments({ contracts, interestData, filters }: any) {
     return runs;
   }, [visibleOrdered]);
 
+  // ── Paginação (client-side sobre a lista vinda do servidor) ────────────
+  const totalRows = contracts?.length ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const paginated = useMemo(
+    () => (contracts ?? []).slice((page - 1) * pageSize, page * pageSize),
+    [contracts, page, pageSize],
+  );
+
   return (
     <UnyPayLayout>
       <Head title="Controle de Pagamentos" />
@@ -310,9 +323,24 @@ export default function Payments({ contracts, interestData, filters }: any) {
               </colgroup>
 
               <thead>
-                {/* Linha 1 — grupos */}
+                {/* Linha 1 — grupos. A célula vazia (acima do chevron) usa a cor do
+                    primeiro grupo visível para manter alinhamento visual e altura. */}
                 <tr>
-                  <th style={{ background: "#1a2035", padding: 0, borderBottom: "1px solid #cbd5e1" }} />
+                  {(() => {
+                    const firstGroup = visibleGroupRuns[0]?.group;
+                    const firstMeta = firstGroup ? PAYMENTS_GROUP_META[firstGroup] : null;
+                    return (
+                      <th
+                        aria-hidden="true"
+                        style={{
+                          background: firstMeta?.bg ?? "#1f2937",
+                          padding: "4px 8px",
+                          fontSize: 9,
+                          lineHeight: 1.2,
+                        }}
+                      />
+                    );
+                  })()}
                   {visibleGroupRuns.map((run, i) => {
                     const meta = PAYMENTS_GROUP_META[run.group];
                     return (
@@ -324,6 +352,7 @@ export default function Payments({ contracts, interestData, filters }: any) {
                           textAlign: "center", padding: "4px 8px",
                           fontSize: 9, fontWeight: 700, letterSpacing: "0.06em",
                           textTransform: "uppercase",
+                          lineHeight: 1.2,
                         }}
                       >
                         {meta.label}
@@ -368,7 +397,7 @@ export default function Payments({ contracts, interestData, filters }: any) {
                     </td>
                   </tr>
                 ) : (
-                  contracts.map((row: any, rowIdx: number) => {
+                  paginated.map((row: any, rowIdx: number) => {
                     const isExpanded = expandedId === row.contract.id;
                     const rowBg = rowIdx % 2 === 1 ? "#fafafa" : "white";
 
@@ -423,6 +452,49 @@ export default function Payments({ contracts, interestData, filters }: any) {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Paginação */}
+          <div style={{
+            padding: "6px 12px", background: "#fafbfc", borderTop: "1px solid #e5e7eb",
+            display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, flexShrink: 0,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6b7280" }}>
+              <span>Exibir</span>
+              <select style={{ padding: "2px 6px", border: "1px solid #d1d5db", borderRadius: 4, fontSize: 11, background: "white" }} value={pageSize} onChange={e => { setPageSize(+e.target.value); setPage(1); }}>
+                {PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <span>por página</span>
+            </div>
+            <span style={{ fontSize: 11, color: "#6b7280" }}>
+              Mostrando {Math.min((page - 1) * pageSize + 1, totalRows)}–{Math.min(page * pageSize, totalRows)} de {totalRows}
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+              <button type="button" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+                style={{ padding: "3px 10px", border: "1px solid #d1d5db", borderRadius: 4, background: "white", fontSize: 11, cursor: page === 1 ? "not-allowed" : "pointer", color: page === 1 ? "#9ca3af" : "#374151" }}>
+                ← Anterior
+              </button>
+              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                const n = page <= 3 ? i + 1 : page - 2 + i;
+                if (n < 1 || n > totalPages) return null;
+                return (
+                  <button type="button" key={n} onClick={() => setPage(n)}
+                    style={{
+                      width: 28, height: 26, borderRadius: 4, border: "1px solid",
+                      fontSize: 11, background: n === page ? "#1a2035" : "white",
+                      color: n === page ? "white" : "#374151",
+                      borderColor: n === page ? "#1a2035" : "#d1d5db",
+                      fontWeight: n === page ? 700 : 400, cursor: "pointer"
+                    }}>
+                    {n}
+                  </button>
+                );
+              })}
+              <button type="button" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
+                style={{ padding: "3px 10px", border: "1px solid #d1d5db", borderRadius: 4, background: "white", fontSize: 11, cursor: page >= totalPages ? "not-allowed" : "pointer", color: page >= totalPages ? "#9ca3af" : "#374151" }}>
+                Próxima →
+              </button>
+            </div>
           </div>
         </div>
 

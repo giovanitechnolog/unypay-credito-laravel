@@ -32,10 +32,10 @@ export type ClientsColumnId =
 export type ClientsColumnDef = TableColumnDef<ClientsColumnId, ClientsColGroup>;
 
 export const CLIENTS_GROUP_META: Record<ClientsColGroup, ColGroupMeta> = {
-  identificacao: { label: "Identificação", short: "ID",     bg: "#1e3a5f", color: "#ffffff" },
-  contato:       { label: "Contato",       short: "Cont.",  bg: "#2d3a8c", color: "#ffffff" },
-  classificacao: { label: "Classificação", short: "Class.", bg: "#1a4731", color: "#ffffff" },
-  fiadores:      { label: "Fiadores",      short: "Fiad.",  bg: "#7c2d12", color: "#ffffff" },
+  identificacao: { label: "Identificação", short: "ID",     bg: "#1e293b", color: "#ffffff" }, // slate-900
+  contato:       { label: "Contato",       short: "Cont.",  bg: "#1e3a8a", color: "#ffffff" }, // blue-900 (marinho)
+  classificacao: { label: "Classificação", short: "Class.", bg: "#15803d", color: "#ffffff" }, // green-700
+  fiadores:      { label: "Fiadores",      short: "Fiad.",  bg: "#7e22ce", color: "#ffffff" }, // purple-700
 };
 
 export const CLIENTS_GROUP_ORDER: readonly ClientsColGroup[] = [

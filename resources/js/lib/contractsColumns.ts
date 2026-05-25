@@ -26,9 +26,9 @@ export type ContractsColumnId =
 export type ContractsColumnDef = TableColumnDef<ContractsColumnId, ContractsColGroup>;
 
 export const CONTRACTS_GROUP_META: Record<ContractsColGroup, ColGroupMeta> = {
-  identificacao: { label: "Identificação", short: "ID",   bg: "#1e3a5f", color: "#ffffff" },
-  financeiro:    { label: "Financeiro",    short: "Fin.", bg: "#2d3a8c", color: "#ffffff" },
-  situacao:      { label: "Situação",      short: "Sit.", bg: "#1e2139", color: "#ffffff" },
+  identificacao: { label: "Identificação", short: "ID",   bg: "#1e293b", color: "#ffffff" }, // slate-900
+  financeiro:    { label: "Financeiro",    short: "Fin.", bg: "#92400e", color: "#ffffff" }, // amber-800 (mostarda escura)
+  situacao:      { label: "Situação",      short: "Sit.", bg: "#7e22ce", color: "#ffffff" }, // purple-700
 };
 
 export const CONTRACTS_GROUP_ORDER: readonly ContractsColGroup[] = [

@@ -71,11 +71,11 @@ export interface LancamentoColumnDef {
 
 // ── Metadados visuais dos grupos ───────────────────────────────────────────
 export const COL_GROUP_META: Record<ColGroup, ColGroupMeta> = {
-  identificacao: { label: "Identificação", short: "ID",    bg: "#1e3a5f", color: "#ffffff" },
-  financeiro:    { label: "Financeiro",    short: "Fin.",  bg: "#2d3a8c", color: "#ffffff" },
-  parcelas:      { label: "Parcelas",      short: "Parc.", bg: "#1a4731", color: "#ffffff" },
-  juros:         { label: "Juros / CET",   short: "Juros", bg: "#7c2d12", color: "#ffffff" },
-  situacao:      { label: "Situação",      short: "Sit.",  bg: "#1e2139", color: "#ffffff" },
+  identificacao: { label: "Identificação", short: "ID",    bg: "#1e293b", color: "#ffffff" }, // slate-900
+  financeiro:    { label: "Financeiro",    short: "Fin.",  bg: "#92400e", color: "#ffffff" }, // amber-800 (mostarda escura)
+  parcelas:      { label: "Parcelas",      short: "Parc.", bg: "#15803d", color: "#ffffff" }, // green-700
+  juros:         { label: "Juros / CET",   short: "Juros", bg: "#991b1b", color: "#ffffff" }, // red-800 (vinho)
+  situacao:      { label: "Situação",      short: "Sit.",  bg: "#7e22ce", color: "#ffffff" }, // purple-700
 };
 
 export const GROUP_ORDER: readonly ColGroup[] = [

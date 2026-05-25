@@ -90,6 +90,8 @@ const Label = ({ children }: { children: React.ReactNode }) => (
 // largura da coluna especial de ações
 const ACTIONS_WIDTH = 130;
 
+const PAGE_SIZES = [20, 50, 100];
+
 // estilos compactos
 const headerCellStyle: React.CSSProperties = {
   background: "#f1f5f9", color: "#334155",
@@ -102,6 +104,8 @@ const tdCenter: React.CSSProperties = { ...tdBase, textAlign: "center" };
 
 export default function Clients({ clients, filters }: any) {
   const [search, setSearch] = useState(filters?.search || "");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -146,6 +150,7 @@ export default function Clients({ clients, filters }: any) {
 
   const handleSearchChange = (value: string) => {
     setSearch(value);
+    setPage(1);
     router.get("/clients", { search: value }, { preserveState: true, replace: true });
   };
 
@@ -248,6 +253,14 @@ export default function Clients({ clients, filters }: any) {
 
   const f = (k: keyof FormType) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }));
+
+  // ── Paginação (client-side sobre a lista vinda do servidor) ────────────
+  const totalRows = clients?.length ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const paginated = useMemo(
+    () => (clients ?? []).slice((page - 1) * pageSize, page * pageSize),
+    [clients, page, pageSize],
+  );
 
   // ── células ────────────────────────────────────────────────────────────
   const renderCellContent = (col: ClientsColumnDef, client: any): React.ReactNode => {
@@ -404,7 +417,7 @@ export default function Clients({ clients, filters }: any) {
                     </td>
                   </tr>
                 ) : (
-                  clients.map((client: any, rowIdx: number) => {
+                  paginated.map((client: any, rowIdx: number) => {
                     const rowBg = rowIdx % 2 === 1 ? "#fafafa" : "white";
                     return (
                       <tr key={client.id} style={{ background: rowBg }}
@@ -437,6 +450,49 @@ export default function Clients({ clients, filters }: any) {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Paginação */}
+          <div style={{
+            padding: "6px 12px", background: "#fafbfc", borderTop: "1px solid #e5e7eb",
+            display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, flexShrink: 0,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6b7280" }}>
+              <span>Exibir</span>
+              <select style={{ padding: "2px 6px", border: "1px solid #d1d5db", borderRadius: 4, fontSize: 11, background: "white" }} value={pageSize} onChange={e => { setPageSize(+e.target.value); setPage(1); }}>
+                {PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <span>por página</span>
+            </div>
+            <span style={{ fontSize: 11, color: "#6b7280" }}>
+              Mostrando {Math.min((page - 1) * pageSize + 1, totalRows)}–{Math.min(page * pageSize, totalRows)} de {totalRows}
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+              <button type="button" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+                style={{ padding: "3px 10px", border: "1px solid #d1d5db", borderRadius: 4, background: "white", fontSize: 11, cursor: page === 1 ? "not-allowed" : "pointer", color: page === 1 ? "#9ca3af" : "#374151" }}>
+                ← Anterior
+              </button>
+              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                const n = page <= 3 ? i + 1 : page - 2 + i;
+                if (n < 1 || n > totalPages) return null;
+                return (
+                  <button type="button" key={n} onClick={() => setPage(n)}
+                    style={{
+                      width: 28, height: 26, borderRadius: 4, border: "1px solid",
+                      fontSize: 11, background: n === page ? "#1a2035" : "white",
+                      color: n === page ? "white" : "#374151",
+                      borderColor: n === page ? "#1a2035" : "#d1d5db",
+                      fontWeight: n === page ? 700 : 400, cursor: "pointer"
+                    }}>
+                    {n}
+                  </button>
+                );
+              })}
+              <button type="button" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
+                style={{ padding: "3px 10px", border: "1px solid #d1d5db", borderRadius: 4, background: "white", fontSize: 11, cursor: page >= totalPages ? "not-allowed" : "pointer", color: page >= totalPages ? "#9ca3af" : "#374151" }}>
+                Próxima →
+              </button>
+            </div>
           </div>
         </div>
 

@@ -26,9 +26,9 @@ export type SimHistoryColumnId =
 export type SimHistoryColumnDef = TableColumnDef<SimHistoryColumnId, SimHistoryColGroup>;
 
 export const SIM_HISTORY_GROUP_META: Record<SimHistoryColGroup, ColGroupMeta> = {
-  identificacao: { label: "Identificação", short: "ID",    bg: "#1a243a", color: "#ffffff" },
-  valores:       { label: "Valores",       short: "Val.",  bg: "#0b4687", color: "#ffffff" },
-  juros:         { label: "Juros / CET",   short: "Juros", bg: "#4a1204", color: "#ffffff" },
+  identificacao: { label: "Identificação", short: "ID",    bg: "#1e293b", color: "#ffffff" }, // slate-900
+  valores:       { label: "Valores",       short: "Val.",  bg: "#92400e", color: "#ffffff" }, // amber-800 (mostarda escura)
+  juros:         { label: "Juros / CET",   short: "Juros", bg: "#991b1b", color: "#ffffff" }, // red-800 (vinho)
 };
 
 export const SIM_HISTORY_GROUP_ORDER: readonly SimHistoryColGroup[] = [
