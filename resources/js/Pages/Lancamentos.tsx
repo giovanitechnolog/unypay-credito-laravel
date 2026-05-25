@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, Head, router } from "@inertiajs/react";
 import {
   Search, Plus, RefreshCw, FileText, Download,
@@ -6,8 +6,20 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
+import TableGroupBadges from "../Components/TableGroupBadges";
+import TableColumnPicker from "../Components/TableColumnPicker";
+import { useColumnVisibility } from "../hooks/useColumnVisibility";
+import {
+  COL_GROUP_META,
+  GROUP_ORDER,
+  LANCAMENTOS_COLUMNS,
+  getVisibleOrdered,
+  type ColGroup,
+  type LancamentoColumnDef,
+  type LancamentoColumnId,
+} from "../lib/lancamentosColumns";
 
-// ── Formatadores Nativos da Planilha ──────────────────────────────────────────
+// ── Formatadores ─────────────────────────────────────────────────────────────
 const fmt = (v: number | string) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(v));
 const fmtShort = (v: number) => {
@@ -19,7 +31,7 @@ const fmtDate = (d?: string | null) =>
   d ? new Date(d + "T00:00:00").toLocaleDateString("pt-BR") : "—";
 const fmtPct = (v: number) => `${(v * 100).toFixed(2)}%`;
 
-// ── Badges de tipo corporativo ────────────────────────────────────────────────
+// ── Badges de tipo ───────────────────────────────────────────────────────────
 const TYPE_BADGE: Record<string, { bg: string; color: string; label: string }> = {
   "Mútuo/Confissão de dívida": { bg: "#7c2d12", color: "white", label: "Mútuo" },
   "Mútuo":                     { bg: "#7c2d12", color: "white", label: "Mútuo" },
@@ -30,7 +42,7 @@ const TYPE_BADGE: Record<string, { bg: string; color: string; label: string }> =
 const getType = (t?: string | null) =>
   TYPE_BADGE[t ?? "Outro"] ?? { bg: "#374151", color: "white", label: t ?? "Outro" };
 
-// ── Badges de status da carteira ──────────────────────────────────────────────
+// ── Badges de status ─────────────────────────────────────────────────────────
 const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
   "Ativo":        { bg: "#d1fae5", color: "#065f46" },
   "Inadimplente": { bg: "#fee2e2", color: "#991b1b" },
@@ -40,63 +52,58 @@ const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
 
 const PAGE_SIZES = [20, 50, 100];
 
-// ── Cores dos grupos de colunas ──────────────────────────────────────────────
-const G = {
-  id:       { label: "IDENTIFICAÇÃO",  bg: "#1e3a5f" },
-  fin:      { label: "FINANCEIRO",     bg: "#2d3a8c" },
-  parcelas: { label: "PARCELAS",       bg: "#1a4731" },
-  juros:    { label: "JUROS / CET",    bg: "#7c2d12" },
-  situacao: { label: "SITUAÇÃO",       bg: "#1e2139" },
-  acoes:    { label: "",               bg: "#111827" },
+const COLUMNS_STORAGE_KEY = "unypay_credito_colunas_lancamentos_v1";
+
+const ACTIONS_GROUP_BG = "#111827";
+const ACTIONS_COL_WIDTH = 100;
+
+// ══ ESTILOS DE CÉLULA — fiel ao padrão SIGX (compacto) ═══════════════════════
+const FONT_MONO = "'IBM Plex Mono', monospace";
+
+const tdBase: React.CSSProperties = {
+  fontSize: 11,
+  padding: "3px 7px",
+  whiteSpace: "nowrap",
+  borderBottom: "1px solid #f1f5f9",
+  verticalAlign: "middle",
+};
+const tdNum: React.CSSProperties = {
+  ...tdBase,
+  textAlign: "right",
+  fontFamily: FONT_MONO,
+};
+const tdCenter: React.CSSProperties = { ...tdBase, textAlign: "center" };
+
+// Header (2ª linha) — cabeçalho de cada coluna
+const thBase: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 600,
+  padding: "5px 7px",
+  whiteSpace: "nowrap",
+  cursor: "pointer",
+  userSelect: "none",
+  background: "#f1f5f9",
+  color: "#334155",
+  borderBottom: "2px solid #cbd5e1",
+  position: "sticky",
+  top: 28,
+  zIndex: 10,
+  textAlign: "left",
 };
 
-// ── Colunas congeladas na esquerda (FROZEN WINDOW) ───────────────────────────
-const FROZEN = [
-  { key: "code",   label: "Classif.",  width: 82  },
-  { key: "client", label: "Cliente ▲", width: 220 },
-  { key: "type",   label: "Tipo",      width: 100 },
-  { key: "status", label: "Status",    width: 88  },
-];
-const frozenLeft = (i: number) => FROZEN.slice(0, i).reduce((s, c) => s + c.width, 0);
-
-// ── Colunas roláveis da matriz financeira ─────────────────────────────────────
-type Col = { key: string; label: string; width: number; align: "left"|"right"|"center"; group: string };
-const COLS: Col[] = [
-  { key:"principal",     label:"Principal",    width:120, align:"right",  group:"fin"      },
-  { key:"totalWithInterest", label:"Total c/ Juros", width:135, align:"right", group:"fin" },
-  { key:"toReceiveFin",  label:"Total a Receber", width:130, align:"right", group:"fin"      },
-  { key:"installments",  label:"Parc.",        width:50,  align:"center", group:"fin"      },
-  { key:"installmentAmt",label:"Vl. Parcela",  width:110, align:"right",  group:"fin"      },
-  { key:"date",          label:"Data",         width:86,  align:"center", group:"fin"      },
-  { key:"creditor",      label:"Credor",       width:130, align:"left",   group:"fin"      },
-  { key:"paid",          label:"Pagas",        width:58,  align:"center", group:"parcelas" },
-  { key:"overdue",       label:"Em Aberto",    width:72,  align:"center", group:"parcelas" },
-  { key:"daysOverdue",   label:"Dias Atr.",    width:72,  align:"center", group:"parcelas" },
-  { key:"toReceive",     label:"Vl. Receber",  width:120, align:"right",  group:"parcelas" },
-  { key:"totalInterest", label:"Juros Totais", width:120, align:"right",  group:"juros"    },
-  { key:"cetMonthly",    label:"CET Mensal",   width:84,  align:"center", group:"juros"    },
-  { key:"cetAnnual",     label:"CET Anual",    width:78,  align:"center", group:"juros"    },
-  { key:"firstDue",      label:"1ª Venc.",     width:86,  align:"center", group:"situacao" },
-  { key:"validated",     label:"Valid.",       width:54,  align:"center", group:"situacao" },
-  { key:"actions",       label:"Ações",        width:88,  align:"center", group:"acoes"    },
-];
-
-function buildGroups(cols: Col[]) {
-  const out: { key: string; count: number; endIdx: number }[] = [];
-  let cur = ""; let count = 0;
-  cols.forEach((c, i) => {
-    if (c.group !== cur) {
-      if (cur) out.push({ key: cur, count, endIdx: i - 1 });
-      cur = c.group; count = 1;
-    } else count++;
-    if (i === cols.length - 1) out.push({ key: cur, count, endIdx: i });
-  });
-  return out;
-}
-const COL_GROUPS = buildGroups(COLS);
-const GROUP_END = new Set(COL_GROUPS.map(g => g.endIdx));
-
-const SHADOW = "3px 0 8px rgba(0,0,0,0.18)";
+// Header (1ª linha) — grupo colorido
+const thGroup: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  padding: "5px 12px",
+  whiteSpace: "nowrap",
+  textAlign: "center",
+  letterSpacing: "0.04em",
+  textTransform: "uppercase",
+  position: "sticky",
+  top: 0,
+  zIndex: 11,
+};
 
 export default function Lancamentos({ contracts, clients, kpis, filters }: any) {
   const [search, setSearch]             = useState(filters?.search || "");
@@ -110,10 +117,52 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
   const [priceData, setPriceData]       = useState<any>(null);
   const [priceLoading, setPriceLoading] = useState(false);
 
-  const handleFilterChange = (newSearch: string, newStatus: string) => {
-    router.get("/lancamentos", { search: newSearch, statusFilter: newStatus }, { preserveState: true, replace: true });
-  };
+  // ── Visibilidade de colunas (persistida) ─────────────────────────────────
+  const { visibleIds, toggleColumn, setColumnsVisible, resetDefaults } =
+    useColumnVisibility<LancamentoColumnId>(COLUMNS_STORAGE_KEY, LANCAMENTOS_COLUMNS);
 
+  const visibleOrdered = useMemo(
+    () => getVisibleOrdered(visibleIds),
+    [visibleIds],
+  );
+
+  // Sticky cols visíveis (ordenadas por rank) + offset cumulativo recalculado.
+  const stickyVisible = useMemo(
+    () =>
+      visibleOrdered
+        .filter((c) => c.sticky != null)
+        .sort((a, b) => (a.sticky ?? 0) - (b.sticky ?? 0)),
+    [visibleOrdered],
+  );
+
+  const stickyLeftById = useMemo(() => {
+    const map = new Map<LancamentoColumnId, number>();
+    let acc = 0;
+    for (const col of stickyVisible) {
+      map.set(col.id, acc);
+      acc += col.width;
+    }
+    return map;
+  }, [stickyVisible]);
+
+  const lastIdColumnId = useMemo(() => {
+    const idCols = visibleOrdered.filter((c) => c.group === "identificacao");
+    return idCols.length > 0 ? idCols[idCols.length - 1].id : null;
+  }, [visibleOrdered]);
+
+  const visibleGroupsWithCount = useMemo(() => {
+    const counts: Record<ColGroup, number> = {
+      identificacao: 0, financeiro: 0, parcelas: 0, juros: 0, situacao: 0,
+    };
+    for (const def of LANCAMENTOS_COLUMNS) {
+      if (visibleIds.has(def.id)) counts[def.group] += 1;
+    }
+    return GROUP_ORDER
+      .filter((g) => counts[g] > 0)
+      .map((g) => ({ group: g, count: counts[g] }));
+  }, [visibleIds]);
+
+  // ── Handlers existentes ──────────────────────────────────────────────────
   const handleOpenPrice = (contractId: number) => {
     setPriceId(contractId);
     setPriceLoading(true);
@@ -144,14 +193,9 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
 
   const handleDelete = (id: number) => {
     if (!confirm("Deseja expurgar este contrato e seus lançamentos da auditoria?")) return;
-    
     router.delete(`/api/contracts/destroy/${id}`, {
-      onSuccess: () => {
-        toast.success("Contrato excluído com sucesso do sistema!");
-      },
-      onError: (err: any) => {
-        toast.error("Erro ao deletar ativo: " + err.message);
-      }
+      onSuccess: () => toast.success("Contrato excluído com sucesso do sistema!"),
+      onError:   (err: any) => toast.error("Erro ao deletar ativo: " + err.message),
     });
   };
 
@@ -192,187 +236,489 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
     else { setSortCol(col); setSortDir("asc"); }
   };
   const SortIco = ({ col }: { col: string }) => (
-    <span style={{ marginLeft: 2, opacity: sortCol === col ? 1 : 0.4, fontSize: 8 }}>
+    <span style={{ marginLeft: 2, opacity: sortCol === col ? 1 : 0.35, fontSize: 8 }}>
       {sortCol === col ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
     </span>
   );
 
-  const fTh = (i: number, last: boolean): React.CSSProperties => ({
-    position: "sticky", left: frozenLeft(i), top: 28, zIndex: 30,
-    background: "#1a2035", color: "rgba(255,255,255,0.9)",
-    padding: "6px 10px", fontSize: 11, fontWeight: 500,
-    textAlign: "left", whiteSpace: "nowrap",
-    borderRight: last ? "2px solid rgba(255,255,255,0.2)" : "1px solid rgba(255,255,255,0.07)",
-    boxShadow: last ? SHADOW : "none",
-    cursor: "pointer",
+  // ── Render de uma célula do corpo (data-driven por id de coluna) ─────────
+  const renderCellContent = (col: LancamentoColumnDef, c: any) => {
+    switch (col.id) {
+      case "code":
+        return <span style={{ fontFamily: FONT_MONO, fontSize: 10, fontWeight: 600, color: "#374151" }}>{c.code}</span>;
+      case "client":
+        return (
+          <div style={{ maxWidth: col.width - 16, minWidth: 0 }}>
+            <div
+              title={c.clientName}
+              style={{
+                fontSize: 11, fontWeight: 600, lineHeight: 1.25, color: "#111827",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}
+            >
+              {c.clientName}
+            </div>
+            <div
+              title={c.contractName}
+              style={{
+                fontSize: 9, color: "#9ca3af", lineHeight: 1.2, marginTop: 1,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}
+            >
+              {c.contractName}
+            </div>
+          </div>
+        );
+      case "type": {
+        const tc = getType(c.contractType);
+        return (
+          <span
+            style={{
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              minWidth: 70, height: 18,
+              padding: "0 6px", borderRadius: 3,
+              background: tc.bg, color: tc.color,
+              fontSize: 9, fontWeight: 700, letterSpacing: "0.02em",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {tc.label}
+          </span>
+        );
+      }
+      case "status": {
+        const badge = STATUS_BADGE[c.status] ?? STATUS_BADGE["Ativo"];
+        return (
+          <span
+            style={{
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              minWidth: 64, height: 18,
+              padding: "0 6px", borderRadius: 3,
+              background: badge.bg, color: badge.color,
+              fontSize: 9, fontWeight: 700,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {c.status}
+          </span>
+        );
+      }
+      case "principal":
+        return <span style={{ fontFamily: FONT_MONO, fontWeight: 700, color: "#111827" }}>{fmt(c.principalAmount)}</span>;
+      case "totalWithInterest":
+        return <span style={{ fontFamily: FONT_MONO, fontWeight: 600, color: "#2563eb" }}>{fmt(c.financedTotal)}</span>;
+      case "toReceiveFin":
+        return <span style={{ fontFamily: FONT_MONO, fontWeight: 600, color: "#ea580c" }}>{fmt(c.openBalanceTotal ?? (c.financedTotal - c.paidTotal))}</span>;
+      case "installments":
+        return <span style={{ color: "#6b7280" }}>{c.installmentCount}×</span>;
+      case "installmentAmt":
+        return <span style={{ fontFamily: FONT_MONO, color: "#6b7280" }}>{fmt(c.installmentAmount)}</span>;
+      case "date":
+        return <span style={{ color: "#6b7280" }}>{fmtDate(c.contractDate)}</span>;
+      case "creditor":
+        return (
+          <span
+            title={c.creditor}
+            style={{
+              fontSize: 10, color: "#6b7280",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              display: "block", maxWidth: 122,
+            }}
+          >
+            {c.creditor}
+          </span>
+        );
+      case "paid":
+        return <span style={{ fontFamily: FONT_MONO, fontWeight: 700, color: "#059669" }}>{c.paidInstallmentsCount ?? 0}</span>;
+      case "overdue":
+        return <span style={{ fontFamily: FONT_MONO, fontWeight: 700, color: "#dc2626" }}>{c.overdueInstallmentsCount ?? 0}</span>;
+      case "daysOverdue":
+        return (
+          <span style={{
+            fontFamily: FONT_MONO, fontWeight: 700,
+            color: (c.maxDaysOverdue ?? 0) > 0 ? "#dc2626" : "#9ca3af",
+          }}>
+            {c.maxDaysOverdue ? Math.trunc(c.maxDaysOverdue) : "—"}
+          </span>
+        );
+      case "toReceive":
+        return <span style={{ fontFamily: FONT_MONO, fontWeight: 600, color: "#ea580c" }}>{fmt(c.openBalanceTotal ?? (c.financedTotal - c.paidTotal))}</span>;
+      case "totalInterest":
+        return <span style={{ fontFamily: FONT_MONO, color: "#dc2626" }}>{fmt(c.interestAccumulated ?? 0)}</span>;
+      case "cetMonthly":
+        return <span style={{ fontFamily: FONT_MONO, color: "#ea580c" }}>{c.moraRateMonthly ? fmtPct(c.moraRateMonthly) : "2,00%"}</span>;
+      case "cetAnnual":
+        return <span style={{ fontFamily: FONT_MONO, color: "#ea580c" }}>{c.penaltyRate ? fmtPct(c.penaltyRate) : "10,00%"}</span>;
+      case "firstDue":
+        return <span style={{ color: "#6b7280" }}>{fmtDate(c.firstDueDate)}</span>;
+      case "validated":
+        return c.validated
+          ? <span style={{ color: "#059669", fontWeight: 700 }}>✓</span>
+          : <span style={{ color: "#9ca3af" }}>—</span>;
+      default:
+        return <span style={{ color: "#9ca3af" }}>—</span>;
+    }
+  };
+
+  // ── Render de uma célula do tfoot ────────────────────────────────────────
+  const renderFooterCell = (col: LancamentoColumnDef): React.ReactNode => {
+    const idCols = visibleOrdered.filter((c) => c.group === "identificacao");
+    const firstId = idCols[0]?.id;
+    const secondId = idCols[1]?.id;
+
+    if (col.id === firstId) {
+      return (
+        <span style={{ color: "white", fontSize: 10, fontWeight: 700, textTransform: "uppercase" }}>
+          TOTAIS
+        </span>
+      );
+    }
+    if (col.id === secondId) {
+      return (
+        <span style={{ color: "#93c5fd", fontSize: 10 }}>
+          {filtered.length} contratos
+        </span>
+      );
+    }
+
+    switch (col.id) {
+      case "principal":
+        return <span style={{ fontFamily: FONT_MONO, color: "white", fontWeight: 700 }}>{fmt(filtered.reduce((s:number,c:any) => s + +c.principalAmount, 0))}</span>;
+      case "totalWithInterest":
+        return <span style={{ fontFamily: FONT_MONO, color: "#c4b5fd", fontWeight: 600 }}>{fmt(filtered.reduce((s:number,c:any) => s + +c.financedTotal, 0))}</span>;
+      case "toReceiveFin":
+        return <span style={{ fontFamily: FONT_MONO, color: "#fb923c", fontWeight: 600 }}>{fmt(filtered.reduce((s:number,c:any) => s + +c.openBalanceTotal, 0))}</span>;
+      case "toReceive":
+        return <span style={{ fontFamily: FONT_MONO, color: "#fca5a5", fontWeight: 600 }}>{fmt(filtered.reduce((s:number,c:any) => s + +c.openBalanceTotal, 0))}</span>;
+      case "totalInterest":
+        return <span style={{ fontFamily: FONT_MONO, color: "#fca5a5", fontWeight: 600 }}>{fmt(filtered.reduce((s:number,c:any) => s + +c.interestAccumulated, 0))}</span>;
+      default:
+        return null;
+    }
+  };
+
+  const footerBg = "#1e2139";
+
+  // ── Estilos sticky derivados (header e cell) ─────────────────────────────
+  const headerStickyStyle = (left: number, isLastIdCol: boolean): React.CSSProperties => ({
+    ...thBase,
+    position: "sticky",
+    top: 28,
+    left,
+    zIndex: 12,
+    boxShadow: isLastIdCol ? "2px 0 4px rgba(0,0,0,0.06)" : undefined,
   });
-  const fTd = (i: number, last: boolean, bg: string): React.CSSProperties => ({
-    position: "sticky", left: frozenLeft(i), zIndex: 20,
+
+  const cellStickyStyle = (left: number, bg: string, isLastIdCol: boolean): React.CSSProperties => ({
+    ...tdBase,
+    position: "sticky",
+    left,
+    zIndex: 4,
     background: bg,
-    padding: "7px 10px",
-    borderBottom: "1px solid #e5e7eb",
-    borderRight: last ? "2px solid #d1d5db" : "1px solid #f0f0f0",
-    boxShadow: last ? SHADOW : "none",
-    verticalAlign: "middle",
-  });
-  const sTh = (align: "left"|"right"|"center", groupEnd: boolean): React.CSSProperties => ({
-    position: "sticky", top: 28, zIndex: 10,
-    background: "#1a2035", color: "rgba(255,255,255,0.9)",
-    padding: "6px 10px", fontSize: 11, fontWeight: 500,
-    textAlign: align, whiteSpace: "nowrap",
-    borderRight: groupEnd ? "2px solid rgba(255,255,255,0.2)" : "1px solid rgba(255,255,255,0.07)",
-    cursor: "pointer",
-  });
-  const sTd = (align: "left"|"right"|"center", groupEnd: boolean): React.CSSProperties => ({
-    padding: "7px 10px",
-    borderBottom: "1px solid #e5e7eb",
-    borderRight: groupEnd ? "2px solid #d1d5db" : "1px solid #f0f0f0",
-    textAlign: align, verticalAlign: "middle",
+    boxShadow: isLastIdCol ? "2px 0 4px rgba(0,0,0,0.05)" : undefined,
   });
 
   return (
     <UnyPayLayout>
       <Head title="Lançamentos — Carteira de Crédito" />
 
-      {/* ── ESCREVA O ESCOPO AQUI: div principal englobando tudo de ponta a ponta ── */}
-      <div style={{ padding: "0px 24px 24px 24px", display:"flex", flexDirection:"column", height:"100%", overflow:"hidden" }}>
+      <div style={{ padding: "12px 20px 16px 20px", display:"flex", flexDirection:"column", height:"100%", overflow:"hidden", gap: 12 }}>
 
         {/* ══ HEADER ═════════════════════════════════════════════════════ */}
-        <div style={{ background:"white", borderBottom:"1px solid #e5e7eb", padding:"10px 0", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
-          <h1 style={{ margin:0, fontSize:18, fontWeight:700, color:"#111827" }}>Lançamentos — Carteira de Crédito</h1>
-          <div style={{ display:"flex", gap:8 }}>
-            <button onClick={() => router.get('/lancamentos')} style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 14px", borderRadius:6, border:"1px solid #d1d5db", background:"white", fontSize:12, fontWeight:500, cursor:"pointer", color:"#374151" }}>
-              <RefreshCw size={13}/> Sincronizar IPCA
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
+          <h1 style={{ margin:0, fontSize:16, fontWeight:700, color:"#111827" }}>Lançamentos — Carteira de Crédito</h1>
+          <div style={{ display:"flex", gap:6 }}>
+            <button onClick={() => router.get('/lancamentos')} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:5, border:"1px solid #d1d5db", background:"white", fontSize:11, fontWeight:500, cursor:"pointer", color:"#374151" }}>
+              <RefreshCw size={12}/> Sincronizar IPCA
             </button>
             <Link href="/contracts">
-              <button style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 14px", borderRadius:6, border:"none", background:"#374151", color:"white", fontSize:12, fontWeight:600, cursor:"pointer" }}>
-                <Plus size={13}/> Novo
+              <button style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:5, border:"none", background:"#374151", color:"white", fontSize:11, fontWeight:600, cursor:"pointer" }}>
+                <Plus size={12}/> Novo
               </button>
             </Link>
-            <button onClick={() => alert("Geração de PDF acionada.")} style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 14px", borderRadius:6, border:"none", background:"#dc2626", color:"white", fontSize:12, fontWeight:600, cursor:"pointer" }}>
-              <FileText size={13}/> Relatório PDF
+            <button onClick={() => alert("Geração de PDF acionada.")} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:5, border:"none", background:"#dc2626", color:"white", fontSize:11, fontWeight:600, cursor:"pointer" }}>
+              <FileText size={12}/> Relatório PDF
             </button>
-            <button onClick={() => alert("Geração de XLS acionada.")} style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 14px", borderRadius:6, border:"none", background:"#059669", color:"white", fontSize:12, fontWeight:600, cursor:"pointer" }}>
-              <Download size={13}/> Exportar Excel
+            <button onClick={() => alert("Geração de XLS acionada.")} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:5, border:"none", background:"#059669", color:"white", fontSize:11, fontWeight:600, cursor:"pointer" }}>
+              <Download size={12}/> Exportar Excel
             </button>
           </div>
         </div>
 
-        {/* ══ KPI CARDS REATIVOS DO LARAVEL ════════════════════════════════ */}
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:0, background:"white", borderBottom:"1px solid #e5e7eb", margin:"0 -24px", flexShrink:0 }}>
+        {/* ══ KPI CARDS — 5 cards separados ════════════════════════════════ */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(5, minmax(0, 1fr))", gap: 10, flexShrink: 0 }}>
           {[
             { label:"CONTRATOS",        value:String(kpis?.totalContracts ?? filtered.length), sub:`${kpis?.activeContracts ?? filtered.filter((c:any)=>c.status==='Ativo').length} ativos`, color:"#6366f1" },
             { label:"TOTAL FINANCIADO", value:fmt(kpis?.totalFinanced ?? filtered.reduce((s:number,c:any)=>s+c.financedTotal, 0)), sub:`Principal: ${fmtShort(kpis?.totalPrincipal ?? filtered.reduce((s:number,c:any)=>s+c.principalAmount, 0))}`, color:"#3b82f6" },
             { label:"TOTAL RECEBIDO",   value:fmt(kpis?.totalPaid ?? filtered.reduce((s:number,c:any)=>s+c.paidTotal, 0)), sub:`${(kpis?.pctPaid ?? 17.1).toFixed(1)}% do financiado`, color:"#10b981" },
             { label:"TOTAL VENCIDO",    value:fmt(kpis?.totalOverdue ?? filtered.reduce((s:number,c:any)=>s+c.overdueTotal, 0)), sub:`${kpis?.overdueInstallments ?? filtered.reduce((s:number,c:any)=>s+c.overdueInstallmentsCount, 0)} parcelas em atraso`, color:"#ef4444" },
             { label:"A VENCER",         value:fmt(kpis?.totalPending ?? filtered.reduce((s:number,c:any)=>s+(c.financedTotal - c.paidTotal), 0)), sub:`${kpis?.pendingInstallments ?? 252} parcelas`, color:"#f59e0b" },
-          ].map((c, i) => (
-            <div key={c.label} style={{ padding:"14px 20px", borderLeft:`3px solid ${c.color}`, borderRight: i < 4 ? "1px solid #e5e7eb" : "none" }}>
-              <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.07em", color:"#9ca3af", marginBottom:6 }}>{c.label}</div>
-              <div style={{ fontSize:22, fontWeight:800, color:"#111827", fontFamily:"'IBM Plex Mono',monospace", lineHeight:1.1 }}>{c.value}</div>
-              <div style={{ fontSize:11, color:"#9ca3af", marginTop:4 }}>{c.sub}</div>
+          ].map((c) => (
+            <div
+              key={c.label}
+              style={{
+                background: "white",
+                border: "1px solid #e5e7eb",
+                borderLeft: `3px solid ${c.color}`,
+                borderRadius: 6,
+                padding: "10px 14px",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
+                minWidth: 0,
+              }}
+            >
+              <div style={{ fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.07em", color:"#9ca3af", marginBottom:4 }}>{c.label}</div>
+              <div
+                title={c.value}
+                style={{
+                  fontSize: 18,
+                  fontWeight: 800,
+                  color: "#111827",
+                  fontFamily: FONT_MONO,
+                  lineHeight: 1.15,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {c.value}
+              </div>
+              <div
+                title={c.sub}
+                style={{
+                  fontSize: 10,
+                  color: "#9ca3af",
+                  marginTop: 3,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {c.sub}
+              </div>
             </div>
           ))}
         </div>
 
-        {/* ══ FILTROS DE PESQUISA ═════════════════════════════════════════ */}
-        <div style={{ background:"white", borderBottom:"1px solid #e5e7eb", padding:"8px 0", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", flexShrink:0 }}>
-          <div style={{ position:"relative", flex:"1 1 200px", maxWidth:280 }}>
-            <Search size={13} style={{ position:"absolute", left:10, top:"50%", transform:"translateY(-50%)", color:"#9ca3af" }}/>
-            <input style={{ width:"100%", padding:"6px 10px 6px 32px", border:"1px solid #d1d5db", borderRadius:6, fontSize:12, outline:"none", background:"white", color:"#374151" }}
-              placeholder="Buscar cliente, código, contrato..." value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />
+        {/* ══ FILTROS + GRUPOS + COLUNAS (2 seções flexíveis) ═════════════ */}
+        <div style={{
+          background: "white",
+          border: "1px solid #e5e7eb",
+          borderRadius: 6,
+          padding: "8px 12px",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
+          flexShrink: 0,
+        }}>
+          {/* SEÇÃO ESQUERDA — filtros */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            flex: "1 1 auto", minWidth: 0, flexWrap: "wrap",
+          }}>
+            <div style={{ position:"relative", flex:"1 1 180px", maxWidth: 260, minWidth: 160 }}>
+              <Search size={12} style={{ position:"absolute", left:9, top:"50%", transform:"translateY(-50%)", color:"#9ca3af" }}/>
+              <input
+                style={{ width:"100%", padding:"5px 8px 5px 28px", border:"1px solid #d1d5db", borderRadius:5, fontSize:11, outline:"none", background:"white", color:"#374151", height: 28 }}
+                placeholder="Buscar cliente, código, contrato..." value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
+              />
+            </div>
+            <select
+              style={{ height: 28, padding:"0 8px", border:"1px solid #d1d5db", borderRadius:5, fontSize:11, background:"white", color:"#374151", cursor:"pointer" }}
+              value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
+            >
+              <option value="Todos">Todos os status</option>
+              <option value="Ativo">Ativo</option><option value="Inadimplente">Inadimplente</option><option value="Quitado">Quitado</option>
+            </select>
+            <select
+              style={{ height: 28, padding:"0 8px", border:"1px solid #d1d5db", borderRadius:5, fontSize:11, background:"white", color:"#374151", cursor:"pointer", maxWidth: 180 }}
+              value={clientFilter} onChange={e => { setClientFilter(e.target.value); setPage(1); }}
+            >
+              <option value="Todos">Todos os clientes</option>
+              {clients?.map((cl: any) => <option key={cl.id} value={String(cl.id)}>{cl.name}</option>)}
+            </select>
+            <span style={{ fontSize:11, color:"#6b7280", fontWeight:500, whiteSpace: "nowrap" }}>{filtered.length} contratos</span>
           </div>
-          <select style={{ padding:"6px 10px", border:"1px solid #d1d5db", borderRadius:6, fontSize:12, background:"white", color:"#374151", cursor:"pointer" }} value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); }}>
-            <option value="Todos">Todos os status</option>
-            <option value="Ativo">Ativo</option><option value="Inadimplente">Inadimplente</option><option value="Quitado">Quitado</option>
-          </select>
-          <select style={{ padding:"6px 10px", border:"1px solid #d1d5db", borderRadius:6, fontSize:12, background:"white", color:"#374151", cursor:"pointer" }} value={clientFilter} onChange={e => { setClientFilter(e.target.value); setPage(1); }}>
-            <option value="Todos">Todos os clientes</option>
-            {clients?.map((cl: any) => <option key={cl.id} value={String(cl.id)}>{cl.name}</option>)}
-          </select>
-          <span style={{ fontSize:12, color:"#6b7280", fontWeight:500 }}>{filtered.length} contratos</span>
+
+          {/* SEÇÃO DIREITA — badges + picker (sempre juntos, não compactam) */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            marginLeft: "auto", flexShrink: 0,
+          }}>
+            <TableGroupBadges
+              allColumns={LANCAMENTOS_COLUMNS}
+              groupOrder={GROUP_ORDER}
+              groupMeta={COL_GROUP_META}
+              visibleIds={visibleIds}
+              setColumnsVisible={setColumnsVisible}
+            />
+            <TableColumnPicker
+              allColumns={LANCAMENTOS_COLUMNS}
+              groupOrder={GROUP_ORDER}
+              groupMeta={COL_GROUP_META}
+              visibleIds={visibleIds}
+              toggleColumn={toggleColumn}
+              setColumnsVisible={setColumnsVisible}
+              resetDefaults={resetDefaults}
+            />
+          </div>
         </div>
 
-        {/* ══ MATRIZ FINANCEIRA STICKY EXCEL STYLE ══ */}
-        <div style={{ flex:1, overflow:"auto", border:"1px solid #d1d5db", borderRadius:"8px 8px 0 0", background:"white", marginTop:12 }}>
-          <table style={{ borderCollapse:"separate", borderSpacing:0, fontSize:12, width:"max-content", minWidth:"100%" }}>
+        {/* ══ TABELA + PAGINAÇÃO (um único container) ═════════════════════ */}
+        <div style={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          border: "1px solid #e5e7eb",
+          borderRadius: 6,
+          background: "white",
+          overflow: "hidden",
+        }}>
+        <div style={{
+          flex: 1,
+          minHeight: 0,
+          overflow: "auto",
+        }}>
+          <table style={{ borderCollapse: "separate", borderSpacing: 0, width: "max-content", minWidth: "100%" }}>
             <colgroup>
-              {FROZEN.map(c => <col key={c.key} style={{ width:c.width }}/>)}
-              {COLS.map(c => <col key={c.key} style={{ width:c.width }}/>)}
+              {visibleOrdered.map((c) => <col key={c.id} style={{ width: c.width }} />)}
+              <col style={{ width: ACTIONS_COL_WIDTH }} />
             </colgroup>
 
             <thead>
+              {/* Linha 1 — cabeçalhos de grupo */}
               <tr>
-                <th colSpan={FROZEN.length} style={{ position:"sticky", top:0, left:0, zIndex:40, background: G.id.bg, color:"white", textAlign:"center", padding:"5px 12px", fontSize:9, fontWeight:700, textTransform:"uppercase", borderRight:"2px solid rgba(255,255,255,0.2)", boxShadow: SHADOW }}>{G.id.label}</th>
-                {COL_GROUPS.map(g => {
-                  const gs = G[g.key as keyof typeof G] ?? G.acoes;
-                  return <th key={g.key} colSpan={g.count} style={{ position:"sticky", top:0, zIndex:20, background: gs.bg, color:"white", textAlign:"center", padding:"5px 12px", fontSize:9, fontWeight:700, textTransform:"uppercase", borderRight:"2px solid rgba(255,255,255,0.15)" }}>{gs.label}</th>;
+                {visibleGroupsWithCount.map(({ group, count }, gIdx) => {
+                  const meta = COL_GROUP_META[group];
+                  const isFirstGroup = gIdx === 0;
+                  const isIdentificacao = group === "identificacao";
+                  const stickyLeft = isFirstGroup && isIdentificacao;
+                  return (
+                    <th
+                      key={group}
+                      colSpan={count}
+                      style={{
+                        ...thGroup,
+                        background: meta.bg,
+                        color: meta.color,
+                        ...(stickyLeft ? { left: 0, zIndex: 32, boxShadow: "2px 0 4px rgba(0,0,0,0.06)" } : {}),
+                      }}
+                    >
+                      {meta.label}
+                    </th>
+                  );
                 })}
+                <th
+                  style={{
+                    ...thGroup,
+                    background: ACTIONS_GROUP_BG,
+                    color: "white",
+                  }}
+                >
+                  Ações
+                </th>
               </tr>
+
+              {/* Linha 2 — cabeçalhos de coluna */}
               <tr>
-                {FROZEN.map((c, i) => <th key={c.key} onClick={() => doSort(c.key)} style={fTh(i, i === FROZEN.length - 1)}>{c.label} <SortIco col={c.key}/></th>)}
-                {COLS.map((c, i) => <th key={c.key} onClick={() => c.key !== "actions" && doSort(c.key)} style={sTh(c.align, GROUP_END.has(i))}>{c.label}{c.key !== "actions" && <SortIco col={c.key}/>}</th>)}
+                {visibleOrdered.map((col) => {
+                  const isLastIdCol = col.id === lastIdColumnId;
+                  const isSticky = col.sticky != null;
+                  const leftOffset = stickyLeftById.get(col.id) ?? 0;
+                  const align = col.align;
+
+                  const baseStyle: React.CSSProperties = isSticky
+                    ? headerStickyStyle(leftOffset, isLastIdCol)
+                    : { ...thBase, textAlign: align };
+
+                  return (
+                    <th
+                      key={col.id}
+                      onClick={() => doSort(col.id)}
+                      style={baseStyle}
+                      title={col.label}
+                    >
+                      {col.label} <SortIco col={col.id}/>
+                    </th>
+                  );
+                })}
+                <th
+                  style={{
+                    ...thBase,
+                    textAlign: "center",
+                    position: "sticky",
+                    top: 28,
+                    zIndex: 10,
+                    cursor: "default",
+                  }}
+                >
+                  Ações
+                </th>
               </tr>
             </thead>
 
             <tbody>
               {paginated.map((c: any, rowIdx: number) => {
-                const badge = STATUS_BADGE[c.status] ?? STATUS_BADGE["Ativo"];
-                const tc = getType(c.contractType);
-                const rowBg = rowIdx % 2 === 1 ? "#f9fafb" : "white";
+                const rowBg = rowIdx % 2 === 1 ? "#f8fafc" : "#ffffff";
 
                 const setRowBg = (el: HTMLTableRowElement, bg: string) => {
                   el.style.background = bg;
-                  el.querySelectorAll<HTMLElement>("td[data-f]").forEach(td => { td.style.background = bg; });
+                  el.querySelectorAll<HTMLElement>("td[data-sticky]").forEach(td => { td.style.background = bg; });
                 };
 
                 return (
-                  <tr key={c.id} style={{ background:rowBg, transition:"background 0.07s" }} onMouseOver={e => setRowBg(e.currentTarget, "#eff6ff")} onMouseOut={e => setRowBg(e.currentTarget, rowBg)}>
-                    
-                    {/* COLUNAS CONGELADAS */}
-                    <td data-f="1" style={fTd(0, false, rowBg)}>
-                      <div style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:11, fontWeight:600, color:"#374151" }}>{c.code}</div>
-                    </td>
-                    <td data-f="1" style={fTd(1, false, rowBg)}>
-                      <div style={{ fontWeight:700, fontSize:13, lineHeight:1.3, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", color:"#111827" }}>{c.clientName}</div>
-                      <div style={{ fontSize:10, color:"#9ca3af", marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.contractName}</div>
-                    </td>
-                    <td data-f="1" style={fTd(2, false, rowBg)}><span className="badge" style={{ background:tc.bg, color:tc.color, fontSize:11, fontWeight:700 }}>{tc.label}</span></td>
-                    <td data-f="1" style={fTd(3, true, rowBg)}><span className="badge" style={{ background:badge.bg, color:badge.color, fontSize:11, fontWeight:600 }}>{c.status}</span></td>
+                  <tr key={c.id} style={{ background: rowBg, transition: "background 0.07s" }}
+                      onMouseOver={e => setRowBg(e.currentTarget, "#eff6ff")}
+                      onMouseOut={e => setRowBg(e.currentTarget, rowBg)}>
 
-                    {/* COLUNAS ROLÁVEIS */}
-                    <td style={sTd("right", false)}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontWeight:800, fontSize:13, color:"#111827" }}>{fmt(c.principalAmount)}</span></td>
-                    <td style={sTd("right", false)}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:13, fontWeight:700, color:"#2563eb" }}>{fmt(c.financedTotal)}</span></td>
-                    <td style={sTd("right", false)}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:13, fontWeight:700, color:"#ea580c" }}>{fmt(c.openBalanceTotal ?? (c.financedTotal - c.paidTotal))}</span></td>
-                    <td style={sTd("center", false)}><span style={{ fontSize:12, color:"#6b7280" }}>{c.installmentCount}×</span></td>
-                    <td style={sTd("right", false)}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:12, color:"#6b7280" }}>{fmt(c.installmentAmount)}</span></td>
-                    <td style={sTd("center", false)}><span style={{ fontSize:11, color:"#6b7280", whiteSpace:"nowrap" }}>{fmtDate(c.contractDate)}</span></td>
-                    <td style={sTd("left", true)}><span style={{ fontSize:11, color:"#6b7280", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", display:"block", maxWidth:125 }}>{c.creditor}</span></td>
+                    {visibleOrdered.map((col) => {
+                      const isLastIdCol = col.id === lastIdColumnId;
+                      const isSticky = col.sticky != null;
+                      const align = col.align;
 
-                    <td style={sTd("center", false)}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:13, fontWeight:800, color:"#059669" }}>{c.paidInstallmentsCount ?? 0}</span></td>
-                    <td style={sTd("center", false)}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:13, fontWeight:800, color:"#dc2626" }}>{c.overdueInstallmentsCount ?? 0}</span></td>
-                    <td style={{ ...sTd("center", false), fontFamily:"'IBM Plex Mono',monospace", fontSize:13, fontWeight:800, color:(c.maxDaysOverdue ?? 0) > 0 ? "#dc2626" : "#9ca3af" }}>{c.maxDaysOverdue ? `${c.maxDaysOverdue}d` : "—"}</td>
-                    <td style={sTd("right", true)}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:13, fontWeight:700, color:"#ea580c" }}>{fmt(c.openBalanceTotal ?? (c.financedTotal - c.paidTotal))}</span></td>
+                      if (isSticky) {
+                        const leftOffset = stickyLeftById.get(col.id) ?? 0;
+                        return (
+                          <td
+                            key={col.id}
+                            data-sticky="1"
+                            style={cellStickyStyle(leftOffset, rowBg, isLastIdCol)}
+                          >
+                            {renderCellContent(col, c)}
+                          </td>
+                        );
+                      }
 
-                    <td style={sTd("right", false)}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:12, fontWeight:600, color:"#dc2626" }}>{fmt(c.interestAccumulated ?? 0)}</span></td>
-                    <td style={sTd("center", false)}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:11, color:"#ea580c" }}>{c.moraRateMonthly ? fmtPct(c.moraRateMonthly) : "2,00%"}</span></td>
-                    <td style={sTd("center", true)}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:11, color:"#ea580c" }}>{c.penaltyRate ? fmtPct(c.penaltyRate) : "10,00%"}</span></td>
+                      const tdStyle: React.CSSProperties =
+                        align === "right" ? tdNum :
+                        align === "center" ? tdCenter :
+                        tdBase;
 
-                    <td style={sTd("center", false)}><span style={{ fontSize:11, color:"#6b7280", whiteSpace:"nowrap" }}>{fmtDate(c.firstDueDate)}</span></td>
-                    <td style={sTd("center", true)}>{c.validated ? <span style={{ fontSize:11, color:"#059669", fontWeight:700 }}>✓</span> : <span style={{ color:"#9ca3af" }}>—</span>}</td>
+                      return (
+                        <td key={col.id} style={tdStyle}>
+                          {renderCellContent(col, c)}
+                        </td>
+                      );
+                    })}
 
-                    <td style={sTd("center", false)}>
-                      <div style={{ display:"flex", gap:3, justifyContent:"center" }}>
-                        <Link href={`/contracts/${c.id}`} style={{ width:26, height:26, border:"none", background:"transparent", cursor:"pointer", borderRadius:4, display:"flex", alignItems:"center", justifyContent:"center", color:"#6b7280" }} title="Visualizar Contrato">
-                          <Eye size={13}/>
+                    {/* Ações — sempre visível */}
+                    <td style={tdCenter}>
+                      <div style={{ display:"flex", gap:2, justifyContent:"center" }}>
+                        <Link href={`/contracts/${c.id}`} style={{ width:22, height:22, border:"none", background:"transparent", cursor:"pointer", borderRadius:3, display:"flex", alignItems:"center", justifyContent:"center", color:"#6b7280" }} title="Visualizar Contrato">
+                          <Eye size={12}/>
                         </Link>
-                        <button type="button" style={{ width:26, height:26, border:"none", background:"transparent", cursor:"pointer", borderRadius:4, display:"flex", alignItems:"center", justifyContent:"center", color:"#6b7280" }} title="Tabela Price" onClick={() => handleOpenPrice(c.id)}><Calculator size={13}/></button>
+                        <button type="button" style={{ width:22, height:22, border:"none", background:"transparent", cursor:"pointer", borderRadius:3, display:"flex", alignItems:"center", justifyContent:"center", color:"#6b7280" }} title="Tabela Price" onClick={() => handleOpenPrice(c.id)}>
+                          <Calculator size={12}/>
+                        </button>
                         {c.validationUrl && (
-                          <a href={c.validationUrl} target="_blank" rel="noopener noreferrer" style={{ width:26, height:26, borderRadius:4, display:"flex", alignItems:"center", justifyContent:"center", color:"#6b7280" }} title="Validação Digital">
-                            <ExternalLink size={13}/>
+                          <a href={c.validationUrl} target="_blank" rel="noopener noreferrer" style={{ width:22, height:22, borderRadius:3, display:"flex", alignItems:"center", justifyContent:"center", color:"#6b7280" }} title="Validação Digital">
+                            <ExternalLink size={12}/>
                           </a>
                         )}
-                        <button type="button" style={{ width:26, height:26, border:"none", background:"transparent", cursor:"pointer", borderRadius:4, display:"flex", alignItems:"center", justifyContent:"center", color:"#dc2626" }} title="Excluir" onClick={() => handleDelete(c.id)}><Trash2 size={13}/></button>
+                        <button type="button" style={{ width:22, height:22, border:"none", background:"transparent", cursor:"pointer", borderRadius:3, display:"flex", alignItems:"center", justifyContent:"center", color:"#dc2626" }} title="Excluir" onClick={() => handleDelete(c.id)}>
+                          <Trash2 size={12}/>
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -380,47 +726,81 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
               })}
             </tbody>
 
-            {/* Totais do Rodapé */}
             {filtered.length > 0 && (
               <tfoot>
-                <tr style={{ background:"#1e2139" }}>
-                  <td data-f="1" style={{ ...fTd(0, false, "#1e2139"), color:"white", fontSize:10, fontWeight:700, textTransform:"uppercase" }}>TOTAIS</td>
-                  <td data-f="1" style={{ ...fTd(1, false, "#1e2139"), color:"#93c5fd", fontSize:11 }}>{filtered.length} contratos</td>
-                  <td data-f="1" style={fTd(2, false, "#1e2139")}/><td data-f="1" style={fTd(3, true, "#1e2139")}/>
-                  <td style={{ textAlign:"right", padding:"8px 10px", fontFamily:"'IBM Plex Mono',monospace", color:"white", fontWeight:800 }}>{fmt(filtered.reduce((s:number,c:any) => s + +c.principalAmount, 0))}</td>
-                  <td style={{ textAlign:"right", padding:"8px 10px", fontFamily:"'IBM Plex Mono',monospace", color:"#c4b5fd", fontWeight:700 }}>{fmt(filtered.reduce((s:number,c:any) => s + +c.financedTotal, 0))}</td>
-                  <td style={{ textAlign:"right", padding:"8px 10px", fontFamily:"'IBM Plex Mono',monospace", color:"#fb923c", fontWeight:700 }}>{fmt(filtered.reduce((s:number,c:any) => s + +c.openBalanceTotal, 0))}</td>
-                  <td colSpan={4}/><td colSpan={3}/>
-                  <td style={{ textAlign:"right", padding:"8px 10px", fontFamily:"'IBM Plex Mono',monospace", color:"#fca5a5", fontWeight:700 }}>{fmt(filtered.reduce((s:number,c:any) => s + +c.openBalanceTotal, 0))}</td>
-                  <td style={{ textAlign:"right", padding:"8px 10px", fontFamily:"'IBM Plex Mono',monospace", color:"#fca5a5", fontWeight:700 }}>{fmt(filtered.reduce((s:number,c:any) => s + +c.interestAccumulated, 0))}</td>
-                  <td colSpan={5}/>
+                <tr style={{ background: footerBg }}>
+                  {visibleOrdered.map((col) => {
+                    const isLastIdCol = col.id === lastIdColumnId;
+                    const isSticky = col.sticky != null;
+                    const align = col.align;
+
+                    const baseFooterTd: React.CSSProperties = {
+                      ...tdBase,
+                      padding: "6px 7px",
+                      background: footerBg,
+                      borderBottom: "none",
+                      textAlign: isSticky ? "left" : align,
+                    };
+
+                    if (isSticky) {
+                      const leftOffset = stickyLeftById.get(col.id) ?? 0;
+                      return (
+                        <td
+                          key={col.id}
+                          data-sticky="1"
+                          style={{
+                            ...baseFooterTd,
+                            position: "sticky",
+                            left: leftOffset,
+                            zIndex: 6,
+                            boxShadow: isLastIdCol ? "2px 0 4px rgba(0,0,0,0.15)" : undefined,
+                          }}
+                        >
+                          {renderFooterCell(col)}
+                        </td>
+                      );
+                    }
+
+                    return (
+                      <td
+                        key={col.id}
+                        style={{
+                          ...baseFooterTd,
+                          fontFamily: align === "right" ? FONT_MONO : undefined,
+                        }}
+                      >
+                        {renderFooterCell(col)}
+                      </td>
+                    );
+                  })}
+                  <td style={{ ...tdBase, background: footerBg, borderBottom: "none" }} />
                 </tr>
               </tfoot>
             )}
           </table>
         </div>
 
-        {/* ══ PAGINAÇÃO ══════════════════════════════════════════════════ */}
-        <div style={{ padding:"8px 0", background:"white", borderTop:"1px solid #e5e7eb", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8, flexShrink:0 }}>
-          <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:"#6b7280" }}>
+        {/* ══ PAGINAÇÃO (dentro do mesmo container da tabela) ══════════════ */}
+        <div style={{ padding:"6px 12px", borderTop:"1px solid #e5e7eb", background:"#fafbfc", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8, flexShrink:0 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:11, color:"#6b7280" }}>
             <span>Exibir</span>
-            <select style={{ padding:"3px 6px", border:"1px solid #d1d5db", borderRadius:4, fontSize:12, background:"white", cursor:"pointer" }} value={pageSize} onChange={e => { setPageSize(+e.target.value); setPage(1); }}>
+            <select style={{ padding:"3px 6px", border:"1px solid #d1d5db", borderRadius:4, fontSize:11, background:"white", cursor:"pointer" }} value={pageSize} onChange={e => { setPageSize(+e.target.value); setPage(1); }}>
               {PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
             <span>por página</span>
           </div>
-          <span style={{ fontSize:12, color:"#6b7280" }}>Mostrando {Math.min((page-1)*pageSize+1, filtered.length)}–{Math.min(page*pageSize, filtered.length)} de {filtered.length}</span>
+          <span style={{ fontSize:11, color:"#6b7280" }}>Mostrando {Math.min((page-1)*pageSize+1, filtered.length)}–{Math.min(page*pageSize, filtered.length)} de {filtered.length}</span>
           <div style={{ display:"flex", alignItems:"center", gap:3 }}>
-            <button onClick={() => setPage(p => Math.max(1,p-1))} disabled={page===1} style={{ padding:"4px 12px", border:"1px solid #d1d5db", borderRadius:4, background:"white", fontSize:12, cursor:page===1?"not-allowed":"pointer", color:page===1?"#9ca3af":"#374151" }}>← Anterior</button>
+            <button onClick={() => setPage(p => Math.max(1,p-1))} disabled={page===1} style={{ padding:"4px 10px", border:"1px solid #d1d5db", borderRadius:4, background:"white", fontSize:11, cursor:page===1?"not-allowed":"pointer", color:page===1?"#9ca3af":"#374151" }}>← Anterior</button>
             {Array.from({ length:Math.min(5,totalPages) }, (_,i) => {
               const n = page<=3 ? i+1 : page-2+i; if (n<1||n>totalPages) return null;
-              return <button key={n} onClick={() => setPage(n)} style={{ width:32, height:30, borderRadius:4, border:"1px solid", fontSize:12, cursor:"pointer", fontWeight:n===page?700:400, background:n===page?"#1e2139":"white", color:n===page?"white":"#374151", borderColor:n===page?"#1e2139":"#d1d5db" }}>{n}</button>;
+              return <button key={n} onClick={() => setPage(n)} style={{ width:28, height:26, borderRadius:4, border:"1px solid", fontSize:11, cursor:"pointer", fontWeight:n===page?700:400, background:n===page?"#1e2139":"white", color:n===page?"white":"#374151", borderColor:n===page?"#1e2139":"#d1d5db" }}>{n}</button>;
             })}
-            <button onClick={() => setPage(p => Math.min(totalPages,p+1))} disabled={page>=totalPages} style={{ padding:"4px 12px", border:"1px solid #d1d5db", borderRadius:4, background:"white", fontSize:12, cursor:page>=totalPages?"not-allowed":"pointer", color:page>=totalPages?"#9ca3af":"#374151" }}>Próxima →</button>
+            <button onClick={() => setPage(p => Math.min(totalPages,p+1))} disabled={page>=totalPages} style={{ padding:"4px 10px", border:"1px solid #d1d5db", borderRadius:4, background:"white", fontSize:11, cursor:page>=totalPages?"not-allowed":"pointer", color:page>=totalPages?"#9ca3af":"#374151" }}>Próxima →</button>
           </div>
         </div>
+        </div>
 
-      {/* ── FECHAMENTO DA DIV DE MARGEM: Colocado exatamente antes do Layout principal ── */}
       </div>
 
       {/* ══ MODAL PRICE ═════════════════════════════════════════════════ */}
@@ -439,7 +819,7 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
               <>
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", borderBottom:"1px solid var(--border)" }}>
                   {[
-                    { label:"PRINCIPAL",       value:fmt(priceData.principal),     color:"#1e2139" },
+                    { label:"PRINCIPAL",        value:fmt(priceData.principal),     color:"#1e2139" },
                     { label:"TOTAL FINANCIADO", value:fmt(priceData.financedTotal), color:"#2563eb" },
                     { label:"TOTAL DE JUROS",   value:fmt(priceData.totalInterest), color:"#dc2626" },
                     { label:"TOTAL A PAGAR",    value:fmt(priceData.totalPayable),  color:"#ea580c" },
@@ -448,7 +828,7 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
                   ].map((c, i) => (
                     <div key={c.label} style={{ padding:"12px 16px", borderLeft:i>0?"1px solid var(--border)":"none", borderTop:`3px solid ${c.color}` }}>
                       <div style={{ fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.07em", color:"var(--muted-foreground)", marginBottom:4 }}>{c.label}</div>
-                      <div style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:15, fontWeight:800, color:c.color }}>{c.value}</div>
+                      <div style={{ fontFamily: FONT_MONO, fontSize:15, fontWeight:800, color:c.color }}>{c.value}</div>
                     </div>
                   ))}
                 </div>
@@ -462,18 +842,16 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
                       </tr>
                     </thead>
                     <tbody>
-                      {priceData.rows.map((row: any, idx: number) => {
-                        return (
-                          <tr key={row.n} style={{ background:idx%2===1?"#f9fafb":"white" }} onMouseOver={e=>(e.currentTarget.style.background="#eff6ff")} onMouseOut={e=>(e.currentTarget.style.background=idx%2===1?"#f9fafb":"white")}>
-                            <td style={{ textAlign:"center", padding:"5px 10px", fontFamily:"'IBM Plex Mono',monospace", fontSize:10, color:"#9ca3af", borderBottom:"1px solid #e5e7eb" }}>{String(row.n).padStart(2,"0")}</td>
-                            <td style={{ padding:"5px 10px", fontSize:11, borderBottom:"1px solid #e5e7eb" }}>{fmtDate(row.dueDate)}</td>
-                            <td style={{ textAlign:"right", padding:"5px 10px", fontFamily:"'IBM Plex Mono',monospace", fontWeight:700, borderBottom:"1px solid #e5e7eb" }}>{fmt(row.payment)}</td>
-                            <td style={{ textAlign:"right", padding:"5px 10px", fontFamily:"'IBM Plex Mono',monospace", color:row.interest>0?"#dc2626":"#9ca3af", borderBottom:"1px solid #e5e7eb" }}>{fmt(row.interest)}</td>
-                            <td style={{ textAlign:"right", padding:"5px 10px", fontFamily:"'IBM Plex Mono',monospace", color:"#059669", borderBottom:"1px solid #e5e7eb" }}>{fmt(row.amortization)}</td>
-                            <td style={{ textAlign:"right", padding:"5px 10px", fontFamily:"'IBM Plex Mono',monospace", fontWeight:600, borderBottom:"1px solid #e5e7eb" }}>{fmt(row.balance)}</td>
-                          </tr>
-                        );
-                      })}
+                      {priceData.rows.map((row: any, idx: number) => (
+                        <tr key={row.n} style={{ background:idx%2===1?"#f9fafb":"white" }} onMouseOver={e=>(e.currentTarget.style.background="#eff6ff")} onMouseOut={e=>(e.currentTarget.style.background=idx%2===1?"#f9fafb":"white")}>
+                          <td style={{ textAlign:"center", padding:"5px 10px", fontFamily: FONT_MONO, fontSize:10, color:"#9ca3af", borderBottom:"1px solid #e5e7eb" }}>{String(row.n).padStart(2,"0")}</td>
+                          <td style={{ padding:"5px 10px", fontSize:11, borderBottom:"1px solid #e5e7eb" }}>{fmtDate(row.dueDate)}</td>
+                          <td style={{ textAlign:"right", padding:"5px 10px", fontFamily: FONT_MONO, fontWeight:700, borderBottom:"1px solid #e5e7eb" }}>{fmt(row.payment)}</td>
+                          <td style={{ textAlign:"right", padding:"5px 10px", fontFamily: FONT_MONO, color:row.interest>0?"#dc2626":"#9ca3af", borderBottom:"1px solid #e5e7eb" }}>{fmt(row.interest)}</td>
+                          <td style={{ textAlign:"right", padding:"5px 10px", fontFamily: FONT_MONO, color:"#059669", borderBottom:"1px solid #e5e7eb" }}>{fmt(row.amortization)}</td>
+                          <td style={{ textAlign:"right", padding:"5px 10px", fontFamily: FONT_MONO, fontWeight:600, borderBottom:"1px solid #e5e7eb" }}>{fmt(row.balance)}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>

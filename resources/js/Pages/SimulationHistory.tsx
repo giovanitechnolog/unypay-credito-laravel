@@ -1,7 +1,17 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Head, router, usePage, Link } from "@inertiajs/react";
 import { History, FileText, Trash2, ArrowRight, X, Calculator } from "lucide-react";
 import UnyPayLayout from "../Components/UnyPayLayout";
+import TableGroupBadges from "../Components/TableGroupBadges";
+import TableColumnPicker from "../Components/TableColumnPicker";
+import { useColumnVisibility } from "../hooks/useColumnVisibility";
+import {
+  SIM_HISTORY_COLUMNS,
+  SIM_HISTORY_GROUP_META,
+  SIM_HISTORY_GROUP_ORDER,
+  type SimHistoryColumnDef,
+  type SimHistoryColumnId,
+} from "../lib/simulationHistoryColumns";
 
 const fmt = (v: number | string) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(v) || 0);
@@ -22,8 +32,22 @@ const MODE_LABELS: Record<string, string> = {
   manual: "Manual",
 };
 
+// largura da coluna especial de ações
+const ACTIONS_WIDTH = 120;
+
+// estilos compactos
+const headerCellStyle: React.CSSProperties = {
+  background: "#f1f5f9", color: "#334155",
+  padding: "5px 7px", fontSize: 9, fontWeight: 700,
+  textTransform: "uppercase", letterSpacing: "0.04em",
+  whiteSpace: "nowrap", borderBottom: "2px solid #cbd5e1",
+};
+const tdBase: React.CSSProperties = { padding: "3px 7px", borderBottom: "1px solid #f1f5f9", fontSize: 11, verticalAlign: "middle" };
+const tdNum: React.CSSProperties = { ...tdBase, fontFamily: "'IBM Plex Mono', monospace", textAlign: "right" };
+const tdCenter: React.CSSProperties = { ...tdBase, textAlign: "center" };
+
 export default function SimulationHistory() {
-  const { simulations, clients, flash, errors }: any = usePage().props;
+  const { simulations, clients, flash }: any = usePage().props;
   const [convertOpen, setConvertOpen] = useState(false);
   const [selectedSim, setSelectedSim] = useState<any>(null);
   const [convertForm, setConvertForm] = useState({
@@ -33,6 +57,40 @@ export default function SimulationHistory() {
     contractDate: new Date().toISOString().slice(0, 10),
     clientId: "",
   });
+
+  // ── Visibilidade de colunas ────────────────────────────────────────────
+  const { visibleIds, toggleColumn, setColumnsVisible, resetDefaults } =
+    useColumnVisibility<SimHistoryColumnId>(
+      "unypay.simHistory.columns.v1",
+      SIM_HISTORY_COLUMNS,
+    );
+
+  const visibleOrdered: SimHistoryColumnDef[] = useMemo(
+    () => SIM_HISTORY_COLUMNS.filter((c) => visibleIds.has(c.id)),
+    [visibleIds],
+  );
+
+  const stickyOffsets = useMemo(() => {
+    const offsets = new Map<SimHistoryColumnId, number>();
+    let acc = 0;
+    for (const col of visibleOrdered) {
+      if (col.sticky) {
+        offsets.set(col.id, acc);
+        acc += col.width;
+      }
+    }
+    return offsets;
+  }, [visibleOrdered]);
+
+  const visibleGroupRuns = useMemo(() => {
+    const runs: { group: typeof SIM_HISTORY_GROUP_ORDER[number]; count: number }[] = [];
+    for (const col of visibleOrdered) {
+      const last = runs[runs.length - 1];
+      if (last && last.group === col.group) last.count += 1;
+      else runs.push({ group: col.group, count: 1 });
+    }
+    return runs;
+  }, [visibleOrdered]);
 
   const handleDelete = (id: number) => {
     if (!confirm("Tem certeza que deseja excluir esta simulação do histórico?")) return;
@@ -60,145 +118,201 @@ export default function SimulationHistory() {
     });
   };
 
+  // ── células ────────────────────────────────────────────────────────────
+  const renderCellContent = (col: SimHistoryColumnDef, sim: any): React.ReactNode => {
+    const cMode = sim.calcMode ?? sim.calc_mode ?? "price";
+    const principalVal = sim.principal ?? 0;
+    const finTotal = sim.financedTotal ?? sim.financed_total ?? principalVal;
+    const pmt = sim.installmentAmount ?? sim.installment_amount ?? 0;
+    const totalInt = sim.totalInterest ?? sim.total_interest ?? 0;
+    const cetM = sim.cetMonthly ?? sim.cet_monthly ?? 0;
+    const instCount = sim.installmentCount ?? sim.installment_count ?? 0;
+    const created = sim.createdAt ?? sim.created_at;
+
+    switch (col.id) {
+      case "date":
+        return <span style={{ color: "#6b7280", whiteSpace: "nowrap" }}>{fmtDate(created)}</span>;
+      case "client":
+        return sim.clientName ? (
+          <div style={{ maxWidth: col.width - 14, overflow: "hidden" }}>
+            <div style={{ fontWeight: 600, fontSize: 11, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sim.clientName}</div>
+            {sim.clientDocument && (
+              <div style={{ fontSize: 9, color: "#6b7280", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sim.clientDocument}</div>
+            )}
+          </div>
+        ) : (
+          <span style={{ color: "#9ca3af" }}>—</span>
+        );
+      case "mode":
+        return (
+          <span style={{ padding: "2px 6px", borderRadius: 4, background: "#dbeafe", color: "#1e40af", fontWeight: 600, fontSize: 9 }}>
+            {MODE_LABELS[cMode] || cMode}
+          </span>
+        );
+      case "savedBy":
+        return <span style={{ color: "#6b7280" }}>{sim.savedBy ?? "Sistema"}</span>;
+      case "principal":
+        return <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{fmt(principalVal)}</span>;
+      case "financed":
+        return <span style={{ fontFamily: "monospace", color: "#4b5563" }}>{fmt(finTotal)}</span>;
+      case "installments":
+        return <span style={{ color: "#4b5563" }}>{instCount}×</span>;
+      case "installmentAmt":
+        return <span style={{ fontFamily: "monospace", color: "#1e40af", fontWeight: 600 }}>{fmt(pmt)}</span>;
+      case "totalInterest":
+        return <span style={{ fontFamily: "monospace", color: "#dc2626", fontWeight: 600 }}>{fmt(totalInt)}</span>;
+      case "cetMonthly":
+        return <span style={{ fontFamily: "monospace", color: "#ea580c", fontWeight: 600 }}>{cetM ? `${(Number(cetM) * 100).toFixed(2)}%` : "—"}</span>;
+      default:
+        return null;
+    }
+  };
+
   return (
     <UnyPayLayout>
       <Head title="Histórico de Simulações" />
-      <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "0 24px 24px 24px" }}>
-        
-        {/* Cabeçalho Superior conforme Imagem */}
-        <div style={{ background: "white", borderBottom: "1px solid #e5e7eb", padding: "12px 0", display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 -24px 16px -24px", paddingLeft: 24, paddingRight: 24 }}>
+
+      <div style={{ padding: "12px 20px 16px 20px", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", gap: 12 }}>
+
+        {/* Cabeçalho */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 38, height: 38, borderRadius: 8, background: "linear-gradient(135deg, #7c3aed, #5b21b6)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <History size={18} color="white" />
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: "linear-gradient(135deg, #7c3aed, #5b21b6)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <History size={16} color="white" />
             </div>
             <div>
-              <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#111827" }}>Histórico de Simulações</h2>
-              <p style={{ margin: 0, fontSize: 11, color: "#6b7280" }}>Simulações salvas — clique em "Converter" para criar um contrato a partir de uma simulação</p>
+              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#111827" }}>Histórico de Simulações</h2>
+              <p style={{ margin: 0, fontSize: 10, color: "#6b7280" }}>
+                Simulações salvas — clique em "Converter" para criar um contrato a partir de uma simulação
+              </p>
             </div>
           </div>
-          <Link href="/simulador" className="btn-primary" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5, textDecoration: "none", padding: "6px 12px" }}>
-            <Calculator size={14} /> Nova Simulação
+          <Link href="/simulador" className="btn-primary" style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 5, textDecoration: "none", padding: "6px 12px" }}>
+            <Calculator size={12} /> Nova Simulação
           </Link>
         </div>
 
         {/* Alertas */}
         {flash?.success && (
-          <div style={{ padding: "10px 16px", background: "#dcfce7", color: "#15803d", borderRadius: 6, fontSize: 12, fontWeight: 600, marginBottom: 14 }}>
+          <div style={{ padding: "8px 14px", background: "#dcfce7", color: "#15803d", borderRadius: 6, fontSize: 11, fontWeight: 600, flexShrink: 0 }}>
             ✓ {flash.success}
           </div>
         )}
 
-        {/* Tabela de Auditoria com Cabeçalhos Coloridos Idêntica ao Print */}
-        <div style={{ background: "white", border: "1px solid #d1d5db", borderRadius: 8, overflow: "hidden", flex: 1 }}>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11, fontFamily: "'IBM Plex Sans', sans-serif" }}>
+        {/* Barra de filtros (badges + picker) */}
+        <div style={{
+          background: "white", border: "1px solid #e5e7eb", borderRadius: 6,
+          padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 auto", minWidth: 0 }}>
+            <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 500, flexShrink: 0 }}>
+              {simulations?.length ?? 0} simulações
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+            <TableGroupBadges
+              allColumns={SIM_HISTORY_COLUMNS}
+              groupOrder={SIM_HISTORY_GROUP_ORDER}
+              groupMeta={SIM_HISTORY_GROUP_META}
+              visibleIds={visibleIds}
+              setColumnsVisible={setColumnsVisible}
+            />
+            <TableColumnPicker
+              allColumns={SIM_HISTORY_COLUMNS}
+              groupOrder={SIM_HISTORY_GROUP_ORDER}
+              groupMeta={SIM_HISTORY_GROUP_META}
+              visibleIds={visibleIds}
+              toggleColumn={toggleColumn}
+              setColumnsVisible={setColumnsVisible}
+              resetDefaults={resetDefaults}
+            />
+          </div>
+        </div>
+
+        {/* Container unificado da tabela */}
+        <div style={{
+          flex: 1, minHeight: 0, display: "flex", flexDirection: "column",
+          border: "1px solid #e5e7eb", borderRadius: 6, overflow: "hidden", background: "white",
+        }}>
+          <div style={{ flex: 1, overflow: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11 }}>
+              <colgroup>
+                {visibleOrdered.map(col => <col key={col.id} style={{ width: col.width }} />)}
+                <col style={{ width: ACTIONS_WIDTH }} />
+              </colgroup>
+
               <thead>
-                {/* ── LINHA 1 DE GRUPOS DE CORES (CONFORME PRINT DO MANUS) ── */}
                 <tr>
-                  <th colSpan={4} style={{ background: "#1a243a", color: "white", textAlign: "center", padding: "5px 10px", fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", borderRight: "1px solid rgba(255,255,255,0.15)" }}>
-                    IDENTIFICAÇÃO
+                  {visibleGroupRuns.map((run, i) => {
+                    const meta = SIM_HISTORY_GROUP_META[run.group];
+                    return (
+                      <th
+                        key={`${run.group}-${i}`}
+                        colSpan={run.count}
+                        style={{
+                          background: meta.bg, color: meta.color,
+                          textAlign: "center", padding: "4px 8px",
+                          fontSize: 9, fontWeight: 700, letterSpacing: "0.06em",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {meta.label}
+                      </th>
+                    );
+                  })}
+                  <th style={{ background: "#1e2139", color: "white", textAlign: "center", padding: "4px 8px", fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                    Ações
                   </th>
-                  <th colSpan={4} style={{ background: "#0b4687", color: "white", textAlign: "center", padding: "5px 10px", fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", borderRight: "1px solid rgba(255,255,255,0.15)" }}>
-                    VALORES
-                  </th>
-                  <th colSpan={2} style={{ background: "#4a1204", color: "white", textAlign: "center", padding: "5px 10px", fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", borderRight: "1px solid rgba(255,255,255,0.15)" }}>
-                    JUROS
-                  </th>
-                  <th style={{ background: "#111622", color: "white", padding: "5px 10px" }} />
                 </tr>
-                {/* ── LINHA 2 DE COLUNAS (CONFORME PRINT DO MANUS) ── */}
                 <tr>
-                  {[
-                    { label: "DATA", align: "left" },
-                    { label: "CLIENTE", align: "left" },
-                    { label: "MODO", align: "center" },
-                    { label: "SALVO POR", align: "left" },
-                    { label: "PRINCIPAL", align: "right" },
-                    { label: "FINANCIADO", align: "right" },
-                    { label: "PARCELAS", align: "center" },
-                    { label: "VL. PARCELA", align: "right" },
-                    { label: "JUROS TOTAIS", align: "right" },
-                    { label: "CET MENSAL", align: "center" },
-                    { label: "AÇÕES", align: "center" },
-                  ].map(col => (
-                    <th key={col.label} style={{
-                      background: "#161b26", color: "white", padding: "6px 10px",
-                      fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em",
-                      textAlign: col.align as any, whiteSpace: "nowrap",
-                    }}>
-                      {col.label}
-                    </th>
-                  ))}
+                  {visibleOrdered.map(col => {
+                    const stickyStyle: React.CSSProperties = col.sticky
+                      ? { position: "sticky", left: stickyOffsets.get(col.id), zIndex: 2, background: "#f1f5f9" }
+                      : {};
+                    return (
+                      <th key={col.id} style={{ ...headerCellStyle, textAlign: col.align, ...stickyStyle }}>
+                        {col.label.toUpperCase()}
+                      </th>
+                    );
+                  })}
+                  <th style={{ ...headerCellStyle, textAlign: "center" }}>AÇÕES</th>
                 </tr>
               </thead>
+
               <tbody>
                 {!simulations || simulations.length === 0 ? (
                   <tr>
-                    <td colSpan={11} style={{ textAlign: "center", padding: 48, color: "#6b7280" }}>
+                    <td colSpan={visibleOrdered.length + 1} style={{ textAlign: "center", padding: 48, color: "#6b7280" }}>
                       Nenhuma simulação registrada no histórico.
                     </td>
                   </tr>
                 ) : (
                   simulations.map((sim: any, idx: number) => {
-                    const cMode = sim.calcMode ?? sim.calc_mode ?? "price";
-                    const principalVal = sim.principal ?? 0;
-                    const finTotal = sim.financedTotal ?? sim.financed_total ?? principalVal;
-                    const pmt = sim.installmentAmount ?? sim.installment_amount ?? 0;
-                    const totalInt = sim.totalInterest ?? sim.total_interest ?? 0;
-                    const cetM = sim.cetMonthly ?? sim.cet_monthly ?? 0;
-                    const instCount = sim.installmentCount ?? sim.installment_count ?? 0;
-                    const created = sim.createdAt ?? sim.created_at;
-
+                    const rowBg = idx % 2 === 1 ? "#fafafa" : "white";
                     return (
-                      <tr key={sim.id} style={{ background: idx % 2 === 1 ? "#fafafa" : "white" }} onMouseOver={e => (e.currentTarget.style.background = "#eff6ff")} onMouseOut={e => (e.currentTarget.style.background = idx % 2 === 1 ? "#fafafa" : "white")}>
-                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", color: "#6b7280", whiteSpace: "nowrap" }}>
-                          {fmtDate(created)}
-                        </td>
-                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb" }}>
-                          {sim.clientName ? (
-                            <div>
-                              <div style={{ fontWeight: 600, fontSize: 12, color: "#111827" }}>{sim.clientName}</div>
-                              {sim.clientDocument && (
-                                <div style={{ fontSize: 10, color: "#6b7280", fontFamily: "monospace" }}>{sim.clientDocument}</div>
-                              )}
-                            </div>
-                          ) : (
-                            <span style={{ color: "#9ca3af" }}>—</span>
-                          )}
-                        </td>
-                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", textAlign: "center" }}>
-                          <span style={{ padding: "2px 6px", borderRadius: 4, background: "#dbeafe", color: "#1e40af", fontWeight: 600, fontSize: 10 }}>
-                            {MODE_LABELS[cMode] || cMode}
-                          </span>
-                        </td>
-                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", color: "#6b7280" }}>
-                          {sim.savedBy ?? "Sistema"}
-                        </td>
-                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>
-                          {fmt(principalVal)}
-                        </td>
-                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", textAlign: "right", fontFamily: "monospace", color: "#4b5563" }}>
-                          {fmt(finTotal)}
-                        </td>
-                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", textAlign: "center", color: "#4b5563" }}>
-                          {instCount}×
-                        </td>
-                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", textAlign: "right", fontFamily: "monospace", color: "#1e40af", fontWeight: 600 }}>
-                          {fmt(pmt)}
-                        </td>
-                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", textAlign: "right", fontFamily: "monospace", color: "#dc2626", fontWeight: 600 }}>
-                          {fmt(totalInt)}
-                        </td>
-                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", textAlign: "center", fontFamily: "monospace", color: "#ea580c", fontWeight: 600 }}>
-                          {cetM ? `${(Number(cetM) * 100).toFixed(2)}%` : "—"}
-                        </td>
-                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb" }}>
+                      <tr key={sim.id} style={{ background: rowBg }}
+                        onMouseOver={e => (e.currentTarget.style.background = "#eff6ff")}
+                        onMouseOut={e => (e.currentTarget.style.background = rowBg)}>
+                        {visibleOrdered.map(col => {
+                          const stickyStyle: React.CSSProperties = col.sticky
+                            ? { position: "sticky", left: stickyOffsets.get(col.id), zIndex: 1, background: "inherit" }
+                            : {};
+                          const base =
+                            col.align === "right" ? tdNum :
+                              col.align === "center" ? tdCenter : tdBase;
+                          return (
+                            <td key={col.id} style={{ ...base, ...stickyStyle }}>
+                              {renderCellContent(col, sim)}
+                            </td>
+                          );
+                        })}
+                        <td style={tdCenter}>
                           <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                            <button className="btn-primary" style={{ fontSize: 10, padding: "3px 10px", display: "flex", alignItems: "center", gap: 3 }} onClick={() => handleOpenConvert(sim)}>
-                              <ArrowRight size={11} /> Converter
+                            <button className="btn-primary" style={{ fontSize: 9, padding: "2px 8px", display: "flex", alignItems: "center", gap: 3 }} onClick={() => handleOpenConvert(sim)}>
+                              <ArrowRight size={10} /> Converter
                             </button>
-                            <button onClick={() => handleDelete(sim.id)} style={{ background: "none", border: "none", color: "#dc2626", cursor: "pointer", padding: 4 }} title="Excluir">
-                              <Trash2 size={12} />
+                            <button onClick={() => handleDelete(sim.id)} style={{ background: "none", border: "none", color: "#dc2626", cursor: "pointer", padding: 2 }} title="Excluir">
+                              <Trash2 size={11} />
                             </button>
                           </div>
                         </td>
@@ -224,7 +338,7 @@ export default function SimulationHistory() {
               </div>
               <form onSubmit={handleConvertSubmit}>
                 <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-                  
+
                   <div style={{ padding: "10px 12px", background: "#f8f9fa", border: "1px solid #d1d5db", borderRadius: 6, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     <div>
                       <span style={{ fontSize: 9, color: "#6b7280", display: "block" }}>VALOR FINANCIADO</span>

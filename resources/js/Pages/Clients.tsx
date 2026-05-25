@@ -1,10 +1,20 @@
-import { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Head, router } from "@inertiajs/react";
-import { 
-  Plus, Search, Edit2, Trash2, Users, Building2, 
-  User, Shield, FileText, X, Eye, Upload, Loader2 
+import {
+  Plus, Search, Edit2, Trash2, Users, Building2,
+  User, Shield, FileText, X, Eye, Upload, Loader2,
 } from "lucide-react";
 import UnyPayLayout from "../Components/UnyPayLayout";
+import TableGroupBadges from "../Components/TableGroupBadges";
+import TableColumnPicker from "../Components/TableColumnPicker";
+import { useColumnVisibility } from "../hooks/useColumnVisibility";
+import {
+  CLIENTS_COLUMNS,
+  CLIENTS_GROUP_META,
+  CLIENTS_GROUP_ORDER,
+  type ClientsColumnDef,
+  type ClientsColumnId,
+} from "../lib/clientsColumns";
 
 const RISK_COLORS: Record<string, { bg: string; color: string }> = {
   A: { bg: "oklch(92% .08 145)", color: "oklch(35% .15 145)" },
@@ -36,7 +46,7 @@ const emptyForm = {
   name: "", document: "", email: "", phone: "",
   address: "", city: "", state: "", zipCode: "",
   personType: "PF" as "PF" | "PJ",
-  riskRating: "A" as "A"|"B"|"C"|"D"|"E",
+  riskRating: "A" as "A" | "B" | "C" | "D" | "E",
   profissao: "", rendaMensal: "",
   bankAccounts: [emptyBankAccount()] as BankAccount[],
   pixKey: "",
@@ -77,6 +87,19 @@ const Label = ({ children }: { children: React.ReactNode }) => (
   <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>{children}</label>
 );
 
+// largura da coluna especial de ações
+const ACTIONS_WIDTH = 130;
+
+// estilos compactos
+const headerCellStyle: React.CSSProperties = {
+  background: "#f1f5f9", color: "#334155",
+  padding: "5px 7px", fontSize: 9, fontWeight: 700,
+  textTransform: "uppercase", letterSpacing: "0.04em",
+  whiteSpace: "nowrap", borderBottom: "2px solid #cbd5e1",
+};
+const tdBase: React.CSSProperties = { padding: "3px 7px", borderBottom: "1px solid #f1f5f9", fontSize: 11, verticalAlign: "middle" };
+const tdCenter: React.CSSProperties = { ...tdBase, textAlign: "center" };
+
 export default function Clients({ clients, filters }: any) {
   const [search, setSearch] = useState(filters?.search || "");
   const [open, setOpen] = useState(false);
@@ -86,6 +109,40 @@ export default function Clients({ clients, filters }: any) {
   const [ocrLoading, setOcrLoading] = useState(false);
   const [focusedBankIdx, setFocusedBankIdx] = useState<number | null>(null);
   const [cepMeta, setCepMeta] = useState({ main: "", fiador1: "", fiador2: "" });
+
+  // ── Visibilidade de colunas ────────────────────────────────────────────
+  const { visibleIds, toggleColumn, setColumnsVisible, resetDefaults } =
+    useColumnVisibility<ClientsColumnId>(
+      "unypay.clients.columns.v1",
+      CLIENTS_COLUMNS,
+    );
+
+  const visibleOrdered: ClientsColumnDef[] = useMemo(
+    () => CLIENTS_COLUMNS.filter((c) => visibleIds.has(c.id)),
+    [visibleIds],
+  );
+
+  const stickyOffsets = useMemo(() => {
+    const offsets = new Map<ClientsColumnId, number>();
+    let acc = 0;
+    for (const col of visibleOrdered) {
+      if (col.sticky) {
+        offsets.set(col.id, acc);
+        acc += col.width;
+      }
+    }
+    return offsets;
+  }, [visibleOrdered]);
+
+  const visibleGroupRuns = useMemo(() => {
+    const runs: { group: typeof CLIENTS_GROUP_ORDER[number]; count: number }[] = [];
+    for (const col of visibleOrdered) {
+      const last = runs[runs.length - 1];
+      if (last && last.group === col.group) last.count += 1;
+      else runs.push({ group: col.group, count: 1 });
+    }
+    return runs;
+  }, [visibleOrdered]);
 
   const handleSearchChange = (value: string) => {
     setSearch(value);
@@ -113,7 +170,7 @@ export default function Clients({ clients, filters }: any) {
         fiador2Cnpj: extra.fiador2Cnpj ?? "", fiador2Telefone: extra.fiador2Telefone ?? "",
         fiador2Endereco: extra.fiador2Endereco ?? "", fiador2Cidade: extra.fiador2Cidade ?? "",
         fiador2Estado: extra.fiador2Estado ?? "", fiador2Cep: extra.fiador2Cep ?? "",
-        observacoesJuridicas: extra.observacoesJuridicas ?? extra.observacoesJuridicas ?? "",
+        observacoesJuridicas: extra.observacoesJuridicas ?? "",
       });
     } else {
       setEditing(null);
@@ -192,92 +249,186 @@ export default function Clients({ clients, filters }: any) {
   const f = (k: keyof FormType) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }));
 
+  // ── células ────────────────────────────────────────────────────────────
+  const renderCellContent = (col: ClientsColumnDef, client: any): React.ReactNode => {
+    const extra = parseNotes(client.notes);
+    const risk = RISK_COLORS[client.riskRating ?? "A"] ?? RISK_COLORS.A;
+    switch (col.id) {
+      case "name":
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, maxWidth: col.width - 14, overflow: "hidden" }}>
+            <div style={{ width: 22, height: 22, borderRadius: "50%", background: "#1a2035", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
+              {client.name.charAt(0).toUpperCase()}
+            </div>
+            <span style={{ fontWeight: 600, fontSize: 11, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{client.name}</span>
+          </div>
+        );
+      case "document":
+        return <span className="mono" style={{ fontSize: 10, color: "#6b7280" }}>{client.document || "—"}</span>;
+      case "personType":
+        return (
+          <span className={`badge ${client.personType === "PJ" ? "badge-pj" : "badge-pf"}`} style={{ fontSize: 9 }}>
+            {client.personType === "PJ" ? <Building2 size={9} /> : <User size={9} />}{client.personType}
+          </span>
+        );
+      case "profession":
+        return <span style={{ fontSize: 10, color: "#6b7280" }}>{extra.profissao || "—"}</span>;
+      case "email":
+        return <span style={{ fontSize: 10, color: "#6b7280" }}>{client.email || "—"}</span>;
+      case "phone":
+        return <span style={{ fontSize: 10, color: "#6b7280" }}>{client.phone || "—"}</span>;
+      case "cityState":
+        return <span style={{ fontSize: 10, color: "#6b7280" }}>{client.city ? `${client.city}${client.state ? `/${client.state}` : ""}` : "—"}</span>;
+      case "rating":
+        return (
+          <span className="badge" style={{ background: risk.bg, color: risk.color, fontSize: 9 }}>
+            <Shield size={9} /> {client.riskRating ?? "A"}
+          </span>
+        );
+      case "pixKey":
+        return <span style={{ fontSize: 10, color: "#6b7280", maxWidth: col.width - 14, display: "inline-block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "middle" }}>{extra.pixKey || "—"}</span>;
+      case "fiador1":
+        return <span style={{ fontSize: 10, color: "#6b7280", maxWidth: col.width - 14, display: "inline-block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "middle" }}>{extra.fiador1Nome || "—"}</span>;
+      case "fiador2":
+        return <span style={{ fontSize: 10, color: "#6b7280", maxWidth: col.width - 14, display: "inline-block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "middle" }}>{extra.fiador2Nome || "—"}</span>;
+      default:
+        return null;
+    }
+  };
+
   return (
     <UnyPayLayout>
       <Head title="Gerenciamento de Clientes" />
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        
-        {/* Toolbar */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <div style={{ position: "relative", flex: "1 1 200px", maxWidth: 320 }}>
-            <Search size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--muted-foreground)" }} />
-            <input className="sigx-input" style={{ paddingLeft: 30 }} placeholder="Buscar clientes..." value={search} onChange={e => handleSearchChange(e.target.value)} />
+      <div style={{ padding: "12px 20px 16px 20px", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", gap: 12 }}>
+
+        {/* Cabeçalho */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#111827" }}>Gerenciamento de Clientes</h1>
+          <button className="btn-primary" onClick={() => handleOpen()} style={{ padding: "6px 14px", fontSize: 11 }}>
+            <Plus size={12} /> Novo Cliente
+          </button>
+        </div>
+
+        {/* Barra de filtros */}
+        <div style={{
+          background: "white", border: "1px solid #e5e7eb", borderRadius: 6,
+          padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 auto", minWidth: 0 }}>
+            <div style={{ position: "relative", flexShrink: 0 }}>
+              <Search size={12} style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "#9ca3af" }} />
+              <input
+                style={{ paddingLeft: 26, width: 280, fontSize: 11, height: 28, border: "1px solid #d1d5db", borderRadius: 6, outline: "none", color: "#374151" }}
+                placeholder="Buscar clientes..." value={search} onChange={e => handleSearchChange(e.target.value)}
+              />
+            </div>
+            <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 500, flexShrink: 0 }}>{clients?.length ?? 0} clientes</span>
           </div>
-          <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>{clients?.length ?? 0} clientes</span>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-            <button className="btn-primary" onClick={() => handleOpen()}>
-              <Plus size={13} /> Novo Cliente
-            </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+            <TableGroupBadges
+              allColumns={CLIENTS_COLUMNS}
+              groupOrder={CLIENTS_GROUP_ORDER}
+              groupMeta={CLIENTS_GROUP_META}
+              visibleIds={visibleIds}
+              setColumnsVisible={setColumnsVisible}
+            />
+            <TableColumnPicker
+              allColumns={CLIENTS_COLUMNS}
+              groupOrder={CLIENTS_GROUP_ORDER}
+              groupMeta={CLIENTS_GROUP_META}
+              visibleIds={visibleIds}
+              toggleColumn={toggleColumn}
+              setColumnsVisible={setColumnsVisible}
+              resetDefaults={resetDefaults}
+            />
           </div>
         </div>
 
-        {/* Tabela */}
-        <div className="sigx-card">
-          <div className="sigx-table-wrapper">
-            <table className="sigx-table">
+        {/* Container unificado da tabela */}
+        <div style={{
+          flex: 1, minHeight: 0, display: "flex", flexDirection: "column",
+          border: "1px solid #e5e7eb", borderRadius: 6, overflow: "hidden", background: "white",
+        }}>
+          <div style={{ flex: 1, overflow: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11 }}>
+              <colgroup>
+                {visibleOrdered.map(col => <col key={col.id} style={{ width: col.width }} />)}
+                <col style={{ width: ACTIONS_WIDTH }} />
+              </colgroup>
+
               <thead>
                 <tr>
-                  <th colSpan={4} className="group-header group-id" style={{ textAlign: "center" }}>IDENTIFICAÇÃO</th>
-                  <th colSpan={3} className="group-header group-fin" style={{ textAlign: "center" }}>CONTATO</th>
-                  <th colSpan={2} className="group-header group-status" style={{ textAlign: "center" }}>CLASSIFICAÇÃO</th>
-                  <th colSpan={2} className="group-header group-taxas" style={{ textAlign: "center" }}>FIADORES</th>
-                  <th className="group-header group-acoes"></th>
+                  {visibleGroupRuns.map((run, i) => {
+                    const meta = CLIENTS_GROUP_META[run.group];
+                    return (
+                      <th
+                        key={`${run.group}-${i}`}
+                        colSpan={run.count}
+                        style={{
+                          background: meta.bg, color: meta.color,
+                          textAlign: "center", padding: "4px 8px",
+                          fontSize: 9, fontWeight: 700, letterSpacing: "0.06em",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {meta.label}
+                      </th>
+                    );
+                  })}
+                  <th style={{ background: "#1e2139", color: "white", textAlign: "center", padding: "4px 8px", fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                    Ações
+                  </th>
                 </tr>
                 <tr>
-                  <th>Nome</th><th>Documento</th><th>Tipo</th><th>Profissão</th>
-                  <th>E-mail</th><th>Telefone</th><th>Cidade/UF</th>
-                  <th style={{ textAlign: "center" }}>Rating</th><th>PIX</th>
-                  <th>Fiador 1</th><th>Fiador 2</th>
-                  <th style={{ textAlign: "center" }}>Ações</th>
+                  {visibleOrdered.map(col => {
+                    const stickyStyle: React.CSSProperties = col.sticky
+                      ? { position: "sticky", left: stickyOffsets.get(col.id), zIndex: 2, background: "#f1f5f9" }
+                      : {};
+                    return (
+                      <th key={col.id} style={{ ...headerCellStyle, textAlign: col.align, ...stickyStyle }}>
+                        {col.label.toUpperCase()}
+                      </th>
+                    );
+                  })}
+                  <th style={{ ...headerCellStyle, textAlign: "center" }}>AÇÕES</th>
                 </tr>
               </thead>
+
               <tbody>
                 {!clients || clients.length === 0 ? (
                   <tr>
-                    <td colSpan={12} style={{ textAlign: "center", padding: 40, color: "var(--muted-foreground)" }}>
-                      <Users size={32} style={{ margin: "0 auto 8px", display: "block", opacity: 0.3 }} />
+                    <td colSpan={visibleOrdered.length + 1} style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>
+                      <Users size={28} style={{ margin: "0 auto 8px", display: "block", opacity: 0.3 }} />
                       Nenhum cliente cadastrado
                     </td>
                   </tr>
                 ) : (
-                  clients.map((client: any) => {
-                    const risk = RISK_COLORS[client.riskRating ?? "A"] ?? RISK_COLORS.A;
-                    const extra = parseNotes(client.notes);
+                  clients.map((client: any, rowIdx: number) => {
+                    const rowBg = rowIdx % 2 === 1 ? "#fafafa" : "white";
                     return (
-                      <tr key={client.id}>
-                        <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                            <div style={{ width: 28, height: 28, borderRadius: "50%", background: "var(--table-header-bg)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
-                              {client.name.charAt(0).toUpperCase()}
-                            </div>
-                            <span style={{ fontWeight: 600, fontSize: 12 }}>{client.name}</span>
-                          </div>
-                        </td>
-                        <td className="mono" style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{client.document || "—"}</td>
-                        <td>
-                          <span className={`badge ${client.personType === "PJ" ? "badge-pj" : "badge-pf"}`}>
-                            {client.personType === "PJ" ? <Building2 size={9} /> : <User size={9} />}{client.personType}
-                          </span>
-                        </td>
-                        <td style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{extra.profissao || "—"}</td>
-                        <td style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{client.email || "—"}</td>
-                        <td style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{client.phone || "—"}</td>
-                        <td style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{client.city ? `${client.city}${client.state ? `/${client.state}` : ""}` : "—"}</td>
-                        <td style={{ textAlign: "center" }}>
-                          <span className="badge" style={{ background: risk.bg, color: risk.color }}>
-                            <Shield size={9} /> {client.riskRating ?? "A"}
-                          </span>
-                        </td>
-                        <td style={{ fontSize: 11, color: "var(--muted-foreground)", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis" }}>{extra.pixKey || "—"}</td>
-                        <td style={{ fontSize: 11, color: "var(--muted-foreground)", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis" }}>{extra.fiador1Nome || "—"}</td>
-                        <td style={{ fontSize: 11, color: "var(--muted-foreground)", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis" }}>{extra.fiador2Nome || "—"}</td>
-                        <td>
+                      <tr key={client.id} style={{ background: rowBg }}
+                        onMouseOver={e => (e.currentTarget.style.background = "#eff6ff")}
+                        onMouseOut={e => (e.currentTarget.style.background = rowBg)}>
+                        {visibleOrdered.map(col => {
+                          const stickyStyle: React.CSSProperties = col.sticky
+                            ? { position: "sticky", left: stickyOffsets.get(col.id), zIndex: 1, background: "inherit" }
+                            : {};
+                          const base =
+                            col.align === "right" ? { ...tdBase, fontFamily: "'IBM Plex Mono', monospace", textAlign: "right" as const } :
+                              col.align === "center" ? tdCenter : tdBase;
+                          return (
+                            <td key={col.id} style={{ ...base, ...stickyStyle }}>
+                              {renderCellContent(col, client)}
+                            </td>
+                          );
+                        })}
+                        <td style={tdCenter}>
                           <div style={{ display: "flex", gap: 3, justifyContent: "center" }}>
                             <button className="btn-icon" title="Ver detalhes" onClick={() => router.get(`/clients/${client.id}`)}><Eye size={11} /></button>
                             <button className="btn-icon" title="Ver contratos" onClick={() => router.get(`/contracts?clientId=${client.id}`)}><FileText size={11} /></button>
                             <button className="btn-icon" title="Editar" onClick={() => handleOpen(client)}><Edit2 size={11} /></button>
-                            <button className="btn-icon" title="Excluir" style={{ color: "var(--color-red)" }} onClick={() => handleDelete(client.id, client.name)}><Trash2 size={11} /></button>
+                            <button className="btn-icon" title="Excluir" style={{ color: "#dc2626" }} onClick={() => handleDelete(client.id, client.name)}><Trash2 size={11} /></button>
                           </div>
                         </td>
                       </tr>
@@ -291,14 +442,9 @@ export default function Clients({ clients, filters }: any) {
 
         {/* Modal de Formulário Completo */}
         {open && (
-          <div className="sigx-modal-overlay" 
-            onMouseDown={e => { 
-              // Mudamos para onMouseDown para isolar cliques de arrasto de campos de texto
-              if (e.target === e.currentTarget) setOpen(false); 
-            }}
-          >
+          <div className="sigx-modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setOpen(false); }}>
             <div className="sigx-modal" style={{ maxWidth: 860 }} onMouseDown={e => e.stopPropagation()}>
-              
+
               <div className="sigx-modal-header">
                 <span className="sigx-modal-title">{editing ? "Editar Cliente" : "Novo Cliente"}</span>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -321,7 +467,6 @@ export default function Clients({ clients, filters }: any) {
               <form onSubmit={handleSubmit}>
                 <div className="sigx-modal-body" style={{ maxHeight: "60vh", overflowY: "auto", padding: 20 }}>
 
-                  {/* Tab 1: Dados Pessoais */}
                   {activeTab === "dados" && (
                     <div className="form-grid-3">
                       <div className="col-span-3">
@@ -337,12 +482,9 @@ export default function Clients({ clients, filters }: any) {
                       </div>
                       <div>
                         <Label>{form.personType === "PJ" ? "CNPJ" : "CPF"}</Label>
-                        <input 
-                          className="sigx-input"
-                          value={form.document} 
-                          onChange={(e) => setForm(p => ({ ...p, document: form.personType === "PJ" ? maskCNPJ(e.target.value) : maskCPF(e.target.value) }))} 
-                          placeholder="Apenas números" 
-                        />
+                        <input className="sigx-input" value={form.document}
+                          onChange={(e) => setForm(p => ({ ...p, document: form.personType === "PJ" ? maskCNPJ(e.target.value) : maskCPF(e.target.value) }))}
+                          placeholder="Apenas números" />
                       </div>
                       <div>
                         <Label>RATING DE RISCO</Label>
@@ -373,22 +515,16 @@ export default function Clients({ clients, filters }: any) {
                     </div>
                   )}
 
-                  {/* Tab 2: Endereço */}
                   {activeTab === "endereco" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                       <div>
                         <Label>CEP</Label>
-                        <input 
-                          className="sigx-input" 
-                          style={{ width: "38%" }}
-                          value={form.zipCode} 
+                        <input className="sigx-input" style={{ width: "38%" }} value={form.zipCode}
                           onChange={(e) => {
                             const masked = maskCEP(e.target.value);
                             setForm(p => ({ ...p, zipCode: masked }));
                             if (masked.replace(/\D/g, "").length === 8) handleFetchCep(masked, "main");
-                          }}
-                          placeholder="00000-000" 
-                        />
+                          }} placeholder="00000-000" />
                         {cepMeta.main && <div style={{ color: "var(--color-green)", fontSize: 11, fontWeight: 600, marginTop: 4 }}>{cepMeta.main}</div>}
                       </div>
                       <div>
@@ -408,17 +544,18 @@ export default function Clients({ clients, filters }: any) {
                     </div>
                   )}
 
-                  {/* Tab 3: Dados Financeiros */}
                   {activeTab === "financeiro" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                       {form.bankAccounts.map((acc, idx) => (
                         <div key={idx} style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 6, background: "#fafafa" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontSize: 11, fontWeight: 700 }}>CONTA {idx + 1}</span>
-                            {form.bankAccounts.length > 1 && <button type="button" style={{ background:"none", border:"none", color:"var(--color-red)", cursor:"pointer" }} onClick={() => setForm(p => ({ ...p, bankAccounts: p.bankAccounts.filter((_, i) => i !== idx) }))}><X size={14} /></button>}
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                            <span style={{ fontSize: 11, fontWeight: 700 }}>CONTA {idx + 1}</span>
+                            {form.bankAccounts.length > 1 && <button type="button" style={{ background: "none", border: "none", color: "var(--color-red)", cursor: "pointer" }} onClick={() => setForm(p => ({ ...p, bankAccounts: p.bankAccounts.filter((_, i) => i !== idx) }))}><X size={14} /></button>}
                           </div>
                           <div style={{ display: "grid", gridTemplateColumns: "2.5fr 1fr 2fr 1.2fr", gap: 10 }}>
                             <div style={{ position: "relative" }}>
-                              <input className="sigx-input" value={acc.banco} placeholder="Buscar banco..." onFocus={() => setFocusedBankIdx(idx)} onBlur={() => setTimeout(() => setFocusedBankIdx(null), 200)} onChange={e => setForm(p => ({ ...p, bankAccounts: form.bankAccounts.map((a, i) => i === idx ? { ...a, banco: e.target.value } : a) }))} />
+                              <input className="sigx-input" value={acc.banco} placeholder="Buscar banco..." onFocus={() => setFocusedBankIdx(idx)} onBlur={() => setTimeout(() => setFocusedBankIdx(null), 200)}
+                                onChange={e => setForm(p => ({ ...p, bankAccounts: form.bankAccounts.map((a, i) => i === idx ? { ...a, banco: e.target.value } : a) }))} />
                               {focusedBankIdx === idx && (
                                 <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "white", border: "1px solid var(--border)", borderRadius: 6, zIndex: 100, maxHeight: 140, overflowY: "auto" }}>
                                   {LISTA_BANCOS.filter(b => b.nome.toLowerCase().includes(acc.banco.toLowerCase())).map(b => (
@@ -429,7 +566,9 @@ export default function Clients({ clients, filters }: any) {
                             </div>
                             <input className="sigx-input" value={acc.agencia} placeholder="Ag." onChange={e => setForm(p => ({ ...p, bankAccounts: form.bankAccounts.map((a, i) => i === idx ? { ...a, agencia: e.target.value } : a) }))} />
                             <input className="sigx-input" value={acc.conta} placeholder="Conta" onChange={e => setForm(p => ({ ...p, bankAccounts: form.bankAccounts.map((a, i) => i === idx ? { ...a, conta: e.target.value } : a) }))} />
-                            <select className="sigx-input" value={acc.tipo} onChange={e => setForm(p => ({ ...p, bankAccounts: form.bankAccounts.map((a, i) => i === idx ? { ...a, tipo: e.target.value } : a) }))}><option value="corrente">C/C</option><option value="poupanca">C/P</option></select>
+                            <select className="sigx-input" value={acc.tipo} onChange={e => setForm(p => ({ ...p, bankAccounts: form.bankAccounts.map((a, i) => i === idx ? { ...a, tipo: e.target.value } : a) }))}>
+                              <option value="corrente">C/C</option><option value="poupanca">C/P</option>
+                            </select>
                           </div>
                         </div>
                       ))}
@@ -439,11 +578,8 @@ export default function Clients({ clients, filters }: any) {
                     </div>
                   )}
 
-                  {/* Tab 4: Fiadores — AJUSTADO RIGOROSAMENTE IGUAL À IMAGEM COM OS DOIS FIADORES */}
                   {activeTab === "fiadores" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-                      
-                      {/* Bloco Fiador 1 */}
                       <div>
                         <div className="section-header" style={{ background: "#1a2035", color: "white", padding: "6px 10px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", borderRadius: 3, marginBottom: 12 }}>Fiador / Avalista 1</div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -480,7 +616,6 @@ export default function Clients({ clients, filters }: any) {
                         </div>
                       </div>
 
-                      {/* Bloco Fiador 2 — ADICIONADO CONFORME IMAGEM */}
                       <div>
                         <div className="section-header" style={{ background: "#0f3a5f", color: "white", padding: "6px 10px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", borderRadius: 3, marginBottom: 12 }}>Fiador / Avalista 2 (Opcional)</div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -516,11 +651,9 @@ export default function Clients({ clients, filters }: any) {
                           </div>
                         </div>
                       </div>
-
                     </div>
                   )}
 
-                  {/* Tab 5: Obs Jurídicas */}
                   {activeTab === "obs" && (
                     <div><Label>Observações Jurídicas e Contratuais</Label><textarea className="sigx-input" value={form.observacoesJuridicas} onChange={f("observacoesJuridicas")} rows={8} style={{ resize: "vertical" }} /></div>
                   )}
@@ -535,6 +668,7 @@ export default function Clients({ clients, filters }: any) {
             </div>
           </div>
         )}
+
       </div>
     </UnyPayLayout>
   );

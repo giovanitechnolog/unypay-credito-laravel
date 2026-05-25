@@ -86,7 +86,16 @@ export default function UnyPayLayout({ children }: { children: React.ReactNode }
 
   const breadcrumb = getBreadcrumb(url);
   const pageTitle = getPageTitle(url);
-  const isFullWidth = ["/"].includes(url);
+  // Páginas que gerenciam o próprio padding/altura interna (tabela cheia / dashboard).
+  const pathname = url.split("?")[0];
+  const isFullWidth = [
+    "/",
+    "/lancamentos",
+    "/pagamentos",
+    "/contracts",
+    "/clients",
+    "/simulacoes",
+  ].includes(pathname);
 
   const SidebarContent = ({ mini }: { mini?: boolean }) => (
     <div style={{
