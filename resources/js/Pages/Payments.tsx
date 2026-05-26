@@ -92,7 +92,7 @@ export default function Payments({ contracts, interestData, filters }: any) {
     if (!payInstId || !expandedId) return;
 
     router.post("/api/payments/record", {
-      installmentId: payInstId,       
+      installmentId: payInstId,      
       amount: parseFloat(payAmount),  
       paidAt: payDate,                
       method: payMethod,   
@@ -103,7 +103,7 @@ export default function Payments({ contracts, interestData, filters }: any) {
         setPayOpen(false);
         fetch(`/api/payments/schedule/${expandedId}?baseDate=${baseDate}`)
           .then(res => res.json())
-          .then(data => setSchedule(data));
+          .then(data => data && setSchedule(data));
       }
     });
   };
@@ -118,12 +118,12 @@ export default function Payments({ contracts, interestData, filters }: any) {
 
       <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#f8f9fa", padding: "0 24px 24px 24px" }}>
         
-        {/* TÍTULO LIMPO "Controle de Pagamentos" (IGUAL À IMAGEM) */}
+        {/* TÍTULO LIMPO */}
         <div style={{ padding: "16px 0 10px 0", flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#111827" }}>Controle de Pagamentos</h1>
         </div>
 
-        {/* BARRA DE FILTROS CIMENTADA NO TOPO DO CONTAINER DA TABELA */}
+        {/* BARRA DE FILTROS */}
         <div style={{ background: "white", border: "1px solid #d1d5db", borderBottom: "none", borderRadius: "8px 8px 0 0", padding: "10px 16px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", flexShrink: 0 }}>
           <div style={{ position: "relative" }}>
             <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#9ca3af" }} />
@@ -150,7 +150,7 @@ export default function Payments({ contracts, interestData, filters }: any) {
           <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 500 }}>{contracts?.length ?? 0} contratos</span>
         </div>
 
-        {/* TABELA INTEGRAL — CABEÇALHO E CORPO VIVEM NO MESMO BLOCO SEM QUEBRAS DE LAYOUT */}
+        {/* TABELA INTEGRAL */}
         <div style={{ flex: 1, overflowY: "auto", paddingBottom: "16px" }}>
           <div style={{ background: "white", border: "1px solid #d1d5db", borderRadius: "0 0 8px 8px", overflow: "hidden" }}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
@@ -191,6 +191,13 @@ export default function Payments({ contracts, interestData, filters }: any) {
                     const isExpanded = expandedId === contract.id;
                     const rowBg = rowIdx % 2 === 1 ? "#fafafa" : "white";
 
+                    const totalInstallments = Number(contract.installmentCount ?? 0);
+                    const paidInstallmentsCount = Number(interest?.paidInstallments ?? 0);
+                    const openInstallmentsCount = totalInstallments - paidInstallmentsCount;
+
+                    // 🚀 CORREÇÃO FRONTEND: Corta qualquer decimal dos dias usando Math.floor()
+                    const cleanDaysOverdue = Math.floor(Number(interest?.maxDaysOverdue ?? 0));
+
                     return (
                       <Fragment key={`ct-wrapper-${contract.id}`}>
                         <tr style={{ background: rowBg, cursor: "pointer" }} onClick={() => setExpandedId(isExpanded ? null : contract.id)} onMouseOver={e => (e.currentTarget.style.background = "#eff6ff")} onMouseOut={e => (e.currentTarget.style.background = rowBg)}>
@@ -208,9 +215,16 @@ export default function Payments({ contracts, interestData, filters }: any) {
                           <td style={{ padding: "7px 10px", textAlign: "right", borderBottom: "1px solid #e5e7eb" }}><span className="mono" style={{ color: "#6b7280" }}>{fmt(contract.financedTotal)}</span></td>
                           <td style={{ padding: "7px 10px", textAlign: "center", borderBottom: "1px solid #e5e7eb" }}>{contract.installmentCount}×</td>
                           <td style={{ padding: "7px 10px", textAlign: "right", borderBottom: "1px solid #e5e7eb" }}><span className="mono">{fmt(contract.installmentAmount)}</span></td>
-                          <td style={{ padding: "7px 10px", textAlign: "center", borderBottom: "1px solid #e5e7eb" }}><span className="mono" style={{ color: "#059669", fontWeight: 600 }}>{interest?.paidInstallments ?? 0}</span></td>
-                          <td style={{ padding: "7px 10px", textAlign: "center", borderBottom: "1px solid #e5e7eb" }}><span className="mono" style={{ color: "#dc2626", fontWeight: 600 }}>{interest?.overdueInstallments ?? 0}</span></td>
-                          <td style={{ padding: "7px 10px", textAlign: "center", borderBottom: "1px solid #e5e7eb" }}><span className="mono" style={{ color: (interest?.maxDaysOverdue ?? 0) > 0 ? "#dc2626" : "inherit" }}>{interest?.maxDaysOverdue ? `${interest.maxDaysOverdue}d` : "—"}</span></td>
+                          <td style={{ padding: "7px 10px", textAlign: "center", borderBottom: "1px solid #e5e7eb" }}><span className="mono" style={{ color: "#059669", fontWeight: 600 }}>{paidInstallmentsCount}</span></td>
+                          <td style={{ padding: "7px 10px", textAlign: "center", borderBottom: "1px solid #e5e7eb" }}><span className="mono" style={{ color: "#dc2626", fontWeight: 600 }}>{openInstallmentsCount}</span></td>
+                          
+                          {/* 🚀 CÉLULA ATUALIZADA: Renderiza os dias limpos formatados como inteiros */}
+                          <td style={{ padding: "7px 10px", textAlign: "center", borderBottom: "1px solid #e5e7eb" }}>
+                            <span className="mono" style={{ color: cleanDaysOverdue > 0 ? "#dc2626" : "#059669", fontWeight: 600 }}>
+                              {cleanDaysOverdue > 0 ? `${cleanDaysOverdue} dias` : "0 dias"}
+                            </span>
+                          </td>
+
                           <td style={{ padding: "7px 10px", textAlign: "right", borderBottom: "1px solid #e5e7eb" }}><span className="mono" style={{ color: "#2563eb", fontWeight: 600 }}>{fmt(interest?.remainingBalance)}</span></td>
                           <td style={{ padding: "7px 10px", textAlign: "right", borderBottom: "1px solid #e5e7eb" }}><span className="mono" style={{ color: "#dc2626", fontWeight: 600 }}>{fmt(interest?.totalInterest)}</span></td>
                           <td style={{ padding: "7px 10px", textAlign: "center", borderBottom: "1px solid #e5e7eb" }}><span className="mono">{interest ? `${(interest.cetMonthly * 100).toFixed(2)}%` : "—"}</span></td>
@@ -302,6 +316,10 @@ export default function Payments({ contracts, interestData, filters }: any) {
                                           const isPago = inst.status === "Pago";
                                           const isVencido = inst.status === "Vencido" || inst.status === "Vencida" || inst.status === "Atrasado";
                                           const rBg = isPago ? "#f0fdf4" : isVencido ? "#fff5f5" : "white";
+                                          
+                                          // 🚀 CORREÇÃO INTERNA: Corta decimais dentro das linhas abertas da sanfona
+                                          const cleanRowDays = Math.floor(Number(inst.daysOverdue ?? 0));
+
                                           return (
                                             <tr key={`inst-row-${inst.installmentId}`} style={{ background: rBg }} onMouseOver={e => (e.currentTarget.style.background = "#eff6ff")} onMouseOut={e => (e.currentTarget.style.background = rBg)}>
                                               <td style={{ textAlign: "center", padding: "5px 8px", fontFamily: "monospace", fontWeight: 700, borderBottom: "1px solid #e5e7eb" }}>{inst.installmentNumber}</td>
@@ -312,11 +330,14 @@ export default function Payments({ contracts, interestData, filters }: any) {
                                               <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#059669", fontWeight: 600, borderBottom: "1px solid #e5e7eb" }}>{inst.paidAmount > 0 ? fmt(inst.paidAmount) : "—"}</td>
                                               <td style={{ textAlign: "center", padding: "5px 8px", color: isPago ? "#059669" : "#6b7280", borderBottom: "1px solid #e5e7eb", fontWeight: 700 }}>{isPago ? "Sim" : "Não"}</td>
                                               <td style={{ textAlign: "center", padding: "5px 8px", color: isVencido ? "#dc2626" : "#6b7280", borderBottom: "1px solid #e5e7eb", fontWeight: 700 }}>{isVencido ? "Sim" : "Não"}</td>
-                                              <td style={{ textAlign: "center", padding: "5px 8px", fontFamily: "monospace", color: inst.daysOverdue > 0 ? "#dc2626" : "#6b7280", fontWeight: 700, borderBottom: "1px solid #e5e7eb" }}>{inst.daysOverdue > 0 ? inst.daysOverdue : "—"}</td>
+                                              
+                                              {/* Dias de atraso internos arredondados */}
+                                              <td style={{ textAlign: "center", padding: "5px 8px", fontFamily: "monospace", color: cleanRowDays > 0 ? "#dc2626" : "#6b7280", fontWeight: 700, borderBottom: "1px solid #e5e7eb" }}>{cleanRowDays > 0 ? cleanRowDays : "—"}</td>
+                                              
                                               <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#6b7280", borderBottom: "1px solid #e5e7eb" }}>{inst.ipcaCorrection > 0 ? fmtN(1 + inst.ipcaCorrection / inst.originalAmount, 4) : "1,00"}</td>
                                               <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#7c3aed", borderBottom: "1px solid #e5e7eb" }}>{inst.ipcaCorrection > 0 ? fmt(inst.ipcaCorrection) : "—"}</td>
                                               <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#ea580c", borderBottom: "1px solid #e5e7eb" }}>{inst.moraAmount > 0 ? fmt(inst.moraAmount) : "—"}</td>
-                                              <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#dc2626", borderBottom: "1px solid #e5e7eb" }}>{inst.penaltyAmount > 0 ? fmt(inst.penaltyAmount) : "—"}</td>
+                                              <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#dc2626", borderBottom: "1px solid #e5e7eb" }}>{inst.moraAmount > 0 ? fmt(inst.penaltyAmount) : "—"}</td>
                                               <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", fontWeight: 700, color: isVencido ? "#dc2626" : "#111827", borderBottom: "1px solid #e5e7eb" }}>{fmt(isPago ? inst.paidAmount : inst.updatedAmount)}</td>
                                               <td style={{ textAlign: "center", padding: "5px 8px", borderBottom: "1px solid #e5e7eb" }}><span style={{ fontSize: 9, fontWeight: 700, color: inst.isAccelerated ? "#dc2626" : "#6b7280" }}>{inst.isAccelerated ? "Sim" : "Não"}</span></td>
                                               <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#6b7280", borderBottom: "1px solid #e5e7eb" }}>{inst.isAccelerated ? fmt(inst.updatedAmount) : "—"}</td>
@@ -358,7 +379,7 @@ export default function Payments({ contracts, interestData, filters }: any) {
           </div>
         </div>
 
-        {/* MODAL DE BAIXA PROTEGIDA CONTRA CLIQUES ACIDENTAIS */}
+        {/* MODAL DE BAIXA PROTEGIDA */}
         {payOpen && (
           <div className="sigx-modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setPayOpen(false); }}>
             <div className="sigx-modal" style={{ maxWidth: 380 }} onMouseDown={e => e.stopPropagation()}>
@@ -379,7 +400,7 @@ export default function Payments({ contracts, interestData, filters }: any) {
                   <div>
                     <label className="sigx-label">Método</label>
                     <select className="sigx-input" value={payMethod} onChange={e => setPayMethod(e.target.value)}>
-                      {["PIX","TED","Boleto","Cheque","Dinheiro","Cartão"].map(m => <option key={m} value={m}>{m}</option>)}
+                      {["PIX","TED","Boleto","Check","Dinheiro","Cartão"].map(m => <option key={m} value={m}>{m}</option>)}
                     </select>
                   </div>
                 </div>

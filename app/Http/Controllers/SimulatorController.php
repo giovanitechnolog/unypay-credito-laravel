@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 
 class SimulatorController extends Controller
 {
@@ -25,26 +26,27 @@ class SimulatorController extends Controller
             'totalInterest'     => 'required|numeric'
         ]);
 
+        // Ajustado de CamelCase para snake_case para bater com as colunas reais do MySQL
         DB::table('loan_simulations')->insert([
-            'userId'            => auth()->id(),
-            'clientName'        => $request->input('clientName'),
-            'clientDocument'    => $request->input('clientDocument'),
-            'personType'        => $request->input('personType', 'PF'),
-            'calcMode'          => $request->input('mode'),
+            'user_id'            => Auth::id(), 
+            'client_name'        => $request->input('clientName'),
+            'client_document'    => $request->input('clientDocument'),
+            'person_type'        => $request->input('personType', 'PF'),
+            'calc_mode'          => $request->input('mode'),
             'principal'          => $request->input('principal'),
-            'monthlyRate'       => $request->input('monthlyRate', 0),
-            'installmentCount'  => $request->input('installmentCount'),
-            'installmentAmount' => $request->input('installmentAmount'),
-            'firstDueDate'     => $request->input('firstDueDate'),
-            'tacValue'          => $request->input('tac', 0),
-            'iofValue'          => $request->input('iof', 0),
-            'financedTotal'     => $request->input('financedTotal'),
-            'totalPayable'      => $request->input('totalPayable'),
-            'totalInterest'     => $request->input('totalInterest'),
-            'cetMonthly'        => $request->input('cetMonthly', 0),
-            'cetAnnual'         => $request->input('cetAnnual', 0),
-            'createdAt'         => now(),
-            'updatedAt'         => now()
+            'monthly_rate'       => $request->input('monthlyRate', 0),
+            'installment_count'  => $request->input('installmentCount'),
+            'installment_amount' => $request->input('installmentAmount'),
+            'first_due_date'     => $request->input('firstDueDate'),
+            'tac_value'          => $request->input('tac', 0),
+            'iof_value'          => $request->input('iof', 0),
+            'financed_total'     => $request->input('financedTotal'),
+            'total_payable'      => $request->input('totalPayable'),
+            'total_interest'     => $request->input('totalInterest'),
+            'cet_monthly'        => $request->input('cetMonthly', 0),
+            'cet_annual'         => $request->input('cetAnnual', 0),
+            'created_at'         => now(),
+            'updated_at'         => now()
         ]);
 
         return redirect()->back()->with('flash', [
@@ -53,8 +55,7 @@ class SimulatorController extends Controller
     }
 
     /**
-     * ── NOVO MÉTODO ──
-     * Lista o histórico completo de simulações e injeta os clientes cadastrados para o modal
+     * ── HISTÓRICO AJUSTADO ──
      */
     public function history()
     {
@@ -69,6 +70,7 @@ class SimulatorController extends Controller
             ->orderBy('name', 'asc')
             ->get();
 
+        // 🚀 CORREÇÃO DO VITE: Apontando exatamente para 'SimulationHistory' (no singular)
         return Inertia::render('SimulationHistory', [
             'simulations' => $simulations,
             'clients'     => $clients
@@ -76,7 +78,6 @@ class SimulatorController extends Controller
     }
 
     /**
-     * ── NOVO MÉTODO ──
      * Exclui um registro do histórico
      */
     public function delete($id)
@@ -89,8 +90,7 @@ class SimulatorController extends Controller
     }
 
     /**
-     * ── NOVO MÉTODO ──
-     * Converte a simulação salva em um Contrato Real na base de dados (Regra de Ouro do Manus)
+     * Converte a simulação salva em um Contrato Real na base de dados
      */
     public function convertToContract(Request $request, $id)
     {
@@ -106,7 +106,7 @@ class SimulatorController extends Controller
             return redirect()->back()->withErrors(['error' => 'Simulação não encontrada.']);
         }
 
-        // 1. Cria o registro do Contrato principal seguindo a estrutura do Manus
+        // Cria o registro do Contrato principal seguindo a estrutura do Manus
         $contractId = DB::table('contracts')->insertGetId([
             'code'           => $request->input('code'),
             'name'           => $request->input('contractName'),
@@ -114,14 +114,12 @@ class SimulatorController extends Controller
             'contract_date'  => $request->input('contractDate'),
             'client_id'      => $request->input('clientId'),
             'principal'      => $sim->principal,
-            'financed_total' => $sim->financedTotal,
-            'total_payable'  => $sim->totalPayable,
-            'calc_mode'      => $sim->calcMode,
+            'financed_total' => $sim->financed_total ?? $sim->financedTotal,
+            'total_payable'  => $sim->total_payable ?? $sim->totalPayable,
+            'calc_mode'      => $sim->calc_mode ?? $sim->calcMode,
             'created_at'     => now(),
             'updated_at'     => now()
         ]);
-
-        // Nota: A lógica original do Manus gera as parcelas (installments) automáticas aqui se necessário.
 
         return redirect()->route('simulator.history')->with('flash', [
             'success' => "Contrato '{$request->input('contractName')}' gerado com sucesso a partir da simulação!"
