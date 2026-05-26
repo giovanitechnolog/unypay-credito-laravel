@@ -31,9 +31,9 @@ export default function UsersTable({ users, loading, currentUserId, onEdit, onDe
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
+            <Th style={{ width: 64 }}>Foto</Th>
             <Th>Nome</Th>
             <Th>E-mail</Th>
-            <Th>Perfil</Th>
             <Th>Último acesso</Th>
             <Th style={{ width: 100, textAlign: "right" }}>Ações</Th>
           </tr>
@@ -42,26 +42,12 @@ export default function UsersTable({ users, loading, currentUserId, onEdit, onDe
           {users.map((u) => (
             <tr key={u.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
               <Td>
+                <Avatar name={u.name} photoUrl={u.photoUrl} />
+              </Td>
+              <Td>
                 <strong style={{ color: "#111827" }}>{u.name}</strong>
               </Td>
               <Td>{u.email}</Td>
-              <Td>
-                <span
-                  style={{
-                    display: "inline-block",
-                    padding: "2px 8px",
-                    borderRadius: 999,
-                    background: u.role === "admin" ? "#eff6ff" : "#f3f4f6",
-                    color: u.role === "admin" ? "#1d4ed8" : "#4b5563",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: 0.4,
-                  }}
-                >
-                  {u.role}
-                </span>
-              </Td>
               <Td>{formatDate(u.lastSignedIn)}</Td>
               <Td style={{ textAlign: "right" }}>
                 <button onClick={() => onEdit(u)} title="Editar" style={iconActionBtn}>
@@ -84,6 +70,29 @@ export default function UsersTable({ users, loading, currentUserId, onEdit, onDe
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function Avatar({ name, photoUrl }: { name: string; photoUrl?: string | null }) {
+  const initial = (name?.trim()?.charAt(0) || "U").toUpperCase();
+  return (
+    <div
+      style={{
+        width: 36,
+        height: 36,
+        borderRadius: "50%",
+        background: photoUrl ? `center / cover no-repeat url(${photoUrl})` : "#1e2139",
+        color: "white",
+        fontWeight: 700,
+        fontSize: 13,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+      }}
+    >
+      {!photoUrl && initial}
     </div>
   );
 }

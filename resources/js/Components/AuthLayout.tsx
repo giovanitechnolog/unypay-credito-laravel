@@ -35,27 +35,13 @@ export default function AuthLayout({ children, title, subtitle, pageTitle }: Aut
           className="hidden lg:flex"
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 8,
-                background: "oklch(60% .18 240)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
-                  stroke="white"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </div>
+            <img
+              src="/images/unypay-logo.png"
+              alt="UnyPay"
+              width={44}
+              height={44}
+              style={{ display: "block", width: 44, height: 44, objectFit: "contain", flexShrink: 0 }}
+            />
             <div>
               <div style={{ fontWeight: 700, fontSize: 18, lineHeight: 1.1 }}>UnyPay®</div>
               <div style={{ fontSize: 12, opacity: 0.7 }}>Sistema de Gestão de Crédito</div>

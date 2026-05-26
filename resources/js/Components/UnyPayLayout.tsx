@@ -3,7 +3,8 @@ import { Link, router, usePage } from "@inertiajs/react"; // Mudamos para os hoo
 import {
   LayoutDashboard, List, Users, FileText, Calculator,
   TrendingUp, ClipboardList, LogOut, Menu, Bell,
-  ChevronDown, Shield, CreditCard, ChevronRight, History
+  ChevronDown, Shield, CreditCard, ChevronRight, History,
+  UserCog
 } from "lucide-react";
 
 const NAV_SECTIONS = [
@@ -32,6 +33,12 @@ const NAV_SECTIONS = [
       //{ href: "/audit",  label: "Auditoria",      icon: ClipboardList },
     ],
   },
+  {
+    label: "GESTÃO INTERNA",
+    items: [
+      { href: "/usuarios", label: "Usuários", icon: UserCog },
+    ],
+  },
 ];
 
 function getPageTitle(url: string) {
@@ -47,6 +54,7 @@ function getPageTitle(url: string) {
   if (url === "/simulator") return "Simulador";
   if (url === "/serasa") return "Monitor Serasa";
   if (url === "/audit") return "Auditoria";
+  if (url === "/usuarios") return "Usuários";
   return "UnyPay® Crédito";
 }
 
@@ -64,6 +72,7 @@ function getBreadcrumb(url: string) {
   if (url === "/simulator") return [base, { label: "Simulador" }];
   if (url === "/serasa") return [base, { label: "Monitor Serasa" }];
   if (url === "/audit") return [base, { label: "Auditoria" }];
+  if (url === "/usuarios") return [base, { label: "Gestão Interna" }, { label: "Usuários" }];
   return [base];
 }
 
@@ -117,17 +126,13 @@ export default function UnyPayLayout({ children }: { children: React.ReactNode }
         gap: mini ? 0 : 10,
         justifyContent: mini ? "center" : "flex-start",
       }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: 6,
-          background: "oklch(55% .18 240)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          flexShrink: 0,
-        }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
-              stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </div>
+        <img
+          src="/images/unypay-logo.png"
+          alt="UnyPay"
+          width={32}
+          height={32}
+          style={{ display: "block", width: 32, height: 32, objectFit: "contain", flexShrink: 0 }}
+        />
         {!mini && (
           <div>
             <div style={{ fontWeight: 700, color: "white", fontSize: 14, lineHeight: 1.2 }}>UnyPay®</div>
@@ -180,8 +185,12 @@ export default function UnyPayLayout({ children }: { children: React.ReactNode }
             background: "oklch(55% .18 240)",
             display: "flex", alignItems: "center", justifyContent: "center",
             color: "white", fontWeight: 700, fontSize: 12, flexShrink: 0,
+            overflow: "hidden",
+            backgroundImage: user?.photoUrl ? `url(${user.photoUrl})` : undefined,
+            backgroundSize: "cover",
+            backgroundPosition: "center",
           }}>
-            {user?.name?.charAt(0)?.toUpperCase() ?? "U"}
+            {!user?.photoUrl && (user?.name?.charAt(0)?.toUpperCase() ?? "U")}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ color: "white", fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -267,8 +276,17 @@ export default function UnyPayLayout({ children }: { children: React.ReactNode }
               <Bell size={16} />
             </button>
             <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "4px 10px", border: "1px solid #e5e7eb", borderRadius: "6px", cursor: "pointer", background: "white" }}>
-              <div style={{ width: 24, height: 24, borderRadius: "50%", background: "#1e2139", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 700, fontSize: 10 }}>
-                {user?.name?.charAt(0)?.toUpperCase() ?? "U"}
+              <div style={{
+                width: 24, height: 24, borderRadius: "50%",
+                background: "#1e2139",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                color: "white", fontWeight: 700, fontSize: 10,
+                overflow: "hidden",
+                backgroundImage: user?.photoUrl ? `url(${user.photoUrl})` : undefined,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+              }}>
+                {!user?.photoUrl && (user?.name?.charAt(0)?.toUpperCase() ?? "U")}
               </div>
               <span style={{ fontSize: 12, fontWeight: 500, color: "#111827" }} className="hidden sm:inline">
                 {user?.name?.split(" ")[0] ?? "Usuário"}
