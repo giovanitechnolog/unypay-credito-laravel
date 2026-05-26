@@ -71,7 +71,7 @@ const COLS: Col[] = [
   { key:"creditor",      label:"Credor",       width:130, align:"left",   group:"fin"      },
   { key:"paid",          label:"Pagas",        width:58,  align:"center", group:"parcelas" },
   { key:"overdue",       label:"Em Aberto",    width:72,  align:"center", group:"parcelas" },
-  { key:"daysOverdue",   label:"Dias Atr.",    width:72,  align:"center", group:"parcelas" },
+  { key:"daysOverdue",   label:"Dias Atr.",    width:84,  align:"center", group:"parcelas" },
   { key:"toReceive",     label:"Vl. Receber",  width:120, align:"right",  group:"parcelas" },
   { key:"totalInterest", label:"Juros Totais", width:120, align:"right",  group:"juros"    },
   { key:"cetMonthly",    label:"CET Mensal",   width:84,  align:"center", group:"juros"    },
@@ -234,7 +234,6 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
     <UnyPayLayout>
       <Head title="Lançamentos — Carteira de Crédito" />
 
-      {/* ── ESCREVA O ESCOPO AQUI: div principal englobando tudo de ponta a ponta ── */}
       <div style={{ padding: "0px 24px 24px 24px", display:"flex", flexDirection:"column", height:"100%", overflow:"hidden" }}>
 
         {/* ══ HEADER ═════════════════════════════════════════════════════ */}
@@ -280,9 +279,9 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
           <div style={{ position:"relative", flex:"1 1 200px", maxWidth:280 }}>
             <Search size={13} style={{ position:"absolute", left:10, top:"50%", transform:"translateY(-50%)", color:"#9ca3af" }}/>
             <input style={{ width:"100%", padding:"6px 10px 6px 32px", border:"1px solid #d1d5db", borderRadius:6, fontSize:12, outline:"none", background:"white", color:"#374151" }}
-              placeholder="Buscar cliente, código, contrato..." value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />
+              placeholder="Buscar cliente, código, contrato..." value={search} onChange={e => { setSearch(e.target.value); handleFilterChange(e.target.value, statusFilter); setPage(1); }} />
           </div>
-          <select style={{ padding:"6px 10px", border:"1px solid #d1d5db", borderRadius:6, fontSize:12, background:"white", color:"#374151", cursor:"pointer" }} value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); }}>
+          <select style={{ padding:"6px 10px", border:"1px solid #d1d5db", borderRadius:6, fontSize:12, background:"white", color:"#374151", cursor:"pointer" }} value={statusFilter} onChange={e => { setStatusFilter(e.target.value); handleFilterChange(search, e.target.value); setPage(1); }}>
             <option value="Todos">Todos os status</option>
             <option value="Ativo">Ativo</option><option value="Inadimplente">Inadimplente</option><option value="Quitado">Quitado</option>
           </select>
@@ -326,6 +325,12 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
                   el.querySelectorAll<HTMLElement>("td[data-f]").forEach(td => { td.style.background = bg; });
                 };
 
+                // 🚀 MATEMÁTICA PROTEGIDA DO FRONT: Calcula de forma dinâmica para as novas linhas do Seeder
+                const totalInstallments = Number(c.installmentCount ?? 0);
+                const paidInstallmentsCount = Number(c.paidInstallmentsCount ?? 0);
+                const openInstallmentsCount = totalInstallments - paidInstallmentsCount;
+                const cleanDaysOverdue = Math.floor(Number(c.maxDaysOverdue ?? 0));
+
                 return (
                   <tr key={c.id} style={{ background:rowBg, transition:"background 0.07s" }} onMouseOver={e => setRowBg(e.currentTarget, "#eff6ff")} onMouseOut={e => setRowBg(e.currentTarget, rowBg)}>
                     
@@ -349,9 +354,15 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
                     <td style={sTd("center", false)}><span style={{ fontSize:11, color:"#6b7280", whiteSpace:"nowrap" }}>{fmtDate(c.contractDate)}</span></td>
                     <td style={sTd("left", true)}><span style={{ fontSize:11, color:"#6b7280", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", display:"block", maxWidth:125 }}>{c.creditor}</span></td>
 
-                    <td style={sTd("center", false)}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:13, fontWeight:800, color:"#059669" }}>{c.paidInstallmentsCount ?? 0}</span></td>
-                    <td style={sTd("center", false)}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:13, fontWeight:800, color:"#dc2626" }}>{c.overdueInstallmentsCount ?? 0}</span></td>
-                    <td style={{ ...sTd("center", false), fontFamily:"'IBM Plex Mono',monospace", fontSize:13, fontWeight:800, color:(c.maxDaysOverdue ?? 0) > 0 ? "#dc2626" : "#9ca3af" }}>{c.maxDaysOverdue ? `${c.maxDaysOverdue}d` : "—"}</td>
+                    {/* 🚀 MUDANÇA NAS PARCELAS DA GRID EXTERNA */}
+                    <td style={sTd("center", false)}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:13, fontWeight:800, color:"#059669" }}>{paidInstallmentsCount}</span></td>
+                    <td style={sTd("center", false)}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:13, fontWeight:800, color:"#dc2626" }}>{openInstallmentsCount}</span></td>
+                    
+                    {/* 🚀 MUDANÇA NA EXIBIÇÃO FORMATADA DE DIAS DE ATRASO SEM DÍZIMAS */}
+                    <td style={{ ...sTd("center", false), fontFamily:"'IBM Plex Mono',monospace", fontSize:12, fontWeight:800, color: cleanDaysOverdue > 0 ? "#dc2626" : "#059669" }}>
+                      {cleanDaysOverdue > 0 ? `${cleanDaysOverdue} dias` : "0 dias"}
+                    </td>
+
                     <td style={sTd("right", true)}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:13, fontWeight:700, color:"#ea580c" }}>{fmt(c.openBalanceTotal ?? (c.financedTotal - c.paidTotal))}</span></td>
 
                     <td style={sTd("right", false)}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:12, fontWeight:600, color:"#dc2626" }}>{fmt(c.interestAccumulated ?? 0)}</span></td>
@@ -420,7 +431,6 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
           </div>
         </div>
 
-      {/* ── FECHAMENTO DA DIV DE MARGEM: Colocado exatamente antes do Layout principal ── */}
       </div>
 
       {/* ══ MODAL PRICE ═════════════════════════════════════════════════ */}
@@ -464,7 +474,7 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
                     <tbody>
                       {priceData.rows.map((row: any, idx: number) => {
                         return (
-                          <tr key={row.n} style={{ background:idx%2===1?"#f9fafb":"white" }} onMouseOver={e=>(e.currentTarget.style.background="#eff6ff")} onMouseOut={e=>(e.currentTarget.style.background=idx%2===1?"#f9fafb":"white")}>
+                          <tr style={{ background:idx%2===1?"#f9fafb":"white" }} key={row.n} onMouseOver={e=>(e.currentTarget.style.background="#eff6ff")} onMouseOut={e=>(e.currentTarget.style.background=idx%2===1?"#f9fafb":"white")}>
                             <td style={{ textAlign:"center", padding:"5px 10px", fontFamily:"'IBM Plex Mono',monospace", fontSize:10, color:"#9ca3af", borderBottom:"1px solid #e5e7eb" }}>{String(row.n).padStart(2,"0")}</td>
                             <td style={{ padding:"5px 10px", fontSize:11, borderBottom:"1px solid #e5e7eb" }}>{fmtDate(row.dueDate)}</td>
                             <td style={{ textAlign:"right", padding:"5px 10px", fontFamily:"'IBM Plex Mono',monospace", fontWeight:700, borderBottom:"1px solid #e5e7eb" }}>{fmt(row.payment)}</td>

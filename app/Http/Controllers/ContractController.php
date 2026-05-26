@@ -10,6 +10,9 @@ class ContractController extends Controller
 {
     /**
      * Listagem Geral de Contratos (Chamada ao clicar no Menu Lateral)
+     */
+    /**
+     * Listagem Geral de Contratos (Chamada ao clicar no Menu Lateral)
      * Rota: http://127.0.0.1:8000/contracts
      */
     public function index(Request $request)
@@ -17,122 +20,83 @@ class ContractController extends Controller
         $search = $request->input('search');
         $statusFilter = $request->input('statusFilter');
 
-        // Cria a query base na tabela de contratos
-        $query = DB::table('contracts');
+        // 🚀 CORREÇÃO: Adicionado o LEFT JOIN com a tabela 'clients' para buscar o nome do cliente
+        $query = DB::table('contracts')
+            ->leftJoin('contract_types', 'contracts.contract_type_id', '=', 'contract_types.id')
+            ->leftJoin('clients', 'contracts.clientId', '=', 'clients.id') // 👈 Conexão com a tabela de clientes
+            ->select(
+                'contracts.*', 
+                'contract_types.name as contract_type_name',
+                'clients.name as client_name' // 👈 Trazendo o nome do cliente mapeado para o React
+            );
 
         // Aplica os filtros apenas se eles forem enviados de verdade pelo input
         if (!empty($search)) {
             $query->where(function($q) use ($search) {
-                // Tenta buscar de forma ampla contornando diferenças de snake_case / camelCase
-                $q->where('code', 'like', "%{$search}%")
-                  ->orWhere('contractName', 'like', "%{$search}%")
-                  ->orWhere('creditor', 'like', "%{$search}%");
+                $q->where('contracts.code', 'like', "%{$search}%")
+                  ->orWhere('contracts.contractName', 'like', "%{$search}%")
+                  ->orWhere('contracts.creditor', 'like', "%{$search}%")
+                  ->orWhere('clients.name', 'like', "%{$search}%"); // 👈 Permite buscar também pelo nome do cliente
             });
         }
 
         if (!empty($statusFilter) && $statusFilter !== 'Todos') {
-            $query->where('status', $statusFilter);
+            $query->where('contracts.status', $statusFilter);
         }
 
         // Puxa todos os registros reais salvos no banco de dados
-        $rawContracts = $query->orderBy('id', 'desc')->get();
-        
-        // Puxa os clientes para fazer o mapa de nomes idêntico ao método show
-        $clients = DB::table('clients')->get();
-        $clientMap = $clients->pluck('name', 'id')->toArray();
+        $rawContracts = $query->orderBy('contracts.id', 'desc')->get();
 
-        // ── MAPEAMENTO DE SUCESSO: Transforma a lista inteira no formato que o React lê ──
-        $processedContracts = $rawContracts->map(function($c) use ($clientMap) {
-            return [
-                'contract' => $c,
-                'clientName' => $clientMap[$c->clientId] ?? 'Consumidor não localizado'
-            ];
-        })->toArray(); // Converte em array plano limpo
+        // 🚀 2. Coleta os tipos cadastrados via Seeder para alimentar o Dropdown do front-end
+        $contractTypes = DB::table('contract_types')->orderBy('name', 'asc')->get();
 
-        // Puxa todos os clientes ordenados para alimentar o Modal de Criação de Títulos
-        $allClients = DB::table('clients')->select('id', 'name')->orderBy('name', 'asc')->get();
-
+        // Retorna a view injetando os dados estruturados no ecossistema do Inertia / React
         return Inertia::render('Contracts', [
-            'contracts' => $processedContracts, // Agora entrega a lista inteira no formato correto!
-            'clients' => $allClients,
-            'filters' => [
-                'search' => $search ?? '',
-                'statusFilter' => $statusFilter ?? 'Todos'
-            ]
+            'contracts'     => $rawContracts,
+            'contractTypes' => $contractTypes
         ]);
     }
 
     /**
-     * Detalhe de um contrato específico (Chamado pelo Olhinho do Lançamentos)
-     * Rota: http://127.0.0.1:8000/contracts/1
+     * API auxiliar de lookup de clientes
      */
-    public function show($id)
+    public function clientsLookup()
     {
-        $contract = DB::table('contracts')->where('id', $id)->first();
-        
-        if (!$contract) {
-            abort(404, 'Ativo contratual não localizado na base.');
-        }
+        $clients = DB::table('clients')
+            ->orderBy('name', 'asc')
+            ->get(['id', 'name', 'document']);
 
-        $client = DB::table('clients')->where('id', $contract->clientId)->first();
-        $allClients = DB::table('clients')->select('id', 'name')->orderBy('name', 'asc')->get();
-
-        // Envia o registro único usando o mesmo array do index
-        $singleContractCollection = [
-            [
-                'contract' => $contract,
-                'clientName' => $client ? $client->name : 'Consumidor não localizado'
-            ]
-        ];
-
-        return Inertia::render('Contracts', [
-            'contracts' => $singleContractCollection,
-            'clients' => $allClients,
-            'filters' => [
-                'search' => $contract->code,
-                'statusFilter' => 'Todos'
-            ]
-        ]);
+        return response()->json($clients);
     }
 
     /**
-     * Salva o novo instrumento contratual vindo do Modal (POST /contracts)
-     * Rota: http://127.0.0.1:8000/contracts
-     */
-    /**
-     * Salva o novo instrumento contratual vindo do Modal (POST /contracts)
-     */
-/**
-     * Salva o novo instrumento contratual vindo do Modal (POST /contracts)
+     * Salva o formulário original
      */
     public function store(Request $request)
     {
         $request->validate([
-            'clientId'          => 'required|numeric',
-            'code'              => 'required|string|max:50',
-            'contractName'      => 'required|string|max:255',
-            'creditor'          => 'required|string|max:255',
-            'principalAmount'   => 'required|numeric',
-            'installmentCount'  => 'required|numeric',
-            'installmentAmount' => 'required|numeric',
-            'status'            => 'required|string',
+            'contractName'     => 'required|string',
+            'code'             => 'required|string',
+            'clientId'         => 'required',
+            'contract_type_id' => 'required', // Validação adicionada para o tipo obrigatório
         ]);
 
+        // Grava no banco respeitando as colunas exatas do seu objeto emptyForm original
         DB::table('contracts')->insert([
             'clientId'                         => $request->input('clientId'),
             'code'                             => $request->input('code'),
             'contractName'                     => $request->input('contractName'),
             'creditor'                         => $request->input('creditor'),
-            'contractType'                     => $request->input('contractType', 'Mútuo/Confissão de dívida'),
+            'contract_type_id'                 => $request->input('contract_type_id'), // 🚀 5. Gravando o ID selecionado
             'contractDate'                     => $request->input('contractDate'),
             'status'                           => $request->input('status', 'Ativo'),
             'validated'                        => (bool)$request->input('validated', false),
-            'principalAmount'                  => $request->input('principalAmount'),
-            'financedTotal'                    => $request->input('financedTotal', $request->input('principalAmount')),
+            'principalAmount'                  => $request->input('principalAmount', 0),
+            'financedTotal'                    => $request->input('financedTotal', 0),
             'tacAmount'                        => $request->input('tacAmount', 0),
             'iofAmount'                        => $request->input('iofAmount', 0),
-            'installmentCount'                 => $request->input('installmentCount'),
-            'installmentAmount'                => $request->input('installmentAmount'),
+            'installmentCount'                 => $request->input('installmentCount', 12),
+            'installmentAmount'                => $request->input('installmentAmount', 0),
             'firstDueDate'                     => $request->input('firstDueDate'),
             'monthlyInterestRate'              => $request->input('monthlyInterestRate', 0),
             'moraRateMonthly'                  => $request->input('moraRateMonthly', 0.02),
@@ -149,14 +113,13 @@ class ContractController extends Controller
             'guarantors'                       => $request->input('guarantors'),
             'validationUrl'                    => $request->input('validationUrl'),
             'observations'                     => $request->input('observations'),
-            // 🔄 REMOVIDOS: created_at e updated_at para não conflitar com seu banco atual
         ]);
 
         return redirect()->route('contracts.index');
     }
 
     /**
-     * Remove ou expurga o contrato selecionado da auditoria
+     * Remove o contrato selecionado
      */
     public function destroy($id)
     {
