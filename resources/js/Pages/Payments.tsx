@@ -1,10 +1,17 @@
 import React, { useState, useMemo, useEffect, Fragment } from "react";
 import { Head, router } from "@inertiajs/react";
-import {
-  Search, Eye, ChevronDown, ChevronRight, X,
-  CheckCircle, DollarSign, RefreshCw, Minus, TrendingUp, TrendingDown
-} from "lucide-react";
+import { Search, ChevronDown, ChevronRight, X } from "lucide-react";
 import UnyPayLayout from "../Components/UnyPayLayout";
+import TableGroupBadges from "../Components/TableGroupBadges";
+import TableColumnPicker from "../Components/TableColumnPicker";
+import { useColumnVisibility } from "../hooks/useColumnVisibility";
+import {
+  PAYMENTS_COLUMNS,
+  PAYMENTS_GROUP_META,
+  PAYMENTS_GROUP_ORDER,
+  type PaymentsColumnDef,
+  type PaymentsColumnId,
+} from "../lib/paymentsColumns";
 
 const fmt = (v: number | string | null | undefined) => {
   const n = Number(v ?? 0);
@@ -19,13 +26,42 @@ const fmtDate = (d?: string | null) => {
 
 const fmtN = (v: number, dec = 2) => v.toFixed(dec).replace(".", ",");
 
+// ── estilos compactos compartilhados ───────────────────────────────────────
+const headerCellStyle: React.CSSProperties = {
+  background: "#f1f5f9",
+  color: "#334155",
+  padding: "5px 7px",
+  fontSize: 9,
+  fontWeight: 700,
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+  whiteSpace: "nowrap",
+  borderBottom: "2px solid #cbd5e1",
+};
+
+const tdBase: React.CSSProperties = {
+  padding: "3px 7px",
+  borderBottom: "1px solid #f1f5f9",
+  fontSize: 11,
+  verticalAlign: "middle",
+};
+const tdNum: React.CSSProperties = { ...tdBase, fontFamily: "'IBM Plex Mono', monospace", textAlign: "right", fontSize: 11 };
+const tdCenter: React.CSSProperties = { ...tdBase, textAlign: "center" };
+
+// largura da coluna especial de chevron
+const CHEVRON_WIDTH = 28;
+
+const PAGE_SIZES = [20, 50, 100];
+
 export default function Payments({ contracts, interestData, filters }: any) {
   const [search, setSearch] = useState(filters?.search || "");
   const [statusFilter, setStatusFilter] = useState(filters?.statusFilter || "Todos");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [schedule, setSchedule] = useState<any>(null);
   const [schedLoading, setSchedLoading] = useState(false);
-  
+
   const [payOpen, setPayOpen] = useState(false);
   const [payInstId, setPayInstId] = useState<number | null>(null);
   const [payAmount, setPayAmount] = useState("");
@@ -33,25 +69,46 @@ export default function Payments({ contracts, interestData, filters }: any) {
   const [payMethod, setPayMethod] = useState("PIX");
   const [baseDate] = useState(new Date().toISOString().slice(0, 10));
 
+  // ── Visibilidade de colunas (persistida no localStorage) ───────────────
+  const {
+    visibleIds, toggleColumn, setColumnsVisible, resetDefaults,
+  } = useColumnVisibility<PaymentsColumnId>(
+    "unypay.payments.columns.v1",
+    PAYMENTS_COLUMNS,
+  );
+
+  const visibleOrdered: PaymentsColumnDef[] = useMemo(
+    () => PAYMENTS_COLUMNS.filter((c) => visibleIds.has(c.id)),
+    [visibleIds],
+  );
+
+  // sticky offsets (esquerda)
+  const stickyOffsets = useMemo(() => {
+    const offsets = new Map<PaymentsColumnId, number>();
+    let acc = CHEVRON_WIDTH; // chevron column sempre antes
+    for (const col of visibleOrdered) {
+      if (col.sticky) {
+        offsets.set(col.id, acc);
+        acc += col.width;
+      }
+    }
+    return offsets;
+  }, [visibleOrdered]);
+
   useEffect(() => {
     if (expandedId) {
       setSchedLoading(true);
       fetch(`/api/payments/schedule/${expandedId}?baseDate=${baseDate}`)
         .then(res => res.json())
-        .then(data => {
-          setSchedule(data);
-          setSchedLoading(false);
-        })
-        .catch(err => {
-          console.error(err);
-          setSchedLoading(false);
-        });
+        .then(data => { setSchedule(data); setSchedLoading(false); })
+        .catch(err => { console.error(err); setSchedLoading(false); });
     } else {
       setSchedule(null);
     }
-  }, [expandedId]);
+  }, [expandedId, baseDate]);
 
   const handleFilterChange = (newSearch: string, newStatus: string) => {
+    setPage(1);
     router.get("/payments", { search: newSearch, statusFilter: newStatus }, { preserveState: true, replace: true });
   };
 
@@ -92,11 +149,11 @@ export default function Payments({ contracts, interestData, filters }: any) {
     if (!payInstId || !expandedId) return;
 
     router.post("/api/payments/record", {
-      installmentId: payInstId,      
-      amount: parseFloat(payAmount),  
-      paidAt: payDate,                
-      method: payMethod,   
-      contractId: expandedId,          
+      installmentId: payInstId,
+      amount: parseFloat(payAmount),
+      paidAt: payDate,
+      method: payMethod,
+      contractId: expandedId,
     }, {
       preserveState: true,
       onSuccess: () => {
@@ -108,278 +165,347 @@ export default function Payments({ contracts, interestData, filters }: any) {
     });
   };
 
-  const STATUS_COLORS: Record<string, string> = {
-    "Ativo": "#059669", "Inadimplente": "#dc2626", "Quitado": "#2563eb", "Renegociado": "#7c3aed",
+  // ── células do corpo (data-driven) ─────────────────────────────────────
+  const renderCellContent = (col: PaymentsColumnDef, row: any): React.ReactNode => {
+    const contract = row.contract;
+    const interest = interestMap.get(contract.id);
+
+    switch (col.id) {
+      case "code":
+        return <span className="mono" style={{ fontSize: 10, fontWeight: 600, color: "#1e40af" }}>{contract.code}</span>;
+      case "client":
+        return (
+          <div style={{ maxWidth: col.width - 14, overflow: "hidden" }}>
+            <div style={{ fontWeight: 700, fontSize: 11, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {row.clientName}
+            </div>
+            <div style={{ fontSize: 9, color: "#6b7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {contract.contractName}
+            </div>
+          </div>
+        );
+      case "date":
+        return <span style={{ color: "#6b7280" }}>{fmtDate(contract.contractDate)}</span>;
+      case "creditor":
+        return <span style={{ color: "#6b7280" }}>{contract.creditor}</span>;
+      case "principal":
+        return <span className="mono" style={{ fontWeight: 700 }}>{fmt(contract.principalAmount)}</span>;
+      case "financed":
+        return <span className="mono" style={{ color: "#6b7280" }}>{fmt(contract.financedTotal)}</span>;
+      case "installments":
+        return <>{contract.installmentCount}×</>;
+      case "installmentAmt":
+        return <span className="mono">{fmt(contract.installmentAmount)}</span>;
+      case "paid": {
+        const paidCount = Number(interest?.paidInstallments ?? 0);
+        return <span className="mono" style={{ color: "#059669", fontWeight: 600 }}>{paidCount}</span>;
+      }
+      case "overdue": {
+        const totalInst = Number(contract.installmentCount ?? 0);
+        const paidCount = Number(interest?.paidInstallments ?? 0);
+        return <span className="mono" style={{ color: "#dc2626", fontWeight: 600 }}>{totalInst - paidCount}</span>;
+      }
+      case "daysOverdue": {
+        const cleanDays = Math.floor(Number(interest?.maxDaysOverdue ?? 0));
+        return (
+          <span className="mono" style={{ color: cleanDays > 0 ? "#dc2626" : "#059669", fontWeight: 600 }}>
+            {cleanDays > 0 ? `${cleanDays} dias` : "0 dias"}
+          </span>
+        );
+      }
+      case "toReceive":
+        return <span className="mono" style={{ color: "#2563eb", fontWeight: 600 }}>{fmt(interest?.remainingBalance)}</span>;
+      case "totalInterest":
+        return <span className="mono" style={{ color: "#dc2626", fontWeight: 600 }}>{fmt(interest?.totalInterest)}</span>;
+      case "cetMonthly":
+        return <span className="mono">{interest ? `${(interest.cetMonthly * 100).toFixed(2)}%` : "—"}</span>;
+      case "status":
+        return (
+          <span style={{
+            padding: "2px 6px", borderRadius: 4, fontSize: 9, fontWeight: 700, textTransform: "uppercase",
+            background: contract.status === "Ativo" ? "#d1fae5" : "#fee2e2",
+            color: contract.status === "Ativo" ? "#065f46" : "#991b1b",
+          }}>
+            {contract.status}
+          </span>
+        );
+      case "firstDue":
+        return <span style={{ color: "#6b7280" }}>{fmtDate(contract.firstDueDate)}</span>;
+      default:
+        return null;
+    }
   };
+
+  const isRightAligned = (col: PaymentsColumnDef) => col.align === "right";
+  const isCenterAligned = (col: PaymentsColumnDef) => col.align === "center";
+
+  // ── agrupamento dos cabeçalhos visíveis para a 1ª linha do thead ───────
+  const visibleGroupRuns = useMemo(() => {
+    const runs: { group: typeof PAYMENTS_GROUP_ORDER[number]; count: number }[] = [];
+    for (const col of visibleOrdered) {
+      const last = runs[runs.length - 1];
+      if (last && last.group === col.group) last.count += 1;
+      else runs.push({ group: col.group, count: 1 });
+    }
+    return runs;
+  }, [visibleOrdered]);
+
+  // ── Paginação (client-side sobre a lista vinda do servidor) ────────────
+  const totalRows = contracts?.length ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const paginated = useMemo(
+    () => (contracts ?? []).slice((page - 1) * pageSize, page * pageSize),
+    [contracts, page, pageSize],
+  );
 
   return (
     <UnyPayLayout>
       <Head title="Controle de Pagamentos" />
 
-      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#f8f9fa", padding: "0 24px 24px 24px" }}>
-        
-        {/* TÍTULO LIMPO */}
-        <div style={{ padding: "16px 0 10px 0", flexShrink: 0 }}>
+      <div style={{ padding: "12px 20px 16px 20px", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", gap: 12 }}>
+
+        {/* Cabeçalho */}
+        <div style={{ flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#111827" }}>Controle de Pagamentos</h1>
         </div>
 
-        {/* BARRA DE FILTROS */}
-        <div style={{ background: "white", border: "1px solid #d1d5db", borderBottom: "none", borderRadius: "8px 8px 0 0", padding: "10px 16px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", flexShrink: 0 }}>
-          <div style={{ position: "relative" }}>
-            <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#9ca3af" }} />
-            <input 
-              type="text" 
-              className="sigx-input" 
-              style={{ paddingLeft: 30, width: 260, fontSize: 12, height: 32 }} 
-              placeholder="Buscar cliente, código, contrato..." 
-              value={search} 
-              onChange={e => { setSearch(e.target.value); handleFilterChange(e.target.value, statusFilter); }} 
+        {/* Barra de filtros (esquerda: search + status + contagem | direita: badges + picker) */}
+        <div style={{
+          background: "white", border: "1px solid #e5e7eb", borderRadius: 6,
+          padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 auto", minWidth: 0 }}>
+            <div style={{ position: "relative", flexShrink: 0 }}>
+              <Search size={12} style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "#9ca3af" }} />
+              <input
+                type="text"
+                style={{ paddingLeft: 26, width: 260, fontSize: 11, height: 28, border: "1px solid #d1d5db", borderRadius: 6, outline: "none", color: "#374151" }}
+                placeholder="Buscar cliente, código, contrato..."
+                value={search}
+                onChange={e => { setSearch(e.target.value); handleFilterChange(e.target.value, statusFilter); }}
+              />
+            </div>
+            <select
+              style={{ width: 140, fontSize: 11, height: 28, background: "white", border: "1px solid #d1d5db", borderRadius: 6, color: "#374151", cursor: "pointer", flexShrink: 0 }}
+              value={statusFilter}
+              onChange={e => { setStatusFilter(e.target.value); handleFilterChange(search, e.target.value); }}
+            >
+              <option value="Todos">Todos os status</option>
+              <option value="Ativo">Ativo</option>
+              <option value="Inadimplente">Inadimplente</option>
+              <option value="Quitado">Quitado</option>
+            </select>
+            <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 500, flexShrink: 0 }}>{contracts?.length ?? 0} contratos</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+            <TableGroupBadges
+              allColumns={PAYMENTS_COLUMNS}
+              groupOrder={PAYMENTS_GROUP_ORDER}
+              groupMeta={PAYMENTS_GROUP_META}
+              visibleIds={visibleIds}
+              setColumnsVisible={setColumnsVisible}
+            />
+            <TableColumnPicker
+              allColumns={PAYMENTS_COLUMNS}
+              groupOrder={PAYMENTS_GROUP_ORDER}
+              groupMeta={PAYMENTS_GROUP_META}
+              visibleIds={visibleIds}
+              toggleColumn={toggleColumn}
+              setColumnsVisible={setColumnsVisible}
+              resetDefaults={resetDefaults}
             />
           </div>
-          <select 
-            className="sigx-input" 
-            style={{ width: 140, fontSize: 12, height: 32, background: "white" }} 
-            value={statusFilter} 
-            onChange={e => { setStatusFilter(e.target.value); handleFilterChange(search, e.target.value); }}
-          >
-            <option value="Todos">Todos os status</option>
-            <option value="Ativo">Ativo</option>
-            <option value="Inadimplente">Inadimplente</option>
-            <option value="Quitado">Quitado</option>
-          </select>
-          <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 500 }}>{contracts?.length ?? 0} contratos</span>
         </div>
 
-        {/* TABELA INTEGRAL */}
-        <div style={{ flex: 1, overflowY: "auto", paddingBottom: "16px" }}>
-          <div style={{ background: "white", border: "1px solid #d1d5db", borderRadius: "0 0 8px 8px", overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+        {/* Tabela (cresce + scroll interno) */}
+        <div style={{
+          flex: 1, minHeight: 0, display: "flex", flexDirection: "column",
+          border: "1px solid #e5e7eb", borderRadius: 6, overflow: "hidden", background: "white",
+        }}>
+          <div style={{ flex: 1, overflow: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11 }}>
+              <colgroup>
+                <col style={{ width: CHEVRON_WIDTH }} />
+                {visibleOrdered.map(col => <col key={col.id} style={{ width: col.width }} />)}
+              </colgroup>
+
               <thead>
-                <tr style={{ background: "#1a2035", color: "white" }}>
-                  <th style={{ width: 28, background: "#1a2035" }} />
-                  <th colSpan={4} style={{ background: "#1e3a5f", color: "white", textAlign: "center", padding: "5px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase" }}>IDENTIFICAÇÃO</th>
-                  <th colSpan={4} style={{ background: "#2d3a8c", color: "white", textAlign: "center", padding: "5px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase" }}>FINANCEIRO</th>
-                  <th colSpan={4} style={{ background: "#1a3a2a", color: "white", textAlign: "center", padding: "5px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase" }}>PARCELAS</th>
-                  <th colSpan={2} style={{ background: "#5f3d11", color: "white", textAlign: "center", padding: "5px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase" }}>JUROS</th>
-                  <th colSpan={2} style={{ background: "#11265f", color: "white", textAlign: "center", padding: "5px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase" }}>SITUAÇÃO</th>
+                {/* Linha 1 — grupos. A célula vazia (acima do chevron) usa a cor do
+                    primeiro grupo visível para manter alinhamento visual e altura. */}
+                <tr>
+                  {(() => {
+                    const firstGroup = visibleGroupRuns[0]?.group;
+                    const firstMeta = firstGroup ? PAYMENTS_GROUP_META[firstGroup] : null;
+                    return (
+                      <th
+                        aria-hidden="true"
+                        style={{
+                          background: firstMeta?.bg ?? "#1f2937",
+                          padding: "4px 8px",
+                          fontSize: 9,
+                          lineHeight: 1.2,
+                        }}
+                      />
+                    );
+                  })()}
+                  {visibleGroupRuns.map((run, i) => {
+                    const meta = PAYMENTS_GROUP_META[run.group];
+                    return (
+                      <th
+                        key={`${run.group}-${i}`}
+                        colSpan={run.count}
+                        style={{
+                          background: meta.bg, color: meta.color,
+                          textAlign: "center", padding: "4px 8px",
+                          fontSize: 9, fontWeight: 700, letterSpacing: "0.06em",
+                          textTransform: "uppercase",
+                          lineHeight: 1.2,
+                        }}
+                      >
+                        {meta.label}
+                      </th>
+                    );
+                  })}
                 </tr>
-                <tr style={{ background: "#202945", color: "rgba(255,255,255,0.9)" }}>
-                  <th style={{ width: 28 }} />
-                  <th style={{ padding: "6px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "left" }}>CÓD.</th>
-                  <th style={{ padding: "6px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "left" }}>CLIENTE</th>
-                  <th style={{ padding: "6px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "left" }}>DATA</th>
-                  <th style={{ padding: "6px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "left" }}>CREDOR</th>
-                  <th style={{ padding: "6px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "right" }}>PRINCIPAL</th>
-                  <th style={{ padding: "6px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "right" }}>FINANCIADO</th>
-                  <th style={{ padding: "6px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "center" }}>PARCELAS</th>
-                  <th style={{ padding: "6px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "right" }}>VL. PARCELA</th>
-                  <th style={{ padding: "6px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "center" }}>PAGAS</th>
-                  <th style={{ padding: "6px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "center" }}>EM ABERTO</th>
-                  <th style={{ padding: "6px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "center" }}>DIAS ATR.</th>
-                  <th style={{ padding: "6px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "right" }}>VL. RECEBER</th>
-                  <th style={{ padding: "6px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "right" }}>JUROS TOTAIS</th>
-                  <th style={{ padding: "6px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "center" }}>CET MENSAL</th>
-                  <th style={{ padding: "6px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "left" }}>STATUS</th>
-                  <th style={{ padding: "6px 10px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "left" }}>1º VENC.</th>
+                {/* Linha 2 — cabeçalhos */}
+                <tr>
+                  <th
+                    style={{
+                      ...headerCellStyle,
+                      position: "sticky", left: 0, zIndex: 3,
+                      width: CHEVRON_WIDTH,
+                    }}
+                  />
+                  {visibleOrdered.map(col => {
+                    const stickyStyle: React.CSSProperties = col.sticky
+                      ? { position: "sticky", left: stickyOffsets.get(col.id), zIndex: 2, background: "#f1f5f9" }
+                      : {};
+                    return (
+                      <th
+                        key={col.id}
+                        style={{
+                          ...headerCellStyle,
+                          textAlign: col.align,
+                          ...stickyStyle,
+                        }}
+                      >
+                        {col.label.toUpperCase()}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
-              <tbody>{contracts?.length === 0 ? (
-                  <tr><td colSpan={17} style={{ textAlign: "center", padding: 30, color: "#9ca3af" }}>Nenhum contrato ativo localizado.</td></tr>
+
+              <tbody>
+                {!contracts || contracts.length === 0 ? (
+                  <tr>
+                    <td colSpan={visibleOrdered.length + 1} style={{ textAlign: "center", padding: 30, color: "#9ca3af", fontSize: 12 }}>
+                      Nenhum contrato ativo localizado.
+                    </td>
+                  </tr>
                 ) : (
-                  contracts?.map(({ contract, clientName }: any, rowIdx: number) => {
-                    const interest = interestMap.get(contract.id);
-                    const isExpanded = expandedId === contract.id;
+                  paginated.map((row: any, rowIdx: number) => {
+                    const isExpanded = expandedId === row.contract.id;
                     const rowBg = rowIdx % 2 === 1 ? "#fafafa" : "white";
 
-                    const totalInstallments = Number(contract.installmentCount ?? 0);
-                    const paidInstallmentsCount = Number(interest?.paidInstallments ?? 0);
-                    const openInstallmentsCount = totalInstallments - paidInstallmentsCount;
-
-                    // 🚀 CORREÇÃO FRONTEND: Corta qualquer decimal dos dias usando Math.floor()
-                    const cleanDaysOverdue = Math.floor(Number(interest?.maxDaysOverdue ?? 0));
-
                     return (
-                      <Fragment key={`ct-wrapper-${contract.id}`}>
-                        <tr style={{ background: rowBg, cursor: "pointer" }} onClick={() => setExpandedId(isExpanded ? null : contract.id)} onMouseOver={e => (e.currentTarget.style.background = "#eff6ff")} onMouseOut={e => (e.currentTarget.style.background = rowBg)}>
-                          <td style={{ padding: "7px 8px", textAlign: "center", borderBottom: "1px solid #e5e7eb" }}>
-                            {isExpanded ? <ChevronDown size={13} style={{ color: "#2563eb" }} /> : <ChevronRight size={13} style={{ color: "#9ca3af" }} />}
+                      <Fragment key={`pay-${row.contract.id}`}>
+                        <tr
+                          style={{ background: rowBg, cursor: "pointer" }}
+                          onClick={() => setExpandedId(isExpanded ? null : row.contract.id)}
+                          onMouseOver={e => (e.currentTarget.style.background = "#eff6ff")}
+                          onMouseOut={e => (e.currentTarget.style.background = rowBg)}
+                        >
+                          <td style={{
+                            ...tdCenter,
+                            position: "sticky", left: 0, zIndex: 1, background: "inherit",
+                          }}>
+                            {isExpanded
+                              ? <ChevronDown size={12} style={{ color: "#2563eb" }} />
+                              : <ChevronRight size={12} style={{ color: "#9ca3af" }} />}
                           </td>
-                          <td style={{ padding: "7px 10px", borderBottom: "1px solid #e5e7eb" }}><span className="mono" style={{ fontSize: 11, fontWeight: 600, color: "#1e40af" }}>{contract.code}</span></td>
-                          <td style={{ padding: "7px 10px", borderBottom: "1px solid #e5e7eb", maxWidth: 160 }}>
-                            <div style={{ fontWeight: 700, fontSize: 12, color: "#111827" }}>{clientName}</div>
-                            <div style={{ fontSize: 9, color: "#6b7280" }}>{contract.contractName}</div>
-                          </td>
-                          <td style={{ padding: "7px 10px", color: "#6b7280", borderBottom: "1px solid #e5e7eb" }}>{fmtDate(contract.contractDate)}</td>
-                          <td style={{ padding: "7px 10px", color: "#6b7280", borderBottom: "1px solid #e5e7eb" }}>{contract.creditor}</td>
-                          <td style={{ padding: "7px 10px", textAlign: "right", borderBottom: "1px solid #e5e7eb" }}><span className="mono" style={{ fontWeight: 700 }}>{fmt(contract.principalAmount)}</span></td>
-                          <td style={{ padding: "7px 10px", textAlign: "right", borderBottom: "1px solid #e5e7eb" }}><span className="mono" style={{ color: "#6b7280" }}>{fmt(contract.financedTotal)}</span></td>
-                          <td style={{ padding: "7px 10px", textAlign: "center", borderBottom: "1px solid #e5e7eb" }}>{contract.installmentCount}×</td>
-                          <td style={{ padding: "7px 10px", textAlign: "right", borderBottom: "1px solid #e5e7eb" }}><span className="mono">{fmt(contract.installmentAmount)}</span></td>
-                          <td style={{ padding: "7px 10px", textAlign: "center", borderBottom: "1px solid #e5e7eb" }}><span className="mono" style={{ color: "#059669", fontWeight: 600 }}>{paidInstallmentsCount}</span></td>
-                          <td style={{ padding: "7px 10px", textAlign: "center", borderBottom: "1px solid #e5e7eb" }}><span className="mono" style={{ color: "#dc2626", fontWeight: 600 }}>{openInstallmentsCount}</span></td>
-                          
-                          {/* 🚀 CÉLULA ATUALIZADA: Renderiza os dias limpos formatados como inteiros */}
-                          <td style={{ padding: "7px 10px", textAlign: "center", borderBottom: "1px solid #e5e7eb" }}>
-                            <span className="mono" style={{ color: cleanDaysOverdue > 0 ? "#dc2626" : "#059669", fontWeight: 600 }}>
-                              {cleanDaysOverdue > 0 ? `${cleanDaysOverdue} dias` : "0 dias"}
-                            </span>
-                          </td>
-
-                          <td style={{ padding: "7px 10px", textAlign: "right", borderBottom: "1px solid #e5e7eb" }}><span className="mono" style={{ color: "#2563eb", fontWeight: 600 }}>{fmt(interest?.remainingBalance)}</span></td>
-                          <td style={{ padding: "7px 10px", textAlign: "right", borderBottom: "1px solid #e5e7eb" }}><span className="mono" style={{ color: "#dc2626", fontWeight: 600 }}>{fmt(interest?.totalInterest)}</span></td>
-                          <td style={{ padding: "7px 10px", textAlign: "center", borderBottom: "1px solid #e5e7eb" }}><span className="mono">{interest ? `${(interest.cetMonthly * 100).toFixed(2)}%` : "—"}</span></td>
-                          <td style={{ padding: "7px 10px", borderBottom: "1px solid #e5e7eb" }}><span style={{ padding: "3px 8px", borderRadius: 4, fontSize: 9, fontWeight: 700, textTransform: "uppercase", background: contract.status === "Ativo" ? "#d1fae5" : "#fee2e2", color: contract.status === "Ativo" ? "#065f46" : "#991b1b" }}>{contract.status}</span></td>
-                          <td style={{ padding: "7px 10px", color: "#6b7280", borderBottom: "1px solid #e5e7eb" }}>{fmtDate(contract.firstDueDate)}</td>
+                          {visibleOrdered.map(col => {
+                            const stickyStyle: React.CSSProperties = col.sticky
+                              ? { position: "sticky", left: stickyOffsets.get(col.id), zIndex: 1, background: "inherit" }
+                              : {};
+                            const base =
+                              isRightAligned(col) ? tdNum :
+                              isCenterAligned(col) ? tdCenter : tdBase;
+                            return (
+                              <td key={col.id} style={{ ...base, ...stickyStyle }}>
+                                {renderCellContent(col, row)}
+                              </td>
+                            );
+                          })}
                         </tr>
 
-                        {/* SUB-PAINEL SANFONADO DETALHADO DO CONTRATO */}
+                        {/* Sub-painel expandido (mantém comportamento original) */}
                         {isExpanded && (
-                          <tr key={`exp-${contract.id}`}>
-                            <td colSpan={17} style={{ padding: 0, borderBottom: "2px solid #1a2035" }}>
-                              <div style={{ background: "#f8f9fa", padding: "4px 0" }}>
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0, borderBottom: "1px solid #e5e7eb" }}>
-                                  
-                                  {/* Parâmetros */}
-                                  <div style={{ padding: 12, borderRight: "1px solid #e5e7eb" }}>
-                                    <div style={{ fontSize: 9, fontWeight: 700, color: "white", background: "#1a2035", padding: "4px 8px", marginBottom: 6, borderRadius: 3 }}>PARÂMETROS DO CONTRATO</div>
-                                    {[
-                                      { label: "Credor", value: contract.creditor },
-                                      { label: "Data base", value: fmtDate(contract.contractDate) },
-                                      { label: "Último IPCA", value: "20/05/2026" },
-                                      { label: "Data do contrato", value: fmtDate(contract.contractDate) },
-                                      { label: "Valor liberado", value: fmt(contract.principalAmount) },
-                                      { label: "Valor contrato", value: fmt(contract.financedTotal) },
-                                      { label: "Número de parcelas", value: String(contract.installmentCount) },
-                                      { label: "Juros mora a.m.", value: `${(Number(contract.moraRateMonthly) * 100).toFixed(2)}%` },
-                                      { label: "Multa", value: `${(Number(contract.penaltyRate) * 100).toFixed(2)}%` },
-                                      { label: "Base multa", value: contract.penaltyBaseType },
-                                      { label: "Honorários", value: `${(Number(contract.honoraryRate) * 100).toFixed(2)}%` },
-                                      { label: "Indexador", value: contract.correctionIndex },
-                                      { label: "Vencimento antecipado", value: contract.accelerates ? "SIM" : "NÃO" },
-                                    ].map(row => (
-                                      <div key={row.label} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px solid #f0f0f0", fontSize: 11 }}>
-                                        <span style={{ color: "#6b7280" }}>{row.label}</span>
-                                        <span style={{ fontWeight: 600, fontFamily: "monospace" }}>{row.value}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-
-                                  {/* Demonstrativo */}
-                                  <div style={{ padding: 12, borderRight: "1px solid #e5e7eb" }}>
-                                    <div style={{ fontSize: 9, fontWeight: 700, color: "white", background: "#1e3a5f", padding: "4px 8px", marginBottom: 6, borderRadius: 3 }}>PAINEL DO CONTRATO</div>
-                                    {schedTotals && [
-                                      { label: "Parcelas vencidas em aberto", value: String(schedTotals.parcVencidas), color: "#dc2626" },
-                                      { label: "Principal vencido", value: fmt((schedule?.schedule ?? []).filter((r: any) => r.status === "Vencido" || r.status === "Atrasado").reduce((s: number, r: any) => s + r.originalAmount, 0)), color: "#dc2626" },
-                                      { label: "Correção IPCA", value: fmt(schedTotals.totalIpca), color: "#7c3aed" },
-                                      { label: "Juros mora", value: fmt(schedTotals.totalMora), color: "#ea580c" },
-                                      { label: "Multa", value: fmt(schedTotals.totalMulta), color: "#dc2626" },
-                                      { label: "Total vencido updatedAmount", value: fmt(schedTotals.totalAtualizado), color: "#dc2626", bold: true },
-                                      { label: "Saldo vincendo acelerado", value: fmt(schedTotals.totalVencendoAcelerado), color: "#7c3aed" },
-                                      { label: "Total exigível sem honorários", value: fmt(schedTotals.totalExigivel), color: "#1e2139", bold: true },
-                                      { label: "Honorários contratuais", value: fmt(schedTotals.totalHonorarios), color: "#6b7280" },
-                                      { label: "Total exigível com honorários", value: fmt(schedTotals.totalExigivel + schedTotals.totalHonorarios), color: "#1e2139", bold: true },
-                                    ].map(row => (
-                                      <div key={row.label} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px solid #f0f0f0", fontSize: 11 }}>
-                                        <span style={{ color: "#6b7280" }}>{row.label}</span>
-                                        <span style={{ fontWeight: row.bold ? 800 : 600, color: row.color, fontFamily: "monospace" }}>{row.value}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-
-                                  {/* Cláusulas e Garantias */}
-                                  <div style={{ padding: 12 }}>
-                                    <div style={{ fontSize: 9, fontWeight: 700, color: "white", background: "#ea580c", padding: "4px 8px", marginBottom: 6, borderRadius: 3 }}>REGRA DE VENCIMENTO ANTECIPADO</div>
-                                    <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.5, background: "#fff", padding: 8, borderRadius: 4, border: "1px solid #e5e7eb", marginBottom: 12 }}>
-                                      {contract.accelerationRule || "Qualquer atraso gera vencimento antecipado da dívida, conforme cláusula 4.1; encargos da cláusula 2.2."}
-                                    </div>
-                                    <div style={{ fontSize: 9, fontWeight: 700, color: "white", background: "#7c3aed", padding: "4px 8px", marginBottom: 6, borderRadius: 3 }}>GARANTIAS / FIADORES</div>
-                                    <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.5, background: "#fff", padding: 8, borderRadius: 4, border: "1px solid #e5e7eb" }}>
-                                      {contract.guarantors || contract.guarantees || "Fiadores solidários identificados no instrumento regulamentar da dívida."}
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* CRONOGRAMA DE AUDITORIA INTERNA DA SANFONA */}
-                                {schedLoading ? (
-                                  <div style={{ padding: 16, textAlign: "center", fontSize: 12, color: "#6b7280" }}>Calculando indexadores e juros diários do banco...</div>
-                                ) : (
-                                  <div style={{ overflowX: "auto" }}>
-                                    <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11 }}>
-                                      <thead>
-                                        <tr style={{ background: "#2d3748", color: "white" }}>
-                                          {["PARCELA","VENCIMENTO","VALOR PARCELA","STATUS ORIGEM","DATA PAGAMENTO","TOTAL PAGO","PAGO?","ABERTA?","DIAS ATRASO","FATOR IPCA","CORREÇÃO IPCA","JUROS MORA","MULTA","TOTAL ATUALIZADO","VINCENDO ACELERADO?","VALOR VINCENDO ACELERADO","OBSERVAÇÃO"].map((h, i) => (
-                                            <th key={`th-inst-${i}`} style={{ background: i === 0 ? "#1a2035" : i < 6 ? "#1e3a5f" : i < 9 ? "#5f2d11" : i < 13 ? "#2a1a5f" : "#1a3a2a", color: "white", padding: "5px 8px", fontSize: 8, fontWeight: 700, textTransform: "uppercase", textAlign: ["VALOR PARCELA","TOTAL PAGO","FATOR IPCA","CORREÇÃO IPCA","JUROS MORA","MULTA","TOTAL ATUALIZADO","VALOR VINCENDO ACELERADO"].includes(h) ? "right" : "center", whiteSpace: "nowrap", borderRight: "1px solid rgba(255,255,255,0.1)" }}>{h}</th>
-                                          ))}
-                                        </tr>
-                                      </thead>
-                                      <tbody>{schedule?.schedule?.map((inst: any) => {
-                                          const isPago = inst.status === "Pago";
-                                          const isVencido = inst.status === "Vencido" || inst.status === "Vencida" || inst.status === "Atrasado";
-                                          const rBg = isPago ? "#f0fdf4" : isVencido ? "#fff5f5" : "white";
-                                          
-                                          // 🚀 CORREÇÃO INTERNA: Corta decimais dentro das linhas abertas da sanfona
-                                          const cleanRowDays = Math.floor(Number(inst.daysOverdue ?? 0));
-
-                                          return (
-                                            <tr key={`inst-row-${inst.installmentId}`} style={{ background: rBg }} onMouseOver={e => (e.currentTarget.style.background = "#eff6ff")} onMouseOut={e => (e.currentTarget.style.background = rBg)}>
-                                              <td style={{ textAlign: "center", padding: "5px 8px", fontFamily: "monospace", fontWeight: 700, borderBottom: "1px solid #e5e7eb" }}>{inst.installmentNumber}</td>
-                                              <td style={{ textAlign: "center", padding: "5px 8px", borderBottom: "1px solid #e5e7eb" }}>{fmtDate(inst.dueDate)}</td>
-                                              <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", borderBottom: "1px solid #e5e7eb" }}>{fmt(inst.originalAmount)}</td>
-                                              <td style={{ textAlign: "center", padding: "5px 8px", borderBottom: "1px solid #e5e7eb" }}><span style={{ fontSize: 9, fontWeight: 600, color: isPago ? "#059669" : "#dc2626" }}>{isPago ? "Pago" : "vencido"}</span></td>
-                                              <td style={{ textAlign: "center", padding: "5px 8px", color: "#059669", borderBottom: "1px solid #e5e7eb" }}>{inst.payments?.[0] ? fmtDate(inst.payments[0].paidAt) : "—"}</td>
-                                              <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#059669", fontWeight: 600, borderBottom: "1px solid #e5e7eb" }}>{inst.paidAmount > 0 ? fmt(inst.paidAmount) : "—"}</td>
-                                              <td style={{ textAlign: "center", padding: "5px 8px", color: isPago ? "#059669" : "#6b7280", borderBottom: "1px solid #e5e7eb", fontWeight: 700 }}>{isPago ? "Sim" : "Não"}</td>
-                                              <td style={{ textAlign: "center", padding: "5px 8px", color: isVencido ? "#dc2626" : "#6b7280", borderBottom: "1px solid #e5e7eb", fontWeight: 700 }}>{isVencido ? "Sim" : "Não"}</td>
-                                              
-                                              {/* Dias de atraso internos arredondados */}
-                                              <td style={{ textAlign: "center", padding: "5px 8px", fontFamily: "monospace", color: cleanRowDays > 0 ? "#dc2626" : "#6b7280", fontWeight: 700, borderBottom: "1px solid #e5e7eb" }}>{cleanRowDays > 0 ? cleanRowDays : "—"}</td>
-                                              
-                                              <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#6b7280", borderBottom: "1px solid #e5e7eb" }}>{inst.ipcaCorrection > 0 ? fmtN(1 + inst.ipcaCorrection / inst.originalAmount, 4) : "1,00"}</td>
-                                              <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#7c3aed", borderBottom: "1px solid #e5e7eb" }}>{inst.ipcaCorrection > 0 ? fmt(inst.ipcaCorrection) : "—"}</td>
-                                              <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#ea580c", borderBottom: "1px solid #e5e7eb" }}>{inst.moraAmount > 0 ? fmt(inst.moraAmount) : "—"}</td>
-                                              <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#dc2626", borderBottom: "1px solid #e5e7eb" }}>{inst.moraAmount > 0 ? fmt(inst.penaltyAmount) : "—"}</td>
-                                              <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", fontWeight: 700, color: isVencido ? "#dc2626" : "#111827", borderBottom: "1px solid #e5e7eb" }}>{fmt(isPago ? inst.paidAmount : inst.updatedAmount)}</td>
-                                              <td style={{ textAlign: "center", padding: "5px 8px", borderBottom: "1px solid #e5e7eb" }}><span style={{ fontSize: 9, fontWeight: 700, color: inst.isAccelerated ? "#dc2626" : "#6b7280" }}>{inst.isAccelerated ? "Sim" : "Não"}</span></td>
-                                              <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#6b7280", borderBottom: "1px solid #e5e7eb" }}>{inst.isAccelerated ? fmt(inst.updatedAmount) : "—"}</td>
-                                              <td style={{ padding: "5px 8px", borderBottom: "1px solid #e5e7eb", textAlign: "center" }}>
-                                                {!isPago && <button className="btn-primary" style={{ fontSize: 9, padding: "2px 8px", height: 20 }} onClick={e => { e.stopPropagation(); openPayment(inst.installmentId, inst.openBalance); }}>Pagar</button>}
-                                              </td>
-                                            </tr>
-                                          );
-                                        })}</tbody>
-                                      
-                                      {/* RODAPÉ FINANCEIRO CONSOLIDADO DA SANFONA */}
-                                      {schedTotals && (
-                                        <tfoot>
-                                          <tr style={{ background: "#1e2139", color: "white", fontWeight: 700 }}>
-                                            <td colSpan={2} style={{ padding: "6px 8px", fontSize: 10, textTransform: "uppercase" }}>TOTAL</td>
-                                            <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "monospace" }}>{fmt((schedule?.schedule ?? []).reduce((s: number, r: any) => s + r.originalAmount, 0))}</td>
-                                            <td colSpan={7} />
-                                            <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "monospace", color: "#c4b5fd" }}>{fmt(schedTotals.totalIpca)}</td>
-                                            <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "monospace", color: "#fca5a5" }}>{fmt(schedTotals.totalMora)}</td>
-                                            <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "monospace", color: "#fca5a5" }}>{fmt(schedTotals.totalMulta)}</td>
-                                            <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "monospace", color: "#86efac" }}>{fmt(schedTotals.totalAtualizado)}</td>
-                                            <td colSpan={2} style={{ textAlign: "right", padding: "6px 8px", fontFamily: "monospace", color: "#fca5a5" }}>{fmt(schedTotals.totalVencendoAcelerado)}</td>
-                                            <td />
-                                          </tr>
-                                        </tfoot>
-                                      )}
-                                    </table>
-                                  </div>
-                                )}
-                              </div>
+                          <tr key={`exp-${row.contract.id}`}>
+                            <td colSpan={visibleOrdered.length + 1} style={{ padding: 0, borderBottom: "2px solid #1a2035" }}>
+                              <ExpandedContractDetail
+                                contract={row.contract}
+                                schedule={schedule}
+                                schedTotals={schedTotals}
+                                schedLoading={schedLoading}
+                                openPayment={openPayment}
+                              />
                             </td>
                           </tr>
                         )}
                       </Fragment>
                     );
                   })
-                )}</tbody>
+                )}
+              </tbody>
             </table>
+          </div>
+
+          {/* Paginação */}
+          <div style={{
+            padding: "6px 12px", background: "#fafbfc", borderTop: "1px solid #e5e7eb",
+            display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, flexShrink: 0,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6b7280" }}>
+              <span>Exibir</span>
+              <select style={{ padding: "2px 6px", border: "1px solid #d1d5db", borderRadius: 4, fontSize: 11, background: "white" }} value={pageSize} onChange={e => { setPageSize(+e.target.value); setPage(1); }}>
+                {PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <span>por página</span>
+            </div>
+            <span style={{ fontSize: 11, color: "#6b7280" }}>
+              Mostrando {Math.min((page - 1) * pageSize + 1, totalRows)}–{Math.min(page * pageSize, totalRows)} de {totalRows}
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+              <button type="button" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+                style={{ padding: "3px 10px", border: "1px solid #d1d5db", borderRadius: 4, background: "white", fontSize: 11, cursor: page === 1 ? "not-allowed" : "pointer", color: page === 1 ? "#9ca3af" : "#374151" }}>
+                ← Anterior
+              </button>
+              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                const n = page <= 3 ? i + 1 : page - 2 + i;
+                if (n < 1 || n > totalPages) return null;
+                return (
+                  <button type="button" key={n} onClick={() => setPage(n)}
+                    style={{
+                      width: 28, height: 26, borderRadius: 4, border: "1px solid",
+                      fontSize: 11, background: n === page ? "#1a2035" : "white",
+                      color: n === page ? "white" : "#374151",
+                      borderColor: n === page ? "#1a2035" : "#d1d5db",
+                      fontWeight: n === page ? 700 : 400, cursor: "pointer"
+                    }}>
+                    {n}
+                  </button>
+                );
+              })}
+              <button type="button" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
+                style={{ padding: "3px 10px", border: "1px solid #d1d5db", borderRadius: 4, background: "white", fontSize: 11, cursor: page >= totalPages ? "not-allowed" : "pointer", color: page >= totalPages ? "#9ca3af" : "#374151" }}>
+                Próxima →
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* MODAL DE BAIXA PROTEGIDA */}
+        {/* Modal de baixa */}
         {payOpen && (
           <div className="sigx-modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setPayOpen(false); }}>
             <div className="sigx-modal" style={{ maxWidth: 380 }} onMouseDown={e => e.stopPropagation()}>
@@ -400,7 +526,7 @@ export default function Payments({ contracts, interestData, filters }: any) {
                   <div>
                     <label className="sigx-label">Método</label>
                     <select className="sigx-input" value={payMethod} onChange={e => setPayMethod(e.target.value)}>
-                      {["PIX","TED","Boleto","Check","Dinheiro","Cartão"].map(m => <option key={m} value={m}>{m}</option>)}
+                      {["PIX", "TED", "Boleto", "Cheque", "Dinheiro", "Cartão"].map(m => <option key={m} value={m}>{m}</option>)}
                     </select>
                   </div>
                 </div>
@@ -415,5 +541,171 @@ export default function Payments({ contracts, interestData, filters }: any) {
 
       </div>
     </UnyPayLayout>
+  );
+}
+
+// ── Sub-painel de detalhe do contrato (extraído para clareza) ─────────────
+interface ExpandedDetailProps {
+  contract: any;
+  schedule: any;
+  schedTotals: any;
+  schedLoading: boolean;
+  openPayment: (id: number, amount: number) => void;
+}
+
+function ExpandedContractDetail({ contract, schedule, schedTotals, schedLoading, openPayment }: ExpandedDetailProps) {
+  return (
+    <div style={{ background: "#f8f9fa", padding: "4px 0" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0, borderBottom: "1px solid #e5e7eb" }}>
+
+        {/* Parâmetros */}
+        <div style={{ padding: 12, borderRight: "1px solid #e5e7eb" }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: "white", background: "#1a2035", padding: "4px 8px", marginBottom: 6, borderRadius: 3 }}>
+            PARÂMETROS DO CONTRATO
+          </div>
+          {[
+            { label: "Credor", value: contract.creditor },
+            { label: "Data base", value: fmtDate(contract.contractDate) },
+            { label: "Último IPCA", value: "20/05/2026" },
+            { label: "Data do contrato", value: fmtDate(contract.contractDate) },
+            { label: "Valor liberado", value: fmt(contract.principalAmount) },
+            { label: "Valor contrato", value: fmt(contract.financedTotal) },
+            { label: "Número de parcelas", value: String(contract.installmentCount) },
+            { label: "Juros mora a.m.", value: `${(Number(contract.moraRateMonthly) * 100).toFixed(2)}%` },
+            { label: "Multa", value: `${(Number(contract.penaltyRate) * 100).toFixed(2)}%` },
+            { label: "Base multa", value: contract.penaltyBaseType },
+            { label: "Honorários", value: `${(Number(contract.honoraryRate) * 100).toFixed(2)}%` },
+            { label: "Indexador", value: contract.correctionIndex },
+            { label: "Vencimento antecipado", value: contract.accelerates ? "SIM" : "NÃO" },
+          ].map(row => (
+            <div key={row.label} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px solid #f0f0f0", fontSize: 11 }}>
+              <span style={{ color: "#6b7280" }}>{row.label}</span>
+              <span style={{ fontWeight: 600, fontFamily: "monospace" }}>{row.value}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Demonstrativo */}
+        <div style={{ padding: 12, borderRight: "1px solid #e5e7eb" }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: "white", background: "#1e3a5f", padding: "4px 8px", marginBottom: 6, borderRadius: 3 }}>
+            PAINEL DO CONTRATO
+          </div>
+          {schedTotals && [
+            { label: "Parcelas vencidas em aberto", value: String(schedTotals.parcVencidas), color: "#dc2626" },
+            { label: "Principal vencido", value: fmt((schedule?.schedule ?? []).filter((r: any) => r.status === "Vencido" || r.status === "Atrasado").reduce((s: number, r: any) => s + r.originalAmount, 0)), color: "#dc2626" },
+            { label: "Correção IPCA", value: fmt(schedTotals.totalIpca), color: "#7c3aed" },
+            { label: "Juros mora", value: fmt(schedTotals.totalMora), color: "#ea580c" },
+            { label: "Multa", value: fmt(schedTotals.totalMulta), color: "#dc2626" },
+            { label: "Total vencido updatedAmount", value: fmt(schedTotals.totalAtualizado), color: "#dc2626", bold: true },
+            { label: "Saldo vincendo acelerado", value: fmt(schedTotals.totalVencendoAcelerado), color: "#7c3aed" },
+            { label: "Total exigível sem honorários", value: fmt(schedTotals.totalExigivel), color: "#1e2139", bold: true },
+            { label: "Honorários contratuais", value: fmt(schedTotals.totalHonorarios), color: "#6b7280" },
+            { label: "Total exigível com honorários", value: fmt(schedTotals.totalExigivel + schedTotals.totalHonorarios), color: "#1e2139", bold: true },
+          ].map(row => (
+            <div key={row.label} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px solid #f0f0f0", fontSize: 11 }}>
+              <span style={{ color: "#6b7280" }}>{row.label}</span>
+              <span style={{ fontWeight: row.bold ? 800 : 600, color: row.color, fontFamily: "monospace" }}>{row.value}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Cláusulas e Garantias */}
+        <div style={{ padding: 12 }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: "white", background: "#ea580c", padding: "4px 8px", marginBottom: 6, borderRadius: 3 }}>
+            REGRA DE VENCIMENTO ANTECIPADO
+          </div>
+          <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.5, background: "#fff", padding: 8, borderRadius: 4, border: "1px solid #e5e7eb", marginBottom: 12 }}>
+            {contract.accelerationRule || "Qualquer atraso gera vencimento antecipado da dívida, conforme cláusula 4.1; encargos da cláusula 2.2."}
+          </div>
+          <div style={{ fontSize: 9, fontWeight: 700, color: "white", background: "#7c3aed", padding: "4px 8px", marginBottom: 6, borderRadius: 3 }}>
+            GARANTIAS / FIADORES
+          </div>
+          <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.5, background: "#fff", padding: 8, borderRadius: 4, border: "1px solid #e5e7eb" }}>
+            {contract.guarantors || contract.guarantees || "Fiadores solidários identificados no instrumento regulamentar da dívida."}
+          </div>
+        </div>
+      </div>
+
+      {/* Cronograma */}
+      {schedLoading ? (
+        <div style={{ padding: 16, textAlign: "center", fontSize: 12, color: "#6b7280" }}>
+          Calculando indexadores e juros diários do banco...
+        </div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11 }}>
+            <thead>
+              <tr style={{ background: "#2d3748", color: "white" }}>
+                {["PARCELA", "VENCIMENTO", "VALOR PARCELA", "STATUS ORIGEM", "DATA PAGAMENTO", "TOTAL PAGO", "PAGO?", "ABERTA?", "DIAS ATRASO", "FATOR IPCA", "CORREÇÃO IPCA", "JUROS MORA", "MULTA", "TOTAL ATUALIZADO", "VINCENDO ACELERADO?", "VALOR VINCENDO ACELERADO", "AÇÕES"].map((h, i) => (
+                  <th key={`th-inst-${i}`} style={{
+                    background: i === 0 ? "#1a2035" : i < 6 ? "#1e3a5f" : i < 9 ? "#5f2d11" : i < 13 ? "#2a1a5f" : "#1a3a2a",
+                    color: "white", padding: "5px 8px", fontSize: 8, fontWeight: 700, textTransform: "uppercase",
+                    textAlign: ["VALOR PARCELA", "TOTAL PAGO", "FATOR IPCA", "CORREÇÃO IPCA", "JUROS MORA", "MULTA", "TOTAL ATUALIZADO", "VALOR VINCENDO ACELERADO"].includes(h) ? "right" : "center",
+                    whiteSpace: "nowrap", borderRight: "1px solid rgba(255,255,255,0.1)",
+                  }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {schedule?.schedule?.map((inst: any) => {
+                const isPago = inst.status === "Pago";
+                const isVencido = inst.status === "Vencido" || inst.status === "Vencida" || inst.status === "Atrasado";
+                const rBg = isPago ? "#f0fdf4" : isVencido ? "#fff5f5" : "white";
+                const cleanRowDays = Math.floor(Number(inst.daysOverdue ?? 0));
+                return (
+                  <tr key={`inst-row-${inst.installmentId}`} style={{ background: rBg }} onMouseOver={e => (e.currentTarget.style.background = "#eff6ff")} onMouseOut={e => (e.currentTarget.style.background = rBg)}>
+                    <td style={{ textAlign: "center", padding: "5px 8px", fontFamily: "monospace", fontWeight: 700, borderBottom: "1px solid #e5e7eb" }}>{inst.installmentNumber}</td>
+                    <td style={{ textAlign: "center", padding: "5px 8px", borderBottom: "1px solid #e5e7eb" }}>{fmtDate(inst.dueDate)}</td>
+                    <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", borderBottom: "1px solid #e5e7eb" }}>{fmt(inst.originalAmount)}</td>
+                    <td style={{ textAlign: "center", padding: "5px 8px", borderBottom: "1px solid #e5e7eb" }}>
+                      <span style={{ fontSize: 9, fontWeight: 600, color: isPago ? "#059669" : "#dc2626" }}>{isPago ? "Pago" : "vencido"}</span>
+                    </td>
+                    <td style={{ textAlign: "center", padding: "5px 8px", color: "#059669", borderBottom: "1px solid #e5e7eb" }}>{inst.payments?.[0] ? fmtDate(inst.payments[0].paidAt) : "—"}</td>
+                    <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#059669", fontWeight: 600, borderBottom: "1px solid #e5e7eb" }}>{inst.paidAmount > 0 ? fmt(inst.paidAmount) : "—"}</td>
+                    <td style={{ textAlign: "center", padding: "5px 8px", color: isPago ? "#059669" : "#6b7280", borderBottom: "1px solid #e5e7eb", fontWeight: 700 }}>{isPago ? "Sim" : "Não"}</td>
+                    <td style={{ textAlign: "center", padding: "5px 8px", color: isVencido ? "#dc2626" : "#6b7280", borderBottom: "1px solid #e5e7eb", fontWeight: 700 }}>{isVencido ? "Sim" : "Não"}</td>
+                    <td style={{ textAlign: "center", padding: "5px 8px", fontFamily: "monospace", color: cleanRowDays > 0 ? "#dc2626" : "#6b7280", fontWeight: 700, borderBottom: "1px solid #e5e7eb" }}>
+                      {cleanRowDays > 0 ? cleanRowDays : "—"}
+                    </td>
+                    <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#6b7280", borderBottom: "1px solid #e5e7eb" }}>{inst.ipcaCorrection > 0 ? fmtN(1 + inst.ipcaCorrection / inst.originalAmount, 4) : "1,00"}</td>
+                    <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#7c3aed", borderBottom: "1px solid #e5e7eb" }}>{inst.ipcaCorrection > 0 ? fmt(inst.ipcaCorrection) : "—"}</td>
+                    <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#ea580c", borderBottom: "1px solid #e5e7eb" }}>{inst.moraAmount > 0 ? fmt(inst.moraAmount) : "—"}</td>
+                    <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#dc2626", borderBottom: "1px solid #e5e7eb" }}>{inst.penaltyAmount > 0 ? fmt(inst.penaltyAmount) : "—"}</td>
+                    <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", fontWeight: 700, color: isVencido ? "#dc2626" : "#111827", borderBottom: "1px solid #e5e7eb" }}>{fmt(isPago ? inst.paidAmount : inst.updatedAmount)}</td>
+                    <td style={{ textAlign: "center", padding: "5px 8px", borderBottom: "1px solid #e5e7eb" }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: inst.isAccelerated ? "#dc2626" : "#6b7280" }}>{inst.isAccelerated ? "Sim" : "Não"}</span>
+                    </td>
+                    <td style={{ textAlign: "right", padding: "5px 8px", fontFamily: "monospace", color: "#6b7280", borderBottom: "1px solid #e5e7eb" }}>{inst.isAccelerated ? fmt(inst.updatedAmount) : "—"}</td>
+                    <td style={{ padding: "5px 8px", borderBottom: "1px solid #e5e7eb", textAlign: "center" }}>
+                      {!isPago && (
+                        <button className="btn-primary" style={{ fontSize: 9, padding: "2px 8px", height: 20 }} onClick={e => { e.stopPropagation(); openPayment(inst.installmentId, inst.openBalance); }}>
+                          Pagar
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+
+            {schedTotals && (
+              <tfoot>
+                <tr style={{ background: "#1e2139", color: "white", fontWeight: 700 }}>
+                  <td colSpan={2} style={{ padding: "6px 8px", fontSize: 10, textTransform: "uppercase" }}>TOTAL</td>
+                  <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "monospace" }}>{fmt((schedule?.schedule ?? []).reduce((s: number, r: any) => s + r.originalAmount, 0))}</td>
+                  <td colSpan={7} />
+                  <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "monospace", color: "#c4b5fd" }}>{fmt(schedTotals.totalIpca)}</td>
+                  <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "monospace", color: "#fca5a5" }}>{fmt(schedTotals.totalMora)}</td>
+                  <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "monospace", color: "#fca5a5" }}>{fmt(schedTotals.totalMulta)}</td>
+                  <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "monospace", color: "#86efac" }}>{fmt(schedTotals.totalAtualizado)}</td>
+                  <td colSpan={2} style={{ textAlign: "right", padding: "6px 8px", fontFamily: "monospace", color: "#fca5a5" }}>{fmt(schedTotals.totalVencendoAcelerado)}</td>
+                  <td />
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
