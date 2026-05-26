@@ -41,9 +41,13 @@ export default function SimulationHistory() {
 
   const handleOpenConvert = (sim: any) => {
     setSelectedSim(sim);
+    // 🛠️ Recupera o nome correto respeitando o mapeamento snake_case do banco de dados
+    const currentClientName = sim.client_name ?? sim.clientName ?? "";
+
     setConvertForm({
       code: `SIM-${sim.id}-${new Date().getFullYear()}`,
-      contractName: sim.clientName ? `Financiamento - {sim.clientName}` : `Empréstimo de ${fmt(sim.principal)}`,
+      // 🛠️ Corrigido o uso de template literals de aspas simples para crases (``)
+      contractName: currentClientName ? `Financiamento - ${currentClientName}` : `Empréstimo de ${fmt(sim.principal)}`,
       creditor: "UnyPay® S.A.",
       contractDate: new Date().toISOString().slice(0, 10),
       clientId: "",
@@ -148,6 +152,9 @@ export default function SimulationHistory() {
                     const cetM = sim.cetMonthly ?? sim.cet_monthly ?? 0;
                     const instCount = sim.installmentCount ?? sim.installment_count ?? 0;
                     const created = sim.createdAt ?? sim.created_at;
+                    
+                    // 🚀 Captura inteligente do nome enviado na simulação
+                    const finalClientName = sim.client_name ?? sim.clientName;
 
                     return (
                       <tr key={sim.id} style={{ background: idx % 2 === 1 ? "#fafafa" : "white" }} onMouseOver={e => (e.currentTarget.style.background = "#eff6ff")} onMouseOut={e => (e.currentTarget.style.background = idx % 2 === 1 ? "#fafafa" : "white")}>
@@ -155,11 +162,11 @@ export default function SimulationHistory() {
                           {fmtDate(created)}
                         </td>
                         <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb" }}>
-                          {sim.clientName ? (
+                          {finalClientName ? (
                             <div>
-                              <div style={{ fontWeight: 600, fontSize: 12, color: "#111827" }}>{sim.clientName}</div>
-                              {sim.clientDocument && (
-                                <div style={{ fontSize: 10, color: "#6b7280", fontFamily: "monospace" }}>{sim.clientDocument}</div>
+                              <div style={{ fontWeight: 600, fontSize: 12, color: "#111827" }}>{finalClientName}</div>
+                              {(sim.client_document ?? sim.clientDocument) && (
+                                <div style={{ fontSize: 10, color: "#6b7280", fontFamily: "monospace" }}>{sim.client_document ?? sim.clientDocument}</div>
                               )}
                             </div>
                           ) : (
@@ -186,7 +193,7 @@ export default function SimulationHistory() {
                         <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", textAlign: "right", fontFamily: "monospace", color: "#1e40af", fontWeight: 600 }}>
                           {fmt(pmt)}
                         </td>
-                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", textAlign: "right", fontFamily: "monospace", color: "#dc2626", fontWeight: 600 }}>
+                        <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", textAlign: "right", fontFamily: "monospace", color: "#4b5563", fontWeight: 600 }}>
                           {fmt(totalInt)}
                         </td>
                         <td style={{ padding: "8px 10px", borderBottom: "1px solid #e5e7eb", textAlign: "center", fontFamily: "monospace", color: "#ea580c", fontWeight: 600 }}>
@@ -269,7 +276,7 @@ export default function SimulationHistory() {
 
                 </div>
                 <div style={{ padding: "10px 16px", background: "#f9fafb", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                  <button type="button" className="btn-secondary" onClick={() => setConvertOpen(false)} style={{ fontSize: 11 }}>Cancelar</button>
+                  <button type="button" className="btn-secondary" onClick={() => setOpen(false)} style={{ fontSize: 11 }}>Cancelar</button>
                   <button type="submit" className="btn-primary" style={{ fontSize: 11 }}>Criar Contrato Físico</button>
                 </div>
               </form>

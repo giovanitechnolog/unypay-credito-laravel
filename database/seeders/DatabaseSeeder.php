@@ -11,5 +11,15 @@ class DatabaseSeeder extends Seeder
         $this->call([
             AdminUserSeeder::class,
         ]);
+
+        $this->call([
+            ContractTypeSeeder::class,
+        ]);
+
+        $this->call([
+            ContractTypeSeeder::class, // Tipos (Mútuo, Consignado...)
+            LoadContractsDataSeeder::class, // 👈 Nova Linha Injetada Aqui!
+        ]);
+
     }
 }

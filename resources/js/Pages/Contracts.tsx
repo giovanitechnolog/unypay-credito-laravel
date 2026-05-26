@@ -19,6 +19,7 @@ const PAGE_SIZES = [20, 50, 100];
 
 const emptyForm = {
   clientId: 0, code: "", contractName: "", creditor: "UnyPay® S.A.",
+  contract_type_id: "", // 👈 1. Campo ID do Tipo injetado aqui para salvar perfeitamente
   contractType: "Mútuo/Confissão de dívida", contractDate: new Date().toISOString().slice(0, 10), status: "Ativo" as const,
   validated: false, principalAmount: 0, financedTotal: 0, tacAmount: 0, iofAmount: 0,
   installmentCount: 12, installmentAmount: 0, firstDueDate: "",
@@ -48,7 +49,8 @@ const TD = (align: "left"|"right"|"center" = "left"): React.CSSProperties => ({
   padding: "8px 10px", borderBottom: "1px solid #e5e7eb", textAlign: align, verticalAlign: "middle", fontSize: 12,
 });
 
-export default function Contracts({ contracts, clients, filters }: any) {
+// 👈 2. Recebendo contractTypes vindo do Controller na assinatura original
+export default function Contracts({ contracts, clients, contractTypes = [], filters }: any) {
   const [search, setSearch] = useState(filters?.search || "");
   const [statusFilter, setStatusFilter] = useState(filters?.statusFilter || "Todos");
   const [open, setOpen] = useState(false);
@@ -63,13 +65,12 @@ export default function Contracts({ contracts, clients, filters }: any) {
     router.get("/contracts", { search: newSearch, statusFilter: newStatus }, { preserveState: true, replace: true });
   };
 
- const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.clientId) { toast.error("Selecione o cliente vinculado."); return; }
     
-    // Envia exatamente para o endpoint POST '/contracts' mapeado no seu web.php
     router.post("/contracts", form, {
-      preserveState: false, // Força o Inertia a reidratar os estados com os dados novos do banco
+      preserveState: false,
       onSuccess: () => { 
         toast.success("Contrato gravado com sucesso!"); 
         setOpen(false); 
@@ -168,13 +169,14 @@ export default function Contracts({ contracts, clients, filters }: any) {
             <table style={{ width:"100%", borderCollapse:"separate", borderSpacing:0, fontSize:12, minWidth:900 }}>
               <thead>
                 <tr>
-                  <th colSpan={4} style={{ ...TH, textAlign:"center", background:"#1e3a5f", fontSize:9, letterSpacing:"0.08em", borderRight:"2px solid rgba(255,255,255,0.2)" }}>IDENTIFICAÇÃO</th>
+                  <th colSpan={5} style={{ ...TH, textAlign:"center", background:"#1e3a5f", fontSize:9, letterSpacing:"0.08em", borderRight:"2px solid rgba(255,255,255,0.2)" }}>IDENTIFICAÇÃO</th> {/* colSpan de 4 para 5 */}
                   <th colSpan={4} style={{ ...TH, textAlign:"center", background:"#2d3a8c", fontSize:9, letterSpacing:"0.08em", borderRight:"2px solid rgba(255,255,255,0.2)" }}>FINANCEIRO</th>
                   <th colSpan={4} style={{ ...TH, textAlign:"center", background:"#1e2139", fontSize:9, letterSpacing:"0.08em" }}>SITUAÇÃO</th>
                 </tr>
                 <tr>
                   <th onClick={() => doSort("code")} style={{ ...TH, cursor:"pointer", textAlign:"left", width:90 }}>CÓD. <SortIco col="code"/></th>
                   <th onClick={() => doSort("client")} style={{ ...TH, cursor:"pointer", textAlign:"left", minWidth:160 }}>CLIENTE <SortIco col="client"/></th>
+                  <th style={{ ...TH, textAlign:"left", minWidth:140 }}>TIPO CONTRATO</th> {/* 👈 3. Nova Coluna na Grid */}
                   <th style={{ ...TH, textAlign:"left", minWidth:180 }}>NOME DO CONTRATO</th>
                   <th style={{ ...TH, textAlign:"left", minWidth:120, borderRight:"2px solid rgba(255,255,255,0.2)" }}>CREDOR</th>
                   <th onClick={() => doSort("principal")} style={{ ...TH, cursor:"pointer", textAlign:"right" }}>PRINCIPAL <SortIco col="principal"/></th>
@@ -190,7 +192,7 @@ export default function Contracts({ contracts, clients, filters }: any) {
               <tbody>
                 {paginated.length === 0 ? (
                   <tr>
-                    <td colSpan={12} style={{ textAlign:"center", padding:48, color:"#9ca3af" }}>
+                    <td colSpan={13} style={{ textAlign:"center", padding:48, color:"#9ca3af" }}> {/* colSpan de 12 para 13 */}
                       <FileText size={32} style={{ margin:"0 auto 8px", display:"block", opacity:0.2 }}/> Nenhum contrato encontrado
                     </td>
                   </tr>
@@ -203,6 +205,14 @@ export default function Contracts({ contracts, clients, filters }: any) {
                       <tr key={contract.id} style={{ background:rowBg }} onMouseOver={e => (e.currentTarget.style.background = "#eff6ff")} onMouseOut={e => (e.currentTarget.style.background = rowBg)}>
                         <td style={TD()}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:11, color:"#6b7280", fontWeight:500 }}>{contract.code}</span></td>
                         <td style={TD()}><div style={{ fontWeight:700, fontSize:13, color:"#111827" }}>{item.clientName ?? item.client_name ?? "—"}</div></td>
+                        
+                        {/* 👈 4. Retorno do campo Tipo na Linha da Grid */}
+                        <td style={TD()}>
+                          <span style={{ fontSize: 11, padding: "3px 6px", background: "#f3f4f6", borderRadius: 4, fontWeight: 500, color: "#4b5563" }}>
+                            {contract.contract_type_name || "Não Informado"}
+                          </span>
+                        </td>
+
                         <td style={TD()}><span style={{ fontSize:12, color:"#374151" }}>{contract.contractName}</span></td>
                         <td style={{ ...TD(), borderRight:"2px solid #e5e7eb" }}><span style={{ fontSize:11, color:"#6b7280" }}>{contract.creditor}</span></td>
                         <td style={TD("right")}><span style={{ fontFamily:"'IBM Plex Mono',monospace", fontWeight:800, fontSize:13 }}>{fmt(contract.principalAmount)}</span></td>
@@ -246,7 +256,6 @@ export default function Contracts({ contracts, clients, filters }: any) {
         {open && (
             <div className="sigx-modal-overlay" 
               onMouseDown={e => { 
-                // Mudamos para onMouseDown para isolar cliques de arrasto de campos de texto
                 if (e.target === e.currentTarget) setOpen(false); 
               }}
             >
@@ -275,7 +284,18 @@ export default function Contracts({ contracts, clients, filters }: any) {
                       <div><label className="sigx-label">DATA DO CONTRATO</label><input type="date" className="sigx-input" value={form.contractDate} onChange={n("contractDate")}/></div>
                       <div style={{ gridColumn:"span 2" }}><label className="sigx-label">NOME DO CONTRATO *</label><input className="sigx-input" value={form.contractName} onChange={n("contractName")} required/></div>
                       <div><label className="sigx-label">CREDOR *</label><input className="sigx-input" value={form.creditor} onChange={n("creditor")} required/></div>
-                      <div><label className="sigx-label">TIPO DE CONTRATO</label><input className="sigx-input" value={form.contractType} onChange={n("contractType")}/></div>
+                      
+                      {/* 🚀 5. Trocado o input de texto original por um select dinâmico atrelado à Seeder */}
+                      <div>
+                        <label className="sigx-label">TIPO DE CONTRATO *</label>
+                        <select className="sigx-input" required value={form.contract_type_id} onChange={e => setForm(p => ({ ...p, contract_type_id: e.target.value }))}>
+                          <option value="">Selecione o Tipo...</option>
+                          {contractTypes.map((type: any) => (
+                            <option key={type.id} value={type.id}>{type.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
                       <div>
                         <label className="sigx-label">STATUS</label>
                         <select className="sigx-input" value={form.status} onChange={n("status") as any}>

@@ -52,26 +52,63 @@ class PaymentController extends Controller
             $maxDays = 0;
             $totalInterest = 0;
 
-            foreach ($overdueInstallments as $inst) {
-                $days = Carbon::parse($inst->dueDate)->diffInDays($baseDate);
-                if ($days > $maxDays) {
-                    $maxDays = $days;
-                }
-                
-                // Aplica os encargos da planilha do Manus sobre o valor original gravado na tabela
-                $original = (double)$inst->originalAmount;
-                $mora = $original * (($contract->moraRateMonthly ?? 0.02) / 30) * $days;
-                $multa = $original * ($contract->penaltyRate ?? 0.10);
-                $totalInterest += ($mora + $multa);
-            }
+            // Se existirem parcelas físicas no banco, calcula em cima delas
+            if ($installments->count() > 0) {
+                foreach ($overdueInstallments as $inst) {
+                    // Força o cálculo de dias de atraso a retornar um valor estritamente inteiro
+                    $days = (int)ceil(Carbon::parse($inst->dueDate)->diffInDays($baseDate, false));
+                    if ($days < 0) {
+                        $days = 0;
+                    }
 
-            $remainingBalance = $contract->financedTotal - $installments->where('status', 'Pago')->sum('originalAmount');
+                    if ($days > $maxDays) {
+                        $maxDays = $days;
+                    }
+                    
+                    $original = (double)$inst->originalAmount;
+                    $mora = $original * (($contract->moraRateMonthly ?? 0.02) / 30) * $days;
+                    $multa = $original * ($contract->penaltyRate ?? 0.10);
+                    $totalInterest += ($mora + $multa);
+                }
+
+                $remainingBalance = $installments->where('status', '!==', 'Pago')->sum('originalAmount');
+                $overdueCount = $overdueInstallments->count();
+            } else {
+                // FALLBACK MATEMÁTICO: Caso a tabela 'installments' esteja vazia para este contrato
+                $remainingBalance = (double)$contract->financedTotal;
+                
+                // Calcula os dias de atraso macros comparando a data do 1º Vencimento com o dia de hoje
+                if ($contract->firstDueDate) {
+                    $firstDue = Carbon::parse($contract->firstDueDate);
+                    if ($firstDue->isBefore($baseDate)) {
+                        $maxDays = (int)ceil($firstDue->diffInDays($baseDate, false));
+                        if ($maxDays < 0) {
+                            $maxDays = 0;
+                        }
+                        
+                        $overdueCount = 1; 
+                        
+                        $original = (double)$contract->installmentAmount;
+                        $mora = $original * (($contract->moraRateMonthly ?? 0.02) / 30) * $maxDays;
+                        $multa = $original * ($contract->penaltyRate ?? 0.10);
+                        $totalInterest = ($mora + $multa);
+                    } else {
+                        $maxDays = 0;
+                        $overdueCount = 0;
+                        $totalInterest = 0;
+                    }
+                } else {
+                    $maxDays = 0;
+                    $overdueCount = 0;
+                    $totalInterest = 0;
+                }
+            }
 
             return [
                 'contractId' => $contract->id,
                 'paidInstallments' => $paidCount,
-                'overdueInstallments' => $overdueInstallments->count(),
-                'maxDaysOverdue' => $maxDays,
+                'overdueInstallments' => $overdueCount, 
+                'maxDaysOverdue' => (int)$maxDays,           
                 'remainingBalance' => $remainingBalance,
                 'totalInterest' => $totalInterest,
                 'cetMonthly' => $contract->monthlyInterestRate > 0 ? (double)$contract->monthlyInterestRate : 0.025
@@ -95,30 +132,22 @@ class PaymentController extends Controller
         $contract = Contract::findOrFail($contractId);
         $baseDate = Carbon::parse($request->input('baseDate', now()->toDateString()));
         
-        // 1. Busca as parcelas reais salvas na tabela 'installments'
         $dbInstallments = DB::table('installments')
             ->where('contractId', $contractId)
             ->orderBy('installmentNumber', 'asc')
             ->get();
 
         $scheduleRows = [];
-        
-        // ── CORREÇÃO DE OURO AQUI: O laço SEMPRE vai rodar o número total do contrato (ex: 12x) ──
         $totalCount = (int)$contract->installmentCount;
         $firstDue = Carbon::parse($contract->firstDueDate ?? now()->toDateString());
 
         for ($i = 1; $i <= $totalCount; $i++) {
-            // Tenta achar se essa parcela específica (ex: #1, #2...) já existe gravada fisicamente
             $dbInst = $dbInstallments->where('installmentNumber', $i)->first();
             
-            // Se ela já existe no banco, herda a data e o valor real do banco. Se não, calcula o fallback.
             $dueDate = $dbInst ? Carbon::parse($dbInst->dueDate) : $firstDue->copy()->addMonths($i - 1);
             $originalAmount = $dbInst ? (double)$dbInst->originalAmount : (double)$contract->installmentAmount;
-            
-            // Se a parcela existe no banco, manda o ID real dela. Se não, manda o número da parcela ($i)
             $installmentIdForAction = $dbInst ? $dbInst->id : $i;
 
-            // Checa se existe recibo atrelado a ela na tabela 'payments'
             $paymentRow = null;
             if ($dbInst) {
                 $paymentRow = DB::table('payments')
@@ -126,12 +155,14 @@ class PaymentController extends Controller
                     ->first();
             }
 
-            // SÓ FICA VERDE se estiver marcada como 'Pago' no banco ou se houver recibo na tabela payments
             $isPago = ($dbInst && $dbInst->status === 'Pago') || !is_null($paymentRow);
             $isOverdue = !$isPago && $dueDate->isBefore($baseDate);
-            $daysOverdue = $isOverdue ? $dueDate->diffInDays($baseDate) : 0;
             
-            // Fórmulas de juros e multas da Planilha Manus aplicadas sobre o valor original
+            $daysOverdue = $isOverdue ? (int)ceil($dueDate->diffInDays($baseDate, false)) : 0;
+            if ($daysOverdue < 0) {
+                $daysOverdue = 0;
+            }
+            
             $moraRateDaily = ($contract->moraRateMonthly ?? 0.02) / 30;
             $moraAmount = $daysOverdue > 0 ? ($originalAmount * $moraRateDaily * $daysOverdue) : 0;
             $penaltyAmount = $daysOverdue > 0 ? ($originalAmount * ($contract->penaltyRate ?? 0.10)) : 0;
@@ -147,14 +178,14 @@ class PaymentController extends Controller
                 'status' => $isPago ? 'Pago' : ($isOverdue ? 'Vencido' : 'A vencer'),
                 'paidAmount' => $isPago ? (double)($paymentRow->amount ?? $originalAmount) : 0,
                 'openBalance' => $isPago ? 0 : $updatedAmount,
-                'daysOverdue' => $daysOverdue,
+                'daysOverdue' => (int)$daysOverdue,
                 'ipcaCorrection' => $isPago ? 0 : $ipcaCorrection,
                 'moraAmount' => $isPago ? 0 : $moraAmount,
                 'penaltyAmount' => $isPago ? 0 : $penaltyAmount,
                 'updatedAmount' => $isPago ? (double)($paymentRow->amount ?? $originalAmount) : $updatedAmount,
                 'isAccelerated' => $contract->accelerates && $isOverdue,
                 'payments' => $isPago ? [['paidAt' => $paymentRow->paidAt ?? $dueDate->toDateString()]] : []
-              ];
+            ];
         }
 
         $totalPaid = collect($scheduleRows)->where('status', 'Pago')->sum('paidAmount');
@@ -169,44 +200,33 @@ class PaymentController extends Controller
 
     public function recordPayment(Request $request)
     {
-        // 1. Removemos o 'exists:installments,id' temporariamente da validação rígida,
-        // pois a parcela pode precisar ser criada agora se for um fallback matemático.
         $request->validate([
-            'installmentId' => 'required', // Pode vir o ID real ou o número da parcela (fallback)
+            'installmentId' => 'required', 
             'amount' => 'required|numeric',
             'paidAt' => 'required|string|max:10',
             'method' => 'required|string',
-            'contractId' => 'nullable|integer' // Garantia extra caso precise criar a parcela
+            'contractId' => 'nullable|integer' 
         ]);
 
-        // Executa tudo dentro de uma transação para garantir consistência pura
         DB::transaction(function() use ($request) {
             $installmentId = $request->installmentId;
-
-            // 2. Checa se o ID enviado realmente existe na tabela 'installments'
             $installmentExists = DB::table('installments')->where('id', $installmentId)->exists();
 
-            // 3. Se NÃO existir (Cenário do Sebastião), nós criamos a parcela no banco agora!
             if (!$installmentExists) {
-                // Buscamos o contrato para herdar os valores base caso o front não mande tudo
-                $contractId = $request->contractId ?? DB::table('payments_fallback_helper')->where('id', $installmentId)->value('contractId'); 
-                
-                // Se não acharmos o contrato de forma direta, tentamos deduzir pelo escopo ou contexto.
-                // Como alternativa segura, criamos a linha na tabela 'installments' usando os dados atuais:
-                $contract = DB::table('contracts')->orderBy('id', 'desc')->first(); // Fallback seguro ou ajuste conforme seu app
+                $contractId = $request->contractId; 
+                $contract = DB::table('contracts')->orderBy('id', 'desc')->first(); 
                 
                 $newInstallmentId = DB::table('installments')->insertGetId([
                     'contractId'        => $contractId ?? $contract->id,
-                    'installmentNumber' => $request->installmentId, // O número temporário vira o número real
-                    'dueDate'           => $request->paidAt, // Assume a data base ou vencimento original
+                    'installmentNumber' => $request->installmentId, 
+                    'dueDate'           => $request->paidAt, 
                     'originalAmount'    => $request->amount,
-                    'status'            => 'Pago', // Já nasce paga!
+                    'status'            => 'Pago', 
                     'createdAt'         => now()
                 ]);
 
-                $installmentId = $newInstallmentId; // Atualiza a variável para vincular no recibo abaixo!
+                $installmentId = $newInstallmentId; 
             } else {
-                // Se a parcela já existia fisicamente, apenas atualiza o status dela para 'Pago'
                 DB::table('installments')
                     ->where('id', $installmentId)
                     ->update([
@@ -215,7 +235,6 @@ class PaymentController extends Controller
                     ]);
             }
             
-            // 4. Grava o histórico de baixa na tabela 'payments' vinculando ao ID correto
             DB::table('payments')->insert([
                 'installmentId' => $installmentId,
                 'amount'        => $request->amount,
@@ -223,7 +242,7 @@ class PaymentController extends Controller
                 'method'        => $request->method,
                 'recordedBy'    => \Illuminate\Support\Facades\Auth::check() ? \Illuminate\Support\Facades\Auth::user()->name : 'Sistema',
             ]);
-        });
+        }); // 🚀 CORREÇÃO: Fechamento correto da função anônima com });
 
         return redirect()->back();
     }

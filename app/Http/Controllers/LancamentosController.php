@@ -51,38 +51,77 @@ class LancamentosController extends Controller
             $paidTotal = 0;
             $overdueTotal = 0;
 
-            foreach ($contractInst as $inst) {
-                // Captura se há registro real de recebimento na tabela payments
-                $payment = $payments->where('installmentId', $inst->id)->first();
-                $isPago = ($inst->status === 'Pago') || !is_null($payment);
+            // 🚀 CORREÇÃO DA REGRA DE NEGÓCIO: Se houver parcelas físicas no banco, roda a esteira padrão
+            if ($contractInst->count() > 0) {
+                foreach ($contractInst as $inst) {
+                    $payment = $payments->where('installmentId', $inst->id)->first();
+                    $isPago = ($inst->status === 'Pago') || !is_null($payment);
 
-                if ($isPago) {
-                    $paidInstallmentsCount++;
-                    $paidTotal += (double)($payment->amount ?? $inst->originalAmount);
-                } else {
-                    $dueDate = Carbon::parse($inst->dueDate);
-                    
-                    if ($dueDate->isBefore($baseDate)) {
-                        $overdueInstallmentsCount++;
-                        $days = $dueDate->diffInDays($baseDate);
+                    if ($isPago) {
+                        $paidInstallmentsCount++;
+                        $paidTotal += (double)($payment->amount ?? $inst->originalAmount);
+                    } else {
+                        $dueDate = Carbon::parse($inst->dueDate);
                         
-                        if ($days > $maxDaysOverdue) {
-                            $maxDaysOverdue = $days;
+                        if ($dueDate->isBefore($baseDate)) {
+                            $overdueInstallmentsCount++;
+                            
+                            // Força o arredondamento de dias matemáticos como inteiros limpos
+                            $days = (int)ceil($dueDate->diffInDays($baseDate, false));
+                            if ($days < 0) $days = 0;
+                            
+                            if ($days > $maxDaysOverdue) {
+                                $maxDaysOverdue = $days;
+                            }
+
+                            $original = (double)$inst->originalAmount;
+                            $mora = $original * (($contract->moraRateMonthly ?? 0.02) / 30) * $days;
+                            $multa = $original * ($contract->penaltyRate ?? 0.10);
+                            
+                            $interestAccumulated += ($mora + $multa);
+                            $overdueTotal += ($original + $mora + $multa);
                         }
-
-                        // Aplicação matemática pura das taxas nativas salvas no contrato
-                        $original = (double)$inst->originalAmount;
-                        $mora = $original * (($contract->moraRateMonthly ?? 0.02) / 30) * $days;
-                        $multa = $original * ($contract->penaltyRate ?? 0.10);
-                        
-                        $interestAccumulated += ($mora + $multa);
-                        $overdueTotal += ($original + $mora + $multa);
                     }
                 }
+                $openBalanceTotal = max(0, (double)$contract->financedTotal - $paidTotal) + $interestAccumulated;
+            } else {
+                // 🚀 FALLBACK MATEMÁTICO: Se não houver parcelas na installments para este contrato ainda
+                $paidInstallmentsCount = 0;
+                $paidTotal = 0;
+                
+                // Calcula dias de atraso comparando o primeiro vencimento com a data atual
+                if ($contract->firstDueDate) {
+                    $firstDue = Carbon::parse($contract->firstDueDate);
+                    if ($firstDue->isBefore($baseDate)) {
+                        $maxDaysOverdue = (int)ceil($firstDue->diffInDays($baseDate, false));
+                        if ($maxDaysOverdue < 0) $maxDaysOverdue = 0;
+                        
+                        // Assume ao menos 1 parcela vencida para sinalizar visualmente
+                        $overdueInstallmentsCount = 1;
+                        
+                        $original = (double)$contract->installmentAmount;
+                        $mora = $original * (($contract->moraRateMonthly ?? 0.02) / 30) * $maxDaysOverdue;
+                        $multa = $original * ($contract->penaltyRate ?? 0.10);
+                        
+                        $interestAccumulated = $mora + $multa;
+                        $overdueTotal = $original + $interestAccumulated;
+                    } else {
+                        $maxDaysOverdue = 0;
+                        $overdueInstallmentsCount = 0;
+                        $interestAccumulated = 0;
+                        $overdueTotal = 0;
+                    }
+                } else {
+                    $maxDaysOverdue = 0;
+                    $overdueInstallmentsCount = 0;
+                    $interestAccumulated = 0;
+                    $overdueTotal = 0;
+                }
+                
+                $openBalanceTotal = (double)$contract->financedTotal + $interestAccumulated;
             }
 
             $financedTotal = (double)$contract->financedTotal;
-            $openBalanceTotal = max(0, $financedTotal - $paidTotal) + $interestAccumulated;
 
             return [
                 'id' => $contract->id,
@@ -102,10 +141,10 @@ class LancamentosController extends Controller
                 'moraRateMonthly' => (double)($contract->moraRateMonthly ?? 0.02),
                 'penaltyRate' => (double)($contract->penaltyRate ?? 0.10),
                 
-                // Variáveis calculadas que alimentam as colunas da planilha e os 5 cards
-                'paidInstallmentsCount' => $paidInstallmentsCount,
-                'overdueInstallmentsCount' => $overdueInstallmentsCount,
-                'maxDaysOverdue' => $maxDaysOverdue,
+                // Variáveis reajustadas para alimentar reativamente a grid
+                'paidInstallmentsCount' => (int)$paidInstallmentsCount,
+                'overdueInstallmentsCount' => (int)$overdueInstallmentsCount,
+                'maxDaysOverdue' => (int)$maxDaysOverdue,
                 'paidTotal' => $paidTotal,
                 'overdueTotal' => $overdueTotal,
                 'openBalanceTotal' => $openBalanceTotal,
