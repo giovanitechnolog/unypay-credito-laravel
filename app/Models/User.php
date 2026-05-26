@@ -11,11 +11,20 @@ class User extends Authenticatable
 {
     use Notifiable;
 
+    /**
+     * Este modelo usa colunas em camelCase (createdAt, updatedAt, lastSignedIn,
+     * openId, loginMethod, photo, etc.). Desabilitamos a conversão automática
+     * para snake_case usada pelos accessors do estilo Attribute, garantindo
+     * que `$appends = ['photoUrl']` resolva o método `photoUrl()` corretamente.
+     */
+    public static $snakeAttributes = false;
+
     protected $fillable = [
         'openId',
         'name',
         'email',
         'password',
+        'photo',
         'loginMethod',
         'role',
         'lastSignedIn',
@@ -26,6 +35,11 @@ class User extends Authenticatable
         'remember_token',
     ];
 
+    /**
+     * Sempre expõe a URL pública da foto no JSON, sem precisar montar no front.
+     */
+    protected $appends = ['photoUrl'];
+
     protected function casts(): array
     {
         return [
@@ -33,6 +47,25 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'lastSignedIn'      => 'datetime',
         ];
+    }
+
+    /**
+     * URL pública para exibir a foto na UI. Retorna null caso o usuário ainda
+     * não tenha foto cadastrada.
+     *
+     * Usamos um caminho host-relative (`/storage/...`) em vez de
+     * `Storage::disk('public')->url()` para que a foto seja servida pelo
+     * mesmo host/porta em que a aplicação está sendo acessada, independente
+     * do que estiver configurado em APP_URL.
+     */
+    protected function photoUrl(): Attribute
+    {
+        return Attribute::get(function () {
+            if (empty($this->photo)) {
+                return null;
+            }
+            return '/storage/' . ltrim($this->photo, '/');
+        });
     }
 
     /**
