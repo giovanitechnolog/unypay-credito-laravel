@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { Camera, User as UserIcon, X } from "lucide-react";
 import { api, extractFirstError } from "../../lib/api";
 import type { User, UserFormValues, UserRole } from "../../types/user";
 
@@ -16,9 +16,12 @@ const EMPTY: UserFormValues = {
   name: "",
   email: "",
   password: "",
-  password_confirmation: "",
   role: "admin",
+  photo: null,
 };
+
+const MAX_PHOTO_BYTES = 4 * 1024 * 1024; // 4MB
+const ACCEPTED_MIMES = ["image/jpeg", "image/png", "image/webp"];
 
 export default function UserFormModal({
   open,
@@ -32,6 +35,8 @@ export default function UserFormModal({
   const [values, setValues] = useState<UserFormValues>(EMPTY);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -40,15 +45,26 @@ export default function UserFormModal({
           name: user.name ?? "",
           email: user.email ?? "",
           password: "",
-          password_confirmation: "",
           role: (user.role as UserRole) ?? "admin",
+          photo: null,
         });
+        setPhotoPreview(user.photoUrl ?? null);
       } else {
         setValues(EMPTY);
+        setPhotoPreview(null);
       }
       setErrors({});
     }
   }, [open, user]);
+
+  // Libera object URLs criados localmente para evitar memory leak.
+  useEffect(() => {
+    return () => {
+      if (photoPreview && photoPreview.startsWith("blob:")) {
+        URL.revokeObjectURL(photoPreview);
+      }
+    };
+  }, [photoPreview]);
 
   if (!open) return null;
 
@@ -56,31 +72,65 @@ export default function UserFormModal({
     setValues((v) => ({ ...v, [key]: value }));
   }
 
+  function handlePhotoChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!ACCEPTED_MIMES.includes(file.type)) {
+      setErrors((prev) => ({ ...prev, photo: "Formatos aceitos: JPG, PNG ou WEBP." }));
+      return;
+    }
+    if (file.size > MAX_PHOTO_BYTES) {
+      setErrors((prev) => ({ ...prev, photo: "A imagem deve ter no máximo 4MB." }));
+      return;
+    }
+
+    setErrors((prev) => {
+      const { photo, ...rest } = prev;
+      return rest;
+    });
+    setField("photo", file);
+
+    if (photoPreview && photoPreview.startsWith("blob:")) {
+      URL.revokeObjectURL(photoPreview);
+    }
+    setPhotoPreview(URL.createObjectURL(file));
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
+
+    // Validação client-side da foto obrigatória no create.
+    if (!isEdit && !values.photo) {
+      setErrors((prev) => ({ ...prev, photo: "Envie a foto do usuário." }));
+      return;
+    }
+
     setSubmitting(true);
     setErrors({});
 
     try {
-      const payload: Partial<UserFormValues> = {
-        name: values.name,
-        email: values.email,
-        role: values.role,
-      };
-      // Senha: obrigatória no create; opcional no update.
+      const formData = new FormData();
+      formData.append("name", values.name);
+      formData.append("email", values.email);
+      formData.append("role", values.role);
       if (values.password) {
-        payload.password = values.password;
-        payload.password_confirmation = values.password_confirmation;
+        formData.append("password", values.password);
+      }
+      if (values.photo) {
+        formData.append("photo", values.photo);
       }
 
       if (isEdit && user) {
-        await api.put(`/api/users/${user.id}`, payload);
+        // Method spoofing para suportar upload de arquivo via PUT.
+        formData.append("_method", "PUT");
+        await api.post(`/api/users/${user.id}`, formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
         onSuccess("Usuário atualizado com sucesso.");
       } else {
-        await api.post(`/api/users`, {
-          ...payload,
-          password: values.password,
-          password_confirmation: values.password_confirmation,
+        await api.post(`/api/users`, formData, {
+          headers: { "Content-Type": "multipart/form-data" },
         });
         onSuccess("Usuário criado com sucesso.");
       }
@@ -130,6 +180,72 @@ export default function UserFormModal({
         </header>
 
         <form onSubmit={submit} style={{ padding: 20 }}>
+          {/* Upload da foto */}
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
+            <div style={{ position: "relative" }}>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                style={{
+                  width: 96,
+                  height: 96,
+                  borderRadius: "50%",
+                  background: photoPreview ? `center / cover no-repeat url(${photoPreview})` : "#f3f4f6",
+                  border: errors.photo ? "2px solid #b91c1c" : "2px solid #e5e7eb",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#9ca3af",
+                  padding: 0,
+                }}
+                aria-label="Selecionar foto"
+                title="Selecionar foto"
+              >
+                {!photoPreview && <UserIcon size={36} />}
+              </button>
+              <span
+                style={{
+                  position: "absolute",
+                  bottom: 0,
+                  right: 0,
+                  width: 28,
+                  height: 28,
+                  borderRadius: "50%",
+                  background: "#1e2139",
+                  color: "white",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  border: "2px solid white",
+                  pointerEvents: "none",
+                }}
+              >
+                <Camera size={14} />
+              </span>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handlePhotoChange}
+                style={{ display: "none" }}
+              />
+            </div>
+          </div>
+
+          {errors.photo && (
+            <p style={{ textAlign: "center", marginTop: -10, marginBottom: 12, fontSize: 12, color: "#b91c1c" }}>
+              {errors.photo}
+            </p>
+          )}
+          {!errors.photo && (
+            <p style={{ textAlign: "center", marginTop: -10, marginBottom: 12, fontSize: 11, color: "#9ca3af" }}>
+              {isEdit
+                ? "Clique para trocar a foto (JPG, PNG ou WEBP — até 4MB)."
+                : "Foto obrigatória — JPG, PNG ou WEBP, até 4MB."}
+            </p>
+          )}
+
           <Field label="Nome" error={errors.name}>
             <input
               type="text"
@@ -150,17 +266,6 @@ export default function UserFormModal({
             />
           </Field>
 
-          <Field label="Perfil" error={errors.role} style={{ marginTop: 14 }}>
-            <select
-              value={values.role}
-              onChange={(e) => setField("role", e.target.value as UserRole)}
-              style={inputStyle}
-            >
-              <option value="admin">Administrador</option>
-              <option value="user">Usuário</option>
-            </select>
-          </Field>
-
           <Field
             label={isEdit ? "Nova senha (opcional)" : "Senha"}
             error={errors.password}
@@ -172,27 +277,11 @@ export default function UserFormModal({
               value={values.password}
               onChange={(e) => setField("password", e.target.value)}
               required={!isEdit}
+              minLength={isEdit && !values.password ? undefined : 8}
               style={inputStyle}
               autoComplete="new-password"
             />
           </Field>
-
-          {(values.password || !isEdit) && (
-            <Field
-              label="Confirmar senha"
-              error={errors.password_confirmation}
-              style={{ marginTop: 14 }}
-            >
-              <input
-                type="password"
-                value={values.password_confirmation}
-                onChange={(e) => setField("password_confirmation", e.target.value)}
-                required={!isEdit || !!values.password}
-                style={inputStyle}
-                autoComplete="new-password"
-              />
-            </Field>
-          )}
 
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 24 }}>
             <button type="button" onClick={onClose} style={secondaryBtn}>

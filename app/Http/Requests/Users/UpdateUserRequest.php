@@ -24,7 +24,9 @@ class UpdateUserRequest extends FormRequest
                 Rule::unique('users', 'email')->ignore($userId),
             ],
             // Senha opcional na edição — só atualiza se vier preenchida.
-            'password' => ['nullable', 'string', 'confirmed', Password::min(8)],
+            'password' => ['nullable', 'string', Password::min(8)],
+            // Foto opcional na edição — mantém a atual se não enviar.
+            'photo'    => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
             'role'     => ['sometimes', 'in:user,admin'],
         ];
     }
@@ -32,9 +34,11 @@ class UpdateUserRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'email.unique'       => 'Já existe um usuário com este e-mail.',
-            'password.confirmed' => 'A confirmação de senha não confere.',
-            'password.min'       => 'A senha deve ter no mínimo 8 caracteres.',
+            'email.unique' => 'Já existe um usuário com este e-mail.',
+            'password.min' => 'A senha deve ter no mínimo 8 caracteres.',
+            'photo.image'  => 'O arquivo enviado precisa ser uma imagem.',
+            'photo.mimes'  => 'Formatos aceitos: JPG, JPEG, PNG ou WEBP.',
+            'photo.max'    => 'A imagem deve ter no máximo 4MB.',
         ];
     }
 }
