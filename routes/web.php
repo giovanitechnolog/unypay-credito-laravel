@@ -55,10 +55,15 @@ Route::middleware('auth')->group(function () {
     Route::delete('/clients/{id}', [ClientController::class, 'destroy'])->name('clients.destroy');
 
     // Contratos
-    Route::get   ('/contracts',      [ContractController::class, 'index'])->name('contracts.index');
-    Route::post  ('/contracts',      [ContractController::class, 'store'])->name('contracts.store');
-    Route::get   ('/contracts/{id}', [ContractController::class, 'show'])->name('contracts.show');
-    Route::delete('/contracts/{id}', [ContractController::class, 'destroy'])->name('contracts.destroy');
+    Route::get   ('/contracts',                  [ContractController::class, 'index'])->name('contracts.index');
+    Route::post  ('/contracts',                  [ContractController::class, 'store'])->name('contracts.store');
+    Route::get   ('/contracts/{id}',             [ContractController::class, 'show'])->name('contracts.show');
+    Route::post  ('/contracts/{id}',             [ContractController::class, 'update'])->name('contracts.update');
+    Route::put   ('/contracts/{id}',             [ContractController::class, 'update']);
+    Route::post  ('/contracts/{id}/cancel',      [ContractController::class, 'cancel'])->name('contracts.cancel');
+    Route::post  ('/contracts/{id}/reactivate',  [ContractController::class, 'reactivate'])->name('contracts.reactivate');
+    Route::get   ('/contracts/{id}/pdf',         [ContractController::class, 'viewPdf'])->name('contracts.pdf');
+    Route::delete('/contracts/{id}',             [ContractController::class, 'destroy'])->name('contracts.destroy');
 
     // API auxiliar de lookup de clientes
     Route::get('/api/clients-lookup', [ContractController::class, 'clientsLookup']);
