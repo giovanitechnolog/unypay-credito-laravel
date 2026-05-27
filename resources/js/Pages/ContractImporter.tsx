@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Head } from "@inertiajs/react";
-import { Upload, FileSpreadsheet, AlertTriangle, CheckCircle2, X, Loader2, ShieldAlert, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
+import { Head, router } from "@inertiajs/react";
+import { Upload, FileSpreadsheet, AlertTriangle, X, Loader2, ShieldAlert, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
 
@@ -78,8 +78,21 @@ export default function ContractImporter({ recent }: { recent: ImportRecord[] })
             toast.success("Importação concluída com sucesso!");
           } else {
             setPhase("failed");
-            toast.error("A importação terminou com falha.");
+            // Procura o erro fatal (mensagem amigável vinda do job) para
+            // exibir no toast em vez da mensagem genérica.
+            const fatal = Array.isArray(data.errors)
+              ? data.errors.find((er: ImportError) => er.severity === "fatal")
+              : null;
+            toast.error(fatal?.message || "A importação terminou com falha.");
           }
+          // Libera o arquivo selecionado automaticamente: o usuário não
+          // precisa clicar em "Nova importação" só para subir outro arquivo.
+          // O resumo e os erros continuam visíveis até o próximo upload.
+          setFile(null);
+          if (inputRef.current) inputRef.current.value = "";
+          // Recarrega só a prop `recent` (Inertia partial reload) para o
+          // novo registro aparecer na tabela sem reload completo da página.
+          router.reload({ only: ["recent"] });
           return; // para o polling
         }
         setTimeout(tick, 2000);
@@ -206,11 +219,6 @@ export default function ContractImporter({ recent }: { recent: ImportRecord[] })
                 : <Upload size={14}/>}
               Importar agora
             </button>
-            {(phase === "done" || phase === "failed" || phase === "validated") && (
-              <button onClick={reset} style={btnStyle("ghost")}>
-                <RefreshCw size={13}/> Nova importação
-              </button>
-            )}
           </div>
         </Card>
 

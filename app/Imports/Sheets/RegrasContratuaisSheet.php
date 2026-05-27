@@ -193,6 +193,13 @@ class RegrasContratuaisSheet implements OnEachRow, WithHeadingRow, WithStartRow,
         } else {
             $this->import->successRows += 1;
         }
+        // Em modo validação a ContractImport recebida é uma instância "fantasma"
+        // (nunca salva no banco). Persistir aqui criaria um registro indesejado
+        // na tabela "Importações recentes". O resumo da validação é devolvido
+        // direto via Registry, sem precisar tocar o banco.
+        if ($this->dryRun) {
+            return;
+        }
         $this->import->saveQuietly();
     }
 
