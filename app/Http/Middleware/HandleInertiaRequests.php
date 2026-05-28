@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use Illuminate\Http\Request;
 use Inertia\Middleware;
+use App\Models\UserColumnPreference; // 🚀 IMPORTAÇÃO DO MODEL
 
 class HandleInertiaRequests extends Middleware
 {
@@ -19,17 +20,26 @@ class HandleInertiaRequests extends Middleware
      */
     public function share(Request $request): array
     {
+        $user = $request->user();
+
         return array_merge(parent::share($request), [
             'auth' => [
-                'user' => $request->user()
+                'user' => $user
                     ? [
-                        'id'       => $request->user()->id,
-                        'name'     => $request->user()->name,
-                        'email'    => $request->user()->email,
-                        'role'     => $request->user()->role,
-                        'photoUrl' => $request->user()->photoUrl,
+                        'id'       => $user->id,
+                        'name'     => $user->name,
+                        'email'    => $user->email,
+                        'role'     => $user->role,
+                        'photoUrl' => $user->photoUrl,
                     ]
                     : null,
+                
+                // 🚀 INJEÇÃO DE PREFERÊNCIAS: Se o usuário estiver logado, busca as colunas e injeta globalmente
+                'columnPreferences' => $user
+                    ? UserColumnPreference::where('user_id', $user->id)
+                        ->pluck('visible_columns', 'table_key')
+                        ->toArray()
+                    : [],
             ],
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),

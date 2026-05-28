@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -36,7 +37,7 @@ class UserController extends Controller
         $perPage = (int) $request->input('per_page', 25);
 
         $query = User::query()
-            ->select(['id', 'name', 'email', 'photo', 'role', 'createdAt', 'updatedAt', 'lastSignedIn']);
+            ->select(['id', 'created_by', 'name', 'email', 'photo', 'role', 'createdAt', 'updatedAt', 'lastSignedIn']);
 
         if ($search !== '') {
             $query->where(function ($q) use ($search) {
@@ -58,6 +59,7 @@ class UserController extends Controller
         $photoPath = $request->file('photo')->store(self::PHOTO_DIR, 'public');
 
         $user = User::create([
+            'created_by'   => Auth::id(), // 🚀 INJEÇÃO DE AUDITORIA: Grava o ID do admin logado que clicou em criar
             'name'         => $request->string('name'),
             'email'        => $request->string('email')->lower(),
             'password'     => $request->string('password'),
@@ -75,10 +77,6 @@ class UserController extends Controller
 
     /**
      * PUT/POST /api/users/{user} — atualiza nome/e-mail/foto e, opcionalmente, senha.
-     *
-     * Observação: como o upload de arquivo via PUT é problemático em alguns
-     * navegadores/servidores, o front envia POST com _method=PUT (Laravel
-     * method spoofing) quando há foto nova. Ambos caem aqui.
      */
     public function update(UpdateUserRequest $request, User $user): JsonResponse
     {

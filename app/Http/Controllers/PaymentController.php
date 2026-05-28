@@ -7,6 +7,7 @@ use App\Models\Contract;
 use Carbon\Carbon;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 
 class PaymentController extends Controller
 {
@@ -71,7 +72,8 @@ class PaymentController extends Controller
                     $totalInterest += ($mora + $multa);
                 }
 
-                $remainingBalance = $installments->where('status', '!==', 'Pago')->sum('originalAmount');
+                // 🚀 CORREÇÃO DO OPERADOR: Alterado de '!==' para '!=' para funcionar na Collection do Laravel
+                $remainingBalance = $installments->where('status', '!=', 'Pago')->sum('originalAmount');
                 $overdueCount = $overdueInstallments->count();
             } else {
                 // FALLBACK MATEMÁTICO: Caso a tabela 'installments' esteja vazia para este contrato
@@ -127,7 +129,7 @@ class PaymentController extends Controller
         ]);
     }
 
-    public function getSchedule(Request $request, $contractId)
+    public function getSchedule(Request $request, int $contractId)
     {
         $contract = Contract::findOrFail($contractId);
         $baseDate = Carbon::parse($request->input('baseDate', now()->toDateString()));
@@ -146,12 +148,24 @@ class PaymentController extends Controller
             
             $dueDate = $dbInst ? Carbon::parse($dbInst->dueDate) : $firstDue->copy()->addMonths($i - 1);
             $originalAmount = $dbInst ? (double)$dbInst->originalAmount : (double)$contract->installmentAmount;
+            
+            // Mantemos o número do laço como referência caso a parcela não exista fisicamente ainda
             $installmentIdForAction = $dbInst ? $dbInst->id : $i;
 
             $paymentRow = null;
+            
+            // 🚀 CORREÇÃO DA BUSCA DE PAGAMENTO: 
+            // Se a parcela existe no banco, busca pelo ID dela. Se for virtual, busca pelo par Contrato + Número
             if ($dbInst) {
                 $paymentRow = DB::table('payments')
                     ->where('installmentId', $dbInst->id)
+                    ->first();
+            } else {
+                $paymentRow = DB::table('payments')
+                    ->join('installments', 'payments.installmentId', '=', 'installments.id')
+                    ->where('installments.contractId', $contractId)
+                    ->where('installments.installmentNumber', $i)
+                    ->select('payments.*')
                     ->first();
             }
 
@@ -201,32 +215,38 @@ class PaymentController extends Controller
     public function recordPayment(Request $request)
     {
         $request->validate([
-            'installmentId' => 'required', 
-            'amount' => 'required|numeric',
-            'paidAt' => 'required|string|max:10',
-            'method' => 'required|string',
-            'contractId' => 'nullable|integer' 
+            'installmentId' => 'required', // Número da parcela ou ID real da tabela
+            'contractId'    => 'required|integer', // Tornou-se obrigatório para amarrar o escopo correto
+            'amount'        => 'required|numeric',
+            'paidAt'        => 'required|string|max:10',
+            'method'        => 'required|string',
         ]);
 
         DB::transaction(function() use ($request) {
-            $installmentId = $request->installmentId;
-            $installmentExists = DB::table('installments')->where('id', $installmentId)->exists();
+            $contractId = $request->contractId;
+            $installmentNumber = $request->installmentId;
 
-            if (!$installmentExists) {
-                $contractId = $request->contractId; 
-                $contract = DB::table('contracts')->orderBy('id', 'desc')->first(); 
-                
-                $newInstallmentId = DB::table('installments')->insertGetId([
-                    'contractId'        => $contractId ?? $contract->id,
-                    'installmentNumber' => $request->installmentId, 
+            // 🚀 CORREÇÃO DE SEGURANÇA CONTRA ID FANTASMA '1':
+            // Buscamos se a combinação de número da parcela + contrato já existe no banco físico
+            $dbInstallment = DB::table('installments')
+                ->where('contractId', $contractId)
+                ->where('installmentNumber', $installmentNumber)
+                ->first();
+
+            if (!$dbInstallment) {
+                // Se a parcela não existia fisicamente, ela é criada agora vinculada ao contrato correto
+                $installmentId = DB::table('installments')->insertGetId([
+                    'contractId'        => $contractId,
+                    'installmentNumber' => $installmentNumber, 
                     'dueDate'           => $request->paidAt, 
                     'originalAmount'    => $request->amount,
                     'status'            => 'Pago', 
                     'createdAt'         => now()
                 ]);
-
-                $installmentId = $newInstallmentId; 
             } else {
+                // Se já existia, pegamos a PK verdadeira (id auto_increment) gerada pelo MySQL
+                $installmentId = $dbInstallment->id;
+                
                 DB::table('installments')
                     ->where('id', $installmentId)
                     ->update([
@@ -235,14 +255,16 @@ class PaymentController extends Controller
                     ]);
             }
             
+            // Gravação limpa na tabela payments garantindo a FK perfeita da auditoria
             DB::table('payments')->insert([
-                'installmentId' => $installmentId,
+                'installmentId' => $installmentId, // 👈 Nunca mais grava '1' de forma genérica
                 'amount'        => $request->amount,
                 'paidAt'        => $request->paidAt,
                 'method'        => $request->method,
-                'recordedBy'    => \Illuminate\Support\Facades\Auth::check() ? \Illuminate\Support\Facades\Auth::user()->name : 'Sistema',
+                'user_id'       => Auth::id(), 
+                'recordedBy'    => Auth::check() ? Auth::user()->name : 'Sistema', 
             ]);
-        }); // 🚀 CORREÇÃO: Fechamento correto da função anônima com });
+        });
 
         return redirect()->back();
     }

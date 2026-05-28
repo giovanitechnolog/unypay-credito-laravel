@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Plus, Search, FileText, CheckCircle, X, Eye, Edit2, Ban, Upload, RotateCcw, Trash2 } from "lucide-react";
+import { Plus, Search, FileText, CheckCircle, X, Edit2, Trash2, Upload, Eye } from "lucide-react";
 import { Head, router } from "@inertiajs/react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
@@ -27,9 +27,7 @@ const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
 };
 
 const PAGE_SIZES = [20, 50, 100];
-
 const ACTIONS_WIDTH = 132;
-
 const MAX_PDF_MB = 20;
 const MAX_PDF_BYTES = MAX_PDF_MB * 1024 * 1024;
 
@@ -39,7 +37,7 @@ type PenaltyScope = "per_installment" | "contract_once";
 
 const emptyForm = {
   clientId: 0, code: "", contractName: "", creditor: "UnyPay® S.A.",
-  contract_type_id: "", // 👈 1. Campo ID do Tipo injetado aqui para salvar perfeitamente
+  contract_type_id: "", 
   contractType: "Mútuo/Confissão de dívida", contractDate: new Date().toISOString().slice(0, 10),
   status: "Ativo" as ContractStatus,
   validated: false, principalAmount: 0, financedTotal: 0, tacAmount: 0, iofAmount: 0,
@@ -49,7 +47,7 @@ const emptyForm = {
   correctionIndex: "IPCA", honoraryRate: 0, accelerates: false,
   accelerationRule: "", accelerationConsecutiveThreshold: undefined as number | undefined,
   accelerationAlternateThreshold: undefined as number | undefined,
-  guarantees: "", guarantors: "", validationUrl: "", sourcePdfName: "", observations: "",
+  guarantees: "", guarantors: "", validationUrl: "", observations: "",
 };
 
 const TABS = [
@@ -60,7 +58,6 @@ const TABS = [
   { key: "regras", label: "Regras Contratuais" },
 ];
 
-// estilos compactos compartilhados
 const headerCellStyle: React.CSSProperties = {
   background: "#f1f5f9", color: "#334155",
   padding: "5px 7px", fontSize: 9, fontWeight: 700,
@@ -68,10 +65,9 @@ const headerCellStyle: React.CSSProperties = {
   whiteSpace: "nowrap", borderBottom: "2px solid #cbd5e1",
 };
 const tdBase: React.CSSProperties = { padding: "3px 7px", borderBottom: "1px solid #f1f5f9", fontSize: 11, verticalAlign: "middle" };
-const tdNum: React.CSSProperties = { ...tdBase, fontFamily: "'IBM Plex Mono', monospace", textAlign: "right" };
+const tdNum: React.CSSProperties = { ...tdBase, fontFamily: "'IBM Plex Mono',monospace", textAlign: "right" };
 const tdCenter: React.CSSProperties = { ...tdBase, textAlign: "center" };
 
-// 👈 2. Recebendo contractTypes vindo do Controller na assinatura original
 export default function Contracts({ contracts, clients, contractTypes = [], filters }: any) {
   const [search, setSearch] = useState(filters?.search || "");
   const [statusFilter, setStatusFilter] = useState(filters?.statusFilter || "Todos");
@@ -79,25 +75,28 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   const [activeTab, setActiveTab] = useState("basico");
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [contractPdfFile, setContractPdfFile] = useState<File | null>(null);
-  const [existingPdfName, setExistingPdfName] = useState<string | null>(null);
+  
+  // 🚀 ESTADO PARA MÚLTIPLOS PDFs
+  const [contractPdfFiles, setContractPdfFiles] = useState<File[]>([]);
+  const [existingPdfNames, setExistingPdfNames] = useState<string[]>([]);
+  
   const [submitting, setSubmitting] = useState(false);
-  const [pdfPreview, setPdfPreview] = useState<{ id: number; code: string; name: string } | null>(null);
+  
+  // Controle de preview de multiplos PDFs
+  const [pdfPreview, setPdfPreview] = useState<{ id: number; code: string; names: string[] } | null>(null);
+  const [activePdfIndex, setActivePdfIndex] = useState<number>(0);
+
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [sortCol, setSortCol] = useState<string>("code");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
-  // ── Visibilidade de colunas ────────────────────────────────────────────
   const { visibleIds, toggleColumn, setColumnsVisible, resetDefaults } =
-    useColumnVisibility<ContractsColumnId>(
-      "unypay.contracts.columns.v1",
-      CONTRACTS_COLUMNS,
-    );
+    useColumnVisibility<ContractsColumnId>("unypay.contracts.columns.v1", CONTRACTS_COLUMNS);
 
   const visibleOrdered: ContractsColumnDef[] = useMemo(
     () => CONTRACTS_COLUMNS.filter((c) => visibleIds.has(c.id)),
-    [visibleIds],
+    [visibleIds]
   );
 
   const stickyOffsets = useMemo(() => {
@@ -129,8 +128,8 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   const resetModal = () => {
     setForm(emptyForm);
     setEditingId(null);
-    setContractPdfFile(null);
-    setExistingPdfName(null);
+    setContractPdfFiles([]);
+    setExistingPdfNames([]);
     setActiveTab("basico");
   };
 
@@ -173,32 +172,41 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       guarantees: c.guarantees ?? "",
       guarantors: c.guarantors ?? "",
       validationUrl: c.validationUrl ?? "",
-      sourcePdfName: c.sourcePdfName ?? "",
       observations: c.observations ?? "",
     });
-    setContractPdfFile(null);
-    setExistingPdfName(c.sourcePdfName ?? null);
+    setContractPdfFiles([]);
+    
+    try {
+      const decodedNames = JSON.parse(c.sourcePdfName || "[]");
+      setExistingPdfNames(Array.isArray(decodedNames) ? decodedNames : []);
+    } catch {
+      setExistingPdfNames(c.sourcePdfName ? [c.sourcePdfName] : []);
+    }
+
     setActiveTab("basico");
     setOpen(true);
   };
 
-  const handlePdfFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] ?? null;
-    if (!file) {
-      setContractPdfFile(null);
-      return;
+  // 🚀 SELEÇÃO MULTIPLA DE PDFs COM FILTRAGEM DE SEGURANÇA
+  const handlePdfFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const validFiles: File[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+        toast.error(`O arquivo "${file.name}" não é um PDF válido.`);
+        continue;
+      }
+      if (file.size > MAX_PDF_BYTES) {
+        toast.error(`O arquivo "${file.name}" ultrapassa o limite de ${MAX_PDF_MB} MB.`);
+        continue;
+      }
+      validFiles.push(file);
     }
-    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-      toast.error("O arquivo selecionado precisa ser um PDF.");
-      e.target.value = "";
-      return;
-    }
-    if (file.size > MAX_PDF_BYTES) {
-      toast.error(`PDF excede o tamanho máximo de ${MAX_PDF_MB} MB.`);
-      e.target.value = "";
-      return;
-    }
-    setContractPdfFile(file);
+    setContractPdfFiles(prev => [...prev, ...validFiles]);
+    e.target.value = ""; // Reseta o input para permitir selecionar o mesmo arquivo se quiser
   };
 
   const buildFormData = (): FormData => {
@@ -208,7 +216,11 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       if (typeof v === "boolean") fd.append(k, v ? "1" : "0");
       else fd.append(k, String(v));
     });
-    if (contractPdfFile) fd.append("contractPdf", contractPdfFile);
+    
+    // Alimenta o array de arquivos esperado pelo PHP
+    contractPdfFiles.forEach((file) => {
+      fd.append("contractPdfs[]", file);
+    });
     return fd;
   };
 
@@ -230,7 +242,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
         resetModal();
       },
       onError: (err: any) => {
-        const message = Object.values(err || {}).join(", ") || "Verifique os campos do formulário.";
+        const message = Object.values(err || {}).join(", ") || "Verifique as regras do formulário.";
         toast.error("Erro ao salvar: " + message);
       },
       onFinish: () => setSubmitting(false),
@@ -239,44 +251,33 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
 
   const handleViewPdf = (item: any) => {
     const c = item.contract ?? item;
-    if (!c.contractPdfPath && !c.hasContractPdf) {
-      toast.info("Este contrato ainda não possui PDF anexado.");
+    if (!c.hasContractPdf) {
+      toast.info("Este contrato não possui minutas digitais anexadas.");
       return;
     }
+    
+    let decodedNames: string[] = [];
+    try {
+      decodedNames = JSON.parse(c.sourcePdfName || "[]");
+    } catch {
+      decodedNames = [c.sourcePdfName || "documento.pdf"];
+    }
+
+    setActivePdfIndex(0); // Força a visualização a começar sempre no primeiro PDF da lista
     setPdfPreview({
       id: c.id,
       code: c.code ?? "",
-      name: c.sourcePdfName ?? `contrato-${c.code ?? c.id}.pdf`,
-    });
-  };
-
-  const handleCancelContract = (item: any) => {
-    const c = item.contract ?? item;
-    const isAlreadyCanceled = c.status === "Cancelado";
-    const action = isAlreadyCanceled ? "reativar" : "cancelar";
-
-    if (!confirm(`Tem certeza que deseja ${action} o contrato ${c.code}?`)) return;
-
-    const endpoint = isAlreadyCanceled
-      ? `/contracts/${c.id}/reactivate`
-      : `/contracts/${c.id}/cancel`;
-
-    router.post(endpoint, {}, {
-      preserveScroll: true,
-      onSuccess: () => {
-        toast.success(isAlreadyCanceled ? "Contrato reativado." : "Contrato cancelado.");
-      },
-      onError: () => toast.error(`Falha ao ${action} o contrato.`),
+      names: decodedNames,
     });
   };
 
   const handleDelete = (item: any) => {
     const c = item.contract ?? item;
-    if (!confirm(`Excluir definitivamente o contrato ${c.code}? Esta ação não pode ser desfeita.`)) return;
+    if (!confirm(`Excluir o contrato ${c.code}? Isso removerá permanentemente TODOS os arquivos anexos.`)) return;
     router.delete(`/contracts/${c.id}`, {
       preserveScroll: true,
-      onSuccess: () => toast.success("Contrato excluído."),
-      onError: () => toast.error("Falha ao excluir o contrato."),
+      onSuccess: () => toast.success("Contrato removido."),
+      onError: () => toast.error("Falha ao deletar o registro."),
     });
   };
 
@@ -322,7 +323,6 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     else { setSortCol(col); setSortDir("asc"); }
   };
 
-  // ── células ────────────────────────────────────────────────────────────
   const renderCellContent = (col: ContractsColumnDef, item: any): React.ReactNode => {
     const contract = item.contract ?? item;
     const sc = STATUS_BADGE[contract.status] ?? STATUS_BADGE["Ativo"];
@@ -338,7 +338,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       case "contractType":
         return (
           <span style={{ fontSize: 10, padding: "2px 6px", background: "#f3f4f6", borderRadius: 4, fontWeight: 500, color: "#4b5563" }}>
-            {contract.contract_type_name ?? contract.contractType ?? "Não Informado"}
+            {contract.contract_type_name ?? contract.contractType ?? "Mútuo"}
           </span>
         );
       case "contractName":
@@ -380,7 +380,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
 
       <div style={{ padding: "12px 20px 16px 20px", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", gap: 12 }}>
 
-        {/* Cabeçalho */}
+        {/* Topo da página */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#111827" }}>Contratos e Ativos</h1>
           <button onClick={handleOpenCreate}
@@ -389,7 +389,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
           </button>
         </div>
 
-        {/* Barra de filtros */}
+        {/* Filtros e Picker de colunas */}
         <div style={{
           background: "white", border: "1px solid #e5e7eb", borderRadius: 6,
           padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0,
@@ -435,7 +435,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
           </div>
         </div>
 
-        {/* Container unificado tabela + paginação */}
+        {/* Tabela de listagem */}
         <div style={{
           flex: 1, minHeight: 0, display: "flex", flexDirection: "column",
           border: "1px solid #e5e7eb", borderRadius: 6, overflow: "hidden", background: "white",
@@ -507,8 +507,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                   paginated.map((item: any, rowIdx: number) => {
                     const rowBg = rowIdx % 2 === 1 ? "#fafafa" : "white";
                     const c = item.contract ?? item;
-                    const hasPdf = !!(c.contractPdfPath || c.hasContractPdf);
-                    const isCanceled = c.status === "Cancelado";
+                    const hasPdf = !!c.hasContractPdf;
                     return (
                       <tr key={c.id} style={{ background: rowBg }}
                         onMouseOver={e => (e.currentTarget.style.background = "#eff6ff")}
@@ -518,9 +517,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                           const stickyStyle: React.CSSProperties = col.sticky
                             ? { position: "sticky", left: stickyOffsets.get(col.id), zIndex: 1, background: "inherit" }
                             : {};
-                          const base =
-                            col.align === "right" ? tdNum :
-                              col.align === "center" ? tdCenter : tdBase;
+                          const base = col.align === "right" ? tdNum : col.align === "center" ? tdCenter : tdBase;
                           return (
                             <td key={col.id} style={{ ...base, ...stickyStyle }}>
                               {renderCellContent(col, item)}
@@ -529,36 +526,22 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                         })}
                         <td style={tdCenter}>
                           <div style={{ display: "flex", gap: 3, justifyContent: "center" }}>
+                            {/* 🚀 ICONE DE DOCUMENTO (ABRE VIEWER MULTI-PDF) */}
                             <button
                               className="btn-icon"
-                              title={hasPdf ? "Visualizar PDF do contrato" : "Nenhum PDF anexado"}
+                              title={hasPdf ? "Visualizar PDFs anexados" : "Nenhum PDF anexado"}
                               onClick={() => handleViewPdf(item)}
                               disabled={!hasPdf}
                               style={{ opacity: hasPdf ? 1 : 0.4, cursor: hasPdf ? "pointer" : "not-allowed" }}
                             >
-                              <Eye size={11} />
+                              <FileText size={11} />
                             </button>
-                            <button
-                              className="btn-icon"
-                              title="Editar contrato"
-                              onClick={() => handleOpenEdit(item)}
-                            >
+
+                            <button className="btn-icon" title="Editar contrato" onClick={() => handleOpenEdit(item)}>
                               <Edit2 size={11} />
                             </button>
-                            <button
-                              className="btn-icon"
-                              title={isCanceled ? "Reativar contrato" : "Cancelar contrato"}
-                              onClick={() => handleCancelContract(item)}
-                              style={{ color: isCanceled ? "#059669" : "#dc2626" }}
-                            >
-                              {isCanceled ? <RotateCcw size={11} /> : <Ban size={11} />}
-                            </button>
-                            <button
-                              className="btn-icon"
-                              title="Excluir contrato"
-                              onClick={() => handleDelete(item)}
-                              style={{ color: "#dc2626" }}
-                            >
+                           
+                            <button className="btn-icon" title="Excluir contrato" onClick={() => handleDelete(item)} style={{ color: "#dc2626" }}>
                               <Trash2 size={11} />
                             </button>
                           </div>
@@ -571,7 +554,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
             </table>
           </div>
 
-          {/* Paginação */}
+          {/* Paginação da tabela */}
           <div style={{
             padding: "6px 12px", background: "#fafbfc", borderTop: "1px solid #e5e7eb",
             display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, flexShrink: 0,
@@ -663,8 +646,9 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                       </div>
                       <div style={{ gridColumn: "span 2" }}><label className="sigx-label">URL DE VALIDAÇÃO</label><input className="sigx-input" value={form.validationUrl} onChange={n("validationUrl")} placeholder="https://valida.ae/..." /></div>
 
+                      {/* 🚀 GERENCIADOR DE MÚLTIPLOS COMPONENTES DE PDF */}
                       <div style={{ gridColumn: "span 2" }}>
-                        <label className="sigx-label">PDF DO CONTRATO</label>
+                        <label className="sigx-label">ANEXAR DOCUMENTOS E ADITIVOS DO CONTRATO (PDF)</label>
                         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                           <label
                             htmlFor="contract-pdf-input"
@@ -675,42 +659,59 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                               fontSize: 11, fontWeight: 600, color: "#374151",
                             }}
                           >
-                            <Upload size={12} /> Selecionar PDF
+                            <Upload size={12} /> Adicionar PDFs
                           </label>
                           <input
                             id="contract-pdf-input"
                             type="file"
                             accept="application/pdf,.pdf"
-                            onChange={handlePdfFileChange}
+                            onChange={handlePdfFilesChange}
+                            multiple // 👈 PERMITE SELECIONAR VÁRIOS ARQUIVOS JUNTOS
                             style={{ display: "none" }}
                           />
-                          {contractPdfFile ? (
-                            <span style={{ fontSize: 11, color: "#065f46", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                              <FileText size={12} /> {contractPdfFile.name}
-                              <button type="button" onClick={() => setContractPdfFile(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#6b7280", padding: 0, display: "flex" }}>
-                                <X size={11} />
-                              </button>
-                            </span>
-                          ) : existingPdfName ? (
-                            <span style={{ fontSize: 11, color: "#6b7280", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                              <FileText size={12} /> Atual: {existingPdfName}
-                              {editingId && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleViewPdf({ id: editingId, contractPdfPath: existingPdfName })}
-                                  style={{ background: "none", border: "none", cursor: "pointer", color: "#2563eb", padding: 0, display: "flex" }}
-                                  title="Visualizar PDF atual"
-                                >
-                                  <Eye size={11} />
-                                </button>
-                              )}
-                            </span>
-                          ) : (
-                            <span style={{ fontSize: 11, color: "#9ca3af" }}>Nenhum PDF anexado.</span>
-                          )}
                         </div>
-                        <span style={{ fontSize: 10, color: "#9ca3af", marginTop: 4, display: "block" }}>
-                          Tamanho máximo: {MAX_PDF_MB} MB. Apenas arquivos .pdf.
+
+                        {/* Listagem temporária dos arquivos recém-selecionados */}
+                        {contractPdfFiles.length > 0 && (
+                          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: "#065f46" }}>NOVOS DOCUMENTOS SELECIONADOS:</span>
+                            {contractPdfFiles.map((file, idx) => (
+                              <span key={idx} style={{ fontSize: 11, color: "#065f46", display: "inline-flex", alignItems: "center", gap: 4, background: "#ecfdf5", padding: "2px 6px", borderRadius: 4, width: "fit-content" }}>
+                                <FileText size={12} /> {file.name}
+                                <button type="button" onClick={() => setContractPdfFiles(prev => prev.filter((_, i) => i !== idx))} style={{ background: "none", border: "none", cursor: "pointer", color: "#6b7280", display: "flex" }}>
+                                  <X size={11} />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Listagem dos arquivos que já estão salvos e guardados no banco */}
+                        {existingPdfNames.length > 0 && (
+                          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: "#4b5563" }}>DOCUMENTOS JÁ ARQUIVADOS:</span>
+                            {existingPdfNames.map((name, idx) => (
+                              <span key={idx} style={{ fontSize: 11, color: "#4b5563", display: "inline-flex", alignItems: "center", gap: 4, background: "#f3f4f6", padding: "2px 6px", borderRadius: 4, width: "fit-content" }}>
+                                <FileText size={12} /> {name}
+                                {editingId && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActivePdfIndex(idx);
+                                      setPdfPreview({ id: editingId, code: form.code, names: existingPdfNames });
+                                    }}
+                                    style={{ background: "none", border: "none", cursor: "pointer", color: "#2563eb", display: "flex" }}
+                                    title="Visualizar este PDF específico"
+                                  >
+                                    <Eye size={11} />
+                                  </button>
+                                )}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <span style={{ fontSize: 10, color: "#9ca3af", marginTop: 6, display: "block" }}>
+                          Tamanho máximo: {MAX_PDF_MB} MB por arquivo. Você pode carregar quantos aditivos ou PDFs forem necessários.
                         </span>
                       </div>
                     </div>
@@ -786,17 +787,14 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
           </div>
         )}
 
-        {/* Modal de Visualização do PDF */}
+        {/* 🚀 VISUALIZADOR AVANÇADO SPLIT-SCREEN PARA MÚLTIPLOS PDFs */}
         {pdfPreview && (
-          <div
-            className="sigx-modal-overlay"
-            onMouseDown={e => { if (e.target === e.currentTarget) setPdfPreview(null); }}
-          >
+          <div className="sigx-modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setPdfPreview(null); }}>
             <div
               className="sigx-modal"
               style={{
-                width: "min(1100px, 95vw)",
-                maxWidth: "95vw",
+                width: "min(1250px, 96vw)",
+                maxWidth: "96vw",
                 height: "92vh",
                 display: "flex",
                 flexDirection: "column",
@@ -804,43 +802,68 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
               }}
               onMouseDown={e => e.stopPropagation()}
             >
+              {/* Topo do Visualizador */}
               <div className="sigx-modal-header" style={{ flexShrink: 0 }}>
                 <span className="sigx-modal-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <FileText size={14} />
-                  Contrato {pdfPreview.code}
-                  <span style={{ fontSize: 11, fontWeight: 400, color: "var(--muted-foreground)" }}>
-                    — {pdfPreview.name}
-                  </span>
+                  Documentos Digitais — Contrato {pdfPreview.code}
                 </span>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {/* 🚀 BOTÃO "VER COMPLETO" EM NOVA ABA */}
                   <a
-                    href={`/contracts/${pdfPreview.id}/pdf`}
+                    href={`/contracts/${pdfPreview.id}/pdf?index=${activePdfIndex}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="btn-secondary"
                     style={{ fontSize: 11, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}
-                    title="Abrir em nova aba"
+                    title="Abrir o PDF selecionado em tamanho completo"
                   >
-                    <Upload size={11} style={{ transform: "rotate(180deg)" }} /> Abrir em nova aba
+                    <Upload size={11} style={{ transform: "rotate(180deg)" }} /> Ver Completo / Imprimir
                   </a>
-                  <button
-                    type="button"
-                    onClick={() => setPdfPreview(null)}
-                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", display: "flex" }}
-                    title="Fechar"
-                  >
+                  <button type="button" onClick={() => setPdfPreview(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", display: "flex" }} title="Fechar">
                     <X size={18} />
                   </button>
                 </div>
               </div>
-              <div style={{ flex: 1, minHeight: 0, background: "#1f2937" }}>
-                <iframe
-                  key={pdfPreview.id}
-                  src={`/contracts/${pdfPreview.id}/pdf#toolbar=1&navpanes=0&view=FitH`}
-                  title={`PDF do contrato ${pdfPreview.code}`}
-                  style={{ width: "100%", height: "100%", border: "none", display: "block", background: "#1f2937" }}
-                />
+
+              {/* Corpo Split (Abas na Esquerda, Visualização na Direita) */}
+              <div style={{ flex: 1, minHeight: 0, display: "flex", background: "#1f2937" }}>
+                
+                {/* Menu lateral esquerdo de abas de arquivos */}
+                <div style={{ width: 250, background: "#111827", borderRight: "1px solid #374151", padding: 12, display: "flex", flexDirection: "column", gap: 6, overflowY: "auto" }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", letterSpacing: "0.05em", marginBottom: 6 }}>ARQUIVOS COMPONENTES:</span>
+                  {pdfPreview.names.map((name, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => setActivePdfIndex(index)}
+                      style={{
+                        width: "100%", padding: "10px 12px", borderRadius: 4, border: "none",
+                        textAlign: "left", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
+                        background: activePdfIndex === index ? "#2563eb" : "#1f2937",
+                        color: activePdfIndex === index ? "white" : "#d1d5db",
+                        transition: "all 0.1s"
+                      }}
+                    >
+                      <FileText size={12} style={{ flexShrink: 0, color: activePdfIndex === index ? "white" : "#9ca3af" }} />
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={name}>
+                        {name}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Área Dinâmica do Iframe carregando o index selecionado */}
+                <div style={{ flex: 1, height: "100%", background: "#1f2937" }}>
+                  <iframe
+                    key={`${pdfPreview.id}-${activePdfIndex}`} // Recarrega o frame de forma limpa mudando a key baseada no index
+                    src={`/contracts/${pdfPreview.id}/pdf?index=${activePdfIndex}#toolbar=1&navpanes=0&view=FitH`}
+                    title={`Visualizador do PDF ${activePdfIndex}`}
+                    style={{ width: "100%", height: "100%", border: "none", display: "block" }}
+                  />
+                </div>
               </div>
+
             </div>
           </div>
         )}

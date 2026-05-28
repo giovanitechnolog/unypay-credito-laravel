@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Inertia\Inertia;
 use App\Models\Client;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 
 class ClientController extends Controller
 {
@@ -40,31 +41,34 @@ class ClientController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'document' => 'nullable|string',
+            'name'       => 'required|string|max:255',
+            'document'   => 'nullable|string',
             'personType' => 'required|string|in:PF,PJ',
             'riskRating' => 'required|string|in:A,B,C,D,E',
-            'phone' => 'nullable|string',
-            'email' => 'nullable|email',
-            'address' => 'nullable|string',
-            'city' => 'nullable|string',
-            'state' => 'nullable|string|max:2',
-            'zipCode' => 'nullable|string',
-            'notes' => 'nullable|string', 
+            'phone'      => 'nullable|string',
+            'email'      => 'nullable|email',
+            'address'    => 'nullable|string',
+            'city'       => 'nullable|string',
+            'state'      => 'nullable|string|max:2',
+            'zipCode'    => 'nullable|string',
+            'notes'      => 'nullable|string', 
         ]);
 
         DB::table('clients')->insert([
-            'name' => $validated['name'],
-            'document' => $validated['document'],
+            'user_id'    => Auth::id(), // 🚀 INJEÇÃO DE AUDITORIA: Salva quem cadastrou
+            'name'       => $validated['name'],
+            'document'   => $validated['document'],
             'personType' => $validated['personType'],
             'riskRating' => $validated['riskRating'],
-            'phone' => $validated['phone'],
-            'email' => $validated['email'],
-            'address' => $validated['address'],
-            'city' => $validated['city'],
-            'state' => $validated['state'],
-            'zipCode' => $validated['zipCode'],
-            'notes' => $validated['notes'], // JSON reativo com os fiadores 1 e 2 armazenados aqui
+            'phone'      => $validated['phone'],
+            'email'      => $validated['email'],
+            'address'    => $validated['address'],
+            'city'       => $validated['city'],
+            'state'      => $validated['state'],
+            'zipCode'    => $validated['zipCode'],
+            'notes'      => $validated['notes'], // JSON reativo com os fiadores 1 e 2 armazenados aqui
+            'createdAt' => now(),
+            'updatedAt' => now()
         ]);
 
         return redirect()->back();
@@ -76,31 +80,33 @@ class ClientController extends Controller
     public function update(Request $request, int $id)
     {
         $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'document' => 'nullable|string',
+            'name'       => 'required|string|max:255',
+            'document'   => 'nullable|string',
             'personType' => 'required|string|in:PF,PJ',
             'riskRating' => 'required|string|in:A,B,C,D,E',
-            'phone' => 'nullable|string',
-            'email' => 'nullable|email',
-            'address' => 'nullable|string',
-            'city' => 'nullable|string',
-            'state' => 'nullable|string|max:2',
-            'zipCode' => 'nullable|string',
-            'notes' => 'nullable|string',
+            'phone'      => 'nullable|string',
+            'email'      => 'nullable|email',
+            'address'    => 'nullable|string',
+            'city'       => 'nullable|string',
+            'state'      => 'nullable|string|max:2',
+            'zipCode'    => 'nullable|string',
+            'notes'      => 'nullable|string',
         ]);
 
         DB::table('clients')->where('id', $id)->update([
-            'name' => $validated['name'],
-            'document' => $validated['document'],
+            'user_id'    => Auth::id(), // 🚀 INJEÇÃO DE AUDITORIA: Atualiza com quem fez a última alteração
+            'name'       => $validated['name'],
+            'document'   => $validated['document'],
             'personType' => $validated['personType'],
             'riskRating' => $validated['riskRating'],
-            'phone' => $validated['phone'],
-            'email' => $validated['email'],
-            'address' => $validated['address'],
-            'city' => $validated['city'],
-            'state' => $validated['state'],
-            'zipCode' => $validated['zipCode'],
-            'notes' => $validated['notes'], // Atualiza o payload com os fiadores modificados
+            'phone'      => $validated['phone'],
+            'email'      => $validated['email'],
+            'address'    => $validated['address'],
+            'city'       => $validated['city'],
+            'state'      => $validated['state'],
+            'zipCode'    => $validated['zipCode'],
+            'notes'      => $validated['notes'], // Atualiza o payload com os fiadores modificados
+            'updatedAt' => now()
         ]);
 
         return redirect()->back();
@@ -125,13 +131,13 @@ class ClientController extends Controller
         ]);
 
         $mockOcrData = [
-            'debtorName' => 'Transportadora Alfa S.A.',
+            'debtorName'     => 'Transportadora Alfa S.A.',
             'debtorDocument' => '12.345.678/0001-99',
-            'debtorAddress' => 'Av. das Indústrias, 1500, Galpão B',
-            'city' => 'Lavras',
-            'state' => 'MG',
-            'pixKey' => 'alfa@transportes.com.br',
-            'guarantors' => 'Marcos Silva Santos',
+            'debtorAddress'  => 'Av. das Indústrias, 1500, Galpão B',
+            'city'           => 'Lavras',
+            'state'          => 'MG',
+            'pixKey'         => 'alfa@transportes.com.br',
+            'guarantors'     => 'Marcos Silva Santos',
         ];
 
         return redirect()->back()->with('flash', [
@@ -139,7 +145,7 @@ class ClientController extends Controller
         ]);
     }
 
-    public function show($id)
+    public function show(int $id)
     {
         $client = Client::with('contracts')->findOrFail($id);
         
