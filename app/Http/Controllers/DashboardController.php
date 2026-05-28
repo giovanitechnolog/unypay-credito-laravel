@@ -215,7 +215,7 @@ class DashboardController extends Controller
                 ->values()
                 ->toArray();
         }
-
+        
         return Inertia::render('Dashboard', [
             'kpis'             => $kpis,
             'monthlyEvolution' => $monthlyEvolution,
