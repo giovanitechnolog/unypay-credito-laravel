@@ -15,7 +15,7 @@ class Contract extends Model
         'moraRateMonthly', 'penaltyRate', 'penaltyBaseType', 'penaltyScope', 'correctionIndex',
         'honoraryRate', 'accelerates', 'accelerationRule', 'accelerationConsecutiveThreshold',
         'accelerationAlternateThreshold', 'guarantees', 'guarantors', 'validationUrl',
-        'sourcePdfName', 'observations'
+        'sourcePdfName', 'contractPdfPath', 'observations', 'contract_type_id',
     ];
 
     const CREATED_AT = 'createdAt';
