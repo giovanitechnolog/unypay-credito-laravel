@@ -28,7 +28,7 @@ class SimulatorController extends Controller
 
         // Ajustado de CamelCase para snake_case para bater com as colunas reais do MySQL
         DB::table('loan_simulations')->insert([
-            'user_id'            => Auth::id(), 
+            'user_id'            => Auth::id(), // 👈 Já registrando perfeitamente quem simulou
             'client_name'        => $request->input('clientName'),
             'client_document'    => $request->input('clientDocument'),
             'person_type'        => $request->input('personType', 'PF'),
@@ -80,7 +80,8 @@ class SimulatorController extends Controller
     /**
      * Exclui um registro do histórico
      */
-    public function delete($id)
+    // 🚀 TIPAGEM INJETADA: Definido int para o ID para remover avisos do editor
+    public function delete(int $id)
     {
         DB::table('loan_simulations')->where('id', $id)->delete();
 
@@ -92,7 +93,8 @@ class SimulatorController extends Controller
     /**
      * Converte a simulação salva em um Contrato Real na base de dados
      */
-    public function convertToContract(Request $request, $id)
+    // 🚀 TIPAGEM INJETADA: Definido int para o ID do parâmetro
+    public function convertToContract(Request $request, int $id)
     {
         $request->validate([
             'code'         => 'required|string',
@@ -113,6 +115,7 @@ class SimulatorController extends Controller
             'creditor'       => $request->input('creditor', 'UnyPay® S.A.'),
             'contract_date'  => $request->input('contractDate'),
             'client_id'      => $request->input('clientId'),
+            'user_id'        => Auth::id(), // 🚀 INJEÇÃO DE AUDITORIA: Salva o ID do usuário que fez a conversão
             'principal'      => $sim->principal,
             'financed_total' => $sim->financed_total ?? $sim->financedTotal,
             'total_payable'  => $sim->total_payable ?? $sim->totalPayable,

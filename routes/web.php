@@ -13,6 +13,9 @@ use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\SerasaController;
 use App\Http\Controllers\SimulatorController;
 use App\Http\Controllers\UserController;
+use App\Models\UserColumnPreference; // 🚀 MODELO IMPORTADO PARA O UPSERT
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -97,6 +100,7 @@ Route::middleware('auth')->group(function () {
     |--------------------------------------------------------------------------
     | Importador de planilha de contratos (rota oculta - sem link no menu)
     |--------------------------------------------------------------------------
+    |
     */
     Route::prefix('sys/importar')->group(function () {
         Route::get ('importar-contratos',         [ContractImportController::class, 'page'])->name('contracts.importer');
@@ -109,6 +113,7 @@ Route::middleware('auth')->group(function () {
     |--------------------------------------------------------------------------
     | CRUD de Usuários administrativos (rotas "ocultas" - sem link no menu)
     |--------------------------------------------------------------------------
+    |
     */
     Route::get('/usuarios', [UserController::class, 'index'])->name('users.index');
 
@@ -116,4 +121,30 @@ Route::middleware('auth')->group(function () {
     Route::post  ('/api/users',         [UserController::class, 'store'])->name('users.store');
     Route::put   ('/api/users/{user}',  [UserController::class, 'update'])->name('users.update');
     Route::delete('/api/users/{user}',  [UserController::class, 'destroy'])->name('users.destroy');
+
+    /*
+    |--------------------------------------------------------------------------
+    | 🚀 Preferências Globais do Operador Logado (Banco de Dados + React Hook)
+    |--------------------------------------------------------------------------
+    |
+    */
+    Route::post('/api/user-preferences/columns', function (Request $request) {
+        $request->validate([
+            'table_key' => 'required|string',
+            'visible_columns' => 'required|array',
+        ]);
+
+        // Executa o "Upsert" automático vinculando ao operador da sessão
+        UserColumnPreference::updateOrCreate(
+            [
+                'user_id'   => Auth::id(),
+                'table_key' => $request->input('table_key'),
+            ],
+            [
+                'visible_columns' => $request->input('visible_columns'),
+            ]
+        );
+
+        return response()->json(['success' => true]);
+    });
 });

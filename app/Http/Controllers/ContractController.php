@@ -10,42 +10,29 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ContractController extends Controller
 {
-    /**
-     * Diretório onde os PDFs anexados aos contratos são salvos.
-     *
-     * Usamos o disk "local" (storage/app/private) para garantir que o
-     * download/visualização sempre passe pela rota autenticada
-     * {@see self::viewPdf()}, em vez de ser exposta diretamente via /storage.
-     */
     private const PDF_DIR  = 'contracts/pdfs';
     private const PDF_DISK = 'local';
 
-    /**
-     * Listagem Geral de Contratos (Chamada ao clicar no Menu Lateral)
-     * Rota: http://127.0.0.1:8000/contracts
-     */
     public function index(Request $request)
     {
         $search = $request->input('search');
         $statusFilter = $request->input('statusFilter');
 
-        // 🚀 CORREÇÃO: Adicionado o LEFT JOIN com a tabela 'clients' para buscar o nome do cliente
         $query = DB::table('contracts')
             ->leftJoin('contract_types', 'contracts.contract_type_id', '=', 'contract_types.id')
-            ->leftJoin('clients', 'contracts.clientId', '=', 'clients.id') // 👈 Conexão com a tabela de clientes
+            ->leftJoin('clients', 'contracts.clientId', '=', 'clients.id')
             ->select(
                 'contracts.*',
                 'contract_types.name as contract_type_name',
-                'clients.name as client_name' // 👈 Trazendo o nome do cliente mapeado para o React
+                'clients.name as client_name'
             );
 
-        // Aplica os filtros apenas se eles forem enviados de verdade pelo input
         if (!empty($search)) {
             $query->where(function ($q) use ($search) {
                 $q->where('contracts.code', 'like', "%{$search}%")
                   ->orWhere('contracts.contractName', 'like', "%{$search}%")
                   ->orWhere('contracts.creditor', 'like', "%{$search}%")
-                  ->orWhere('clients.name', 'like', "%{$search}%"); // 👈 Permite buscar também pelo nome do cliente
+                  ->orWhere('clients.name', 'like', "%{$search}%");
             });
         }
 
@@ -55,42 +42,30 @@ class ContractController extends Controller
 
         $rawContracts = $query->orderBy('contracts.id', 'desc')->get();
 
-        // Sinaliza se há PDF (sem expor o caminho cru); o front baixa via rota autenticada.
+        // 🚀 VERIFICAÇÃO MULTI-PDF: Lê o array JSON do banco de dados para saber se há anexos
         $rawContracts->transform(function ($row) {
-            $row->hasContractPdf = ! empty($row->contractPdfPath);
+            $paths = json_decode($row->contractPdfPath ?? '[]', true);
+            $row->hasContractPdf = !empty($paths) && count($paths) > 0;
             return $row;
         });
 
-        // 🚀 2. Coleta os tipos cadastrados via Seeder para alimentar o Dropdown do front-end
         $contractTypes = DB::table('contract_types')->orderBy('name', 'asc')->get();
-
         $clients = DB::table('clients')->orderBy('name', 'asc')->get(['id', 'name']);
 
         return Inertia::render('Contracts', [
             'contracts'     => $rawContracts,
             'contractTypes' => $contractTypes,
             'clients'       => $clients,
+            'filters'       => $request->only(['search', 'statusFilter'])
         ]);
     }
 
-    /**
-     * API auxiliar de lookup de clientes
-     */
     public function clientsLookup()
     {
-        $clients = DB::table('clients')
-            ->orderBy('name', 'asc')
-            ->get(['id', 'name', 'document']);
-
+        $clients = DB::table('clients')->orderBy('name', 'asc')->get(['id', 'name', 'document']);
         return response()->json($clients);
     }
 
-    /**
-     * Salva o formulário original.
-     *
-     * Aceita um campo opcional `contractPdf` (arquivo .pdf) que, quando enviado,
-     * é persistido no disk "public" sob {@see self::PDF_DIR}.
-     */
     public function store(Request $request)
     {
         $request->validate([
@@ -98,55 +73,72 @@ class ContractController extends Controller
             'code'             => 'required|string',
             'clientId'         => 'required',
             'contract_type_id' => 'required',
-            'contractPdf'      => 'nullable|file|mimes:pdf|max:20480',
+            'contractPdfs'     => 'nullable|array', // Valida como um array de arquivos
+            'contractPdfs.*'   => 'file|mimes:pdf|max:20480',
         ]);
 
-        $pdfPath = null;
-        $pdfName = null;
-        if ($request->hasFile('contractPdf')) {
-            $file = $request->file('contractPdf');
-            $pdfPath = $file->store(self::PDF_DIR, self::PDF_DISK);
-            $pdfName = $file->getClientOriginalName();
+        $pdfPaths = [];
+        $pdfNames = [];
+
+        if ($request->hasFile('contractPdfs')) {
+            foreach ($request->file('contractPdfs') as $file) {
+                $pdfPaths[] = $file->store(self::PDF_DIR, self::PDF_DISK);
+                $pdfNames[] = $file->getClientOriginalName();
+            }
         }
 
-        DB::table('contracts')->insert($this->buildContractPayload($request, [
-            'sourcePdfName'   => $pdfName,
-            'contractPdfPath' => $pdfPath,
-        ]));
+        $extras = [
+            'sourcePdfName'   => json_encode($pdfNames),
+            'contractPdfPath' => json_encode($pdfPaths),
+            'user_id'         => \Illuminate\Support\Facades\Auth::id(),
+        ];
+
+        DB::table('contracts')->insert($this->buildContractPayload($request, $extras));
 
         return redirect()->route('contracts.index');
     }
 
-    /**
-     * Atualiza um contrato existente.
-     *
-     * Mesmas regras do `store`, com tratamento adicional: se um novo PDF for
-     * enviado, o anterior (se houver) é removido do disco.
-     */
-    public function update(Request $request, $id)
+    public function update(Request $request, int $id)
     {
         $request->validate([
             'contractName'     => 'required|string',
             'code'             => 'required|string',
             'clientId'         => 'required',
             'contract_type_id' => 'required',
-            'contractPdf'      => 'nullable|file|mimes:pdf|max:20480',
+            'contractPdfs'     => 'nullable|array',
         ]);
 
         $existing = DB::table('contracts')->where('id', $id)->first();
-        if (! $existing) {
+        if (!$existing) {
             return redirect()->route('contracts.index');
         }
 
-        $extras = [];
-        if ($request->hasFile('contractPdf')) {
-            $file = $request->file('contractPdf');
-            $extras['contractPdfPath'] = $file->store(self::PDF_DIR, self::PDF_DISK);
-            $extras['sourcePdfName']   = $file->getClientOriginalName();
+        $extras = [
+            'user_id' => \Illuminate\Support\Facades\Auth::id()
+        ];
 
-            if (! empty($existing->contractPdfPath) && Storage::disk(self::PDF_DISK)->exists($existing->contractPdfPath)) {
-                Storage::disk(self::PDF_DISK)->delete($existing->contractPdfPath);
+        // Se o operador enviou um novo lote de arquivos, substitui os antigos
+        if ($request->hasFile('contractPdfs')) {
+            $pdfPaths = [];
+            $pdfNames = [];
+
+            foreach ($request->file('contractPdfs') as $file) {
+                $pdfPaths[] = $file->store(self::PDF_DIR, self::PDF_DISK);
+                $pdfNames[] = $file->getClientOriginalName();
             }
+
+            // Exclui fisicamente do disco os arquivos antigos para não entulhar o Laragon
+            $oldPaths = json_decode($existing->contractPdfPath ?? '[]', true);
+            if (is_array($oldPaths)) {
+                foreach ($oldPaths as $oldPath) {
+                    if (!empty($oldPath) && Storage::disk(self::PDF_DISK)->exists($oldPath)) {
+                        Storage::disk(self::PDF_DISK)->delete($oldPath);
+                    }
+                }
+            }
+
+            $extras['contractPdfPath'] = json_encode($pdfPaths);
+            $extras['sourcePdfName']   = json_encode($pdfNames);
         }
 
         DB::table('contracts')
@@ -156,48 +148,53 @@ class ContractController extends Controller
         return redirect()->route('contracts.index');
     }
 
-    /**
-     * Cancela o contrato: apenas altera o status para 'Cancelado'.
-     */
-    public function cancel($id)
+    public function cancel(int $id)
     {
-        DB::table('contracts')
-            ->where('id', $id)
-            ->update(['status' => 'Cancelado']);
+        DB::table('contracts')->where('id', $id)->update([
+            'status' => 'Cancelado',
+            'user_id' => \Illuminate\Support\Facades\Auth::id()
+        ]);
+        return redirect()->back();
+    }
 
+    public function reactivate(int $id)
+    {
+        DB::table('contracts')->where('id', $id)->update([
+            'status' => 'Ativo',
+            'user_id' => \Illuminate\Support\Facades\Auth::id()
+        ]);
         return redirect()->back();
     }
 
     /**
-     * Reabre (reativa) o contrato cancelado, restaurando o status para 'Ativo'.
-     * Útil quando o usuário clica novamente no botão de cancelamento.
+     * 🚀 LEITURA DINÂMICA DE ARQUIVO POR ÍNDICE
      */
-    public function reactivate($id)
-    {
-        DB::table('contracts')
-            ->where('id', $id)
-            ->update(['status' => 'Ativo']);
-
-        return redirect()->back();
-    }
-
-    /**
-     * Faz o download / visualização inline do PDF do contrato.
-     */
-    public function viewPdf($id)
+    public function viewPdf(int $id, Request $request)
     {
         $contract = DB::table('contracts')->where('id', $id)->first();
-        if (! $contract || empty($contract->contractPdfPath)) {
-            abort(404, 'PDF não encontrado para este contrato.');
+        if (!$contract || empty($contract->contractPdfPath)) {
+            abort(404, 'Nenhum PDF encontrado.');
         }
 
+        $paths = json_decode($contract->contractPdfPath, true);
+        $names = json_decode($contract->sourcePdfName, true);
+
+        // Captura o índice enviado pelo React (ex: ?index=2). Se não enviar nada, mostra o primeiro (0)
+        $index = (int)$request->input('index', 0);
+
+        if (!isset($paths[$index])) {
+            abort(404, 'O documento solicitado não existe.');
+        }
+
+        $targetPath = $paths[$index];
         $disk = Storage::disk(self::PDF_DISK);
-        if (! $disk->exists($contract->contractPdfPath)) {
-            abort(404, 'Arquivo PDF ausente no armazenamento.');
+        
+        if (!$disk->exists($targetPath)) {
+            abort(404, 'Arquivo físico ausente.');
         }
 
-        $stream = $disk->readStream($contract->contractPdfPath);
-        $filename = $contract->sourcePdfName ?: ('contrato-' . $contract->code . '.pdf');
+        $stream = $disk->readStream($targetPath);
+        $filename = $names[$index] ?? ('documento-' . $index . '.pdf');
 
         return new StreamedResponse(function () use ($stream) {
             fpassthru($stream);
@@ -207,26 +204,24 @@ class ContractController extends Controller
         ]);
     }
 
-    /**
-     * Remove o contrato selecionado
-     */
-    public function destroy($id)
+    public function destroy(int $id)
     {
         $contract = DB::table('contracts')->where('id', $id)->first();
-        if ($contract && ! empty($contract->contractPdfPath) && Storage::disk(self::PDF_DISK)->exists($contract->contractPdfPath)) {
-            Storage::disk(self::PDF_DISK)->delete($contract->contractPdfPath);
+        if ($contract && !empty($contract->contractPdfPath)) {
+            $paths = json_decode($contract->contractPdfPath, true);
+            if (is_array($paths)) {
+                foreach ($paths as $path) {
+                    if (!empty($path) && Storage::disk(self::PDF_DISK)->exists($path)) {
+                        Storage::disk(self::PDF_DISK)->delete($path);
+                    }
+                }
+            }
         }
 
         DB::table('contracts')->where('id', $id)->delete();
         return redirect()->back();
     }
 
-    /**
-     * Monta o array de colunas mapeadas para gravação, espelhando o `emptyForm`
-     * do front. Centralizado para evitar divergência entre store/update.
-     *
-     * @param  array<string,mixed>  $extras  Colunas extras (ex.: PDF) com prioridade.
-     */
     private function buildContractPayload(Request $request, array $extras = [], bool $isUpdate = false): array
     {
         $payload = [
@@ -262,7 +257,6 @@ class ContractController extends Controller
             'observations'                     => $request->input('observations'),
         ];
 
-        // No update mantemos quaisquer colunas extras (ex.: pdf) somente se foram informadas.
         foreach ($extras as $key => $value) {
             if ($isUpdate && $value === null) {
                 continue;

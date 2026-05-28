@@ -1,114 +1,96 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useState, useCallback } from 'react';
+import { usePage } from '@inertiajs/react';
 
-/**
- * Hook genérico de visibilidade de colunas com persistência em `localStorage`.
- *
- * Contrato:
- *  - Se há preferência salva: ela é respeitada absolutamente (filtrando IDs desconhecidos).
- *    Não "re-injetamos" defaults para evitar reverter escolhas explícitas do usuário.
- *  - Se não há preferência: usa o conjunto `defaultVisible`.
- *  - Para lançar uma coluna nova visível a todos os usuários (mesmo aos que já têm
- *    preferências salvas), basta versionar o `storageKey` (ex.: `_v1` → `_v2`).
- *  - Persiste o set a cada mudança.
- */
-
-export interface ColumnDefBase<T extends string> {
-  id: T;
-  defaultVisible: boolean;
-}
-
-export interface UseColumnVisibilityResult<T extends string> {
-  visibleIds: ReadonlySet<T>;
-  isVisible: (id: T) => boolean;
-  toggleColumn: (id: T) => void;
-  setColumn: (id: T, visible: boolean) => void;
-  setColumnsVisible: (ids: readonly T[], visible: boolean) => void;
-  resetDefaults: () => void;
-}
-
-function buildInitialSet<T extends string>(
+export function useColumnVisibility<TId extends string>(
   storageKey: string,
-  allDefs: readonly ColumnDefBase<T>[],
-): Set<T> {
-  const validIds = new Set(allDefs.map((d) => d.id));
-  const defaults = new Set(allDefs.filter((d) => d.defaultVisible).map((d) => d.id));
+  allColumns: readonly { id: TId; defaultVisible?: boolean }[]
+) {
+  // 1. Captura as preferências vindas direto do banco através do Inertia
+  const { auth } = usePage<any>().props;
+  const dbPreferences = auth?.columnPreferences?.[storageKey];
 
-  if (typeof window === "undefined") return defaults;
-
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (!raw) return defaults;
-
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return defaults;
-
-    const saved = parsed.filter((x): x is T => typeof x === "string" && validIds.has(x as T));
-    return new Set<T>(saved);
-  } catch {
-    return defaults;
-  }
-}
-
-export function useColumnVisibility<T extends string>(
-  storageKey: string,
-  allDefs: readonly ColumnDefBase<T>[],
-): UseColumnVisibilityResult<T> {
-  const [visibleIds, setVisibleIds] = useState<Set<T>>(() =>
-    buildInitialSet(storageKey, allDefs),
-  );
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify(Array.from(visibleIds)));
-    } catch {
-      // localStorage indisponível (modo privado, quota cheia, etc.) — não fatal.
+  // 2. Define o Estado Inicial seguindo a ordem de prioridade: Banco > Navegador > Padrão do código
+  const [visibleIds, setVisibleIds] = useState<ReadonlySet<TId>>(() => {
+    // Se existir configuração no Banco de Dados para esta tela, usa ela
+    if (dbPreferences && Array.isArray(dbPreferences)) {
+      return new Set<TId>(dbPreferences as TId[]);
     }
-  }, [storageKey, visibleIds]);
 
-  const toggleColumn = useCallback((id: T) => {
+    // Se não, tenta ler o LocalStorage antigo (Fallback)
+    try {
+      const localData = localStorage.getItem(storageKey);
+      if (localData) {
+        return new Set<TId>(JSON.parse(localData));
+      }
+    } catch (e) {
+      console.error("Erro ao ler localStorage", e);
+    }
+
+    // Se o usuário nunca mexeu em nada, aplica o padrão definido no código
+    const defaults = allColumns
+      .filter((c) => c.defaultVisible !== false)
+      .map((c) => c.id);
+    return new Set<TId>(defaults);
+  });
+
+  // 🚀 FUNÇÃO DE SINCRONIZAÇÃO ASSÍNCRONA COM O LARAVEL
+  const syncWithServer = useCallback((ids: TId[]) => {
+    fetch('/api/user-preferences/columns', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // Captura o token de segurança do Laravel injetado na página principal
+        'X-CSRF-TOKEN': (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content ?? '',
+      },
+      body: JSON.stringify({
+        table_key: storageKey,
+        visible_columns: ids,
+      }),
+    }).catch(err => console.error("Falha ao salvar colunas no banco de dados:", err));
+  }, [storageKey]);
+
+  // 3. Ações de clique do usuário
+  const toggleColumn = useCallback((id: TId) => {
     setVisibleIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      const arrayIds = Array.from(next);
+      localStorage.setItem(storageKey, JSON.stringify(arrayIds)); // Mantém no LocalStorage por segurança
+      syncWithServer(arrayIds as TId[]); // Grava no Banco de Dados
       return next;
     });
-  }, []);
+  }, [storageKey, syncWithServer]);
 
-  const setColumn = useCallback((id: T, visible: boolean) => {
+  const setColumnsVisible = useCallback((ids: readonly TId[], visible: boolean) => {
     setVisibleIds((prev) => {
       const next = new Set(prev);
-      if (visible) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  }, []);
-
-  const setColumnsVisible = useCallback((ids: readonly T[], visible: boolean) => {
-    if (ids.length === 0) return;
-    setVisibleIds((prev) => {
-      const next = new Set(prev);
-      for (const id of ids) {
+      ids.forEach((id) => {
         if (visible) next.add(id);
         else next.delete(id);
-      }
+      });
+      const arrayIds = Array.from(next);
+      localStorage.setItem(storageKey, JSON.stringify(arrayIds));
+      syncWithServer(arrayIds as TId[]);
       return next;
     });
-  }, []);
+  }, [storageKey, syncWithServer]);
 
   const resetDefaults = useCallback(() => {
-    setVisibleIds(new Set(allDefs.filter((d) => d.defaultVisible).map((d) => d.id)));
-  }, [allDefs]);
-
-  const isVisible = useCallback((id: T) => visibleIds.has(id), [visibleIds]);
-
-  const readonlyVisible = useMemo(() => visibleIds as ReadonlySet<T>, [visibleIds]);
+    const defaults = allColumns
+      .filter((c) => c.defaultVisible !== false)
+      .map((c) => c.id);
+    setVisibleIds(new Set(defaults));
+    localStorage.setItem(storageKey, JSON.stringify(defaults));
+    syncWithServer(defaults);
+  }, [allColumns, storageKey, syncWithServer]);
 
   return {
-    visibleIds: readonlyVisible,
-    isVisible,
+    visibleIds,
     toggleColumn,
-    setColumn,
     setColumnsVisible,
     resetDefaults,
   };
