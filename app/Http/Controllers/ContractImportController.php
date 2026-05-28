@@ -6,11 +6,13 @@ use App\Imports\CarteiraContratosImport;
 use App\Jobs\ImportContractsSpreadsheetJob;
 use App\Models\ContractImport;
 use App\Support\ContractImportRegistry;
+use App\Support\ImportErrorTranslator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Inertia\Inertia;
 use Inertia\Response;
 use Maatwebsite\Excel\Facades\Excel;
@@ -43,9 +45,9 @@ class ContractImportController extends Controller
      */
     public function validateSpreadsheet(Request $request): JsonResponse
     {
-        $request->validate([
-            'file' => 'required|file|mimes:xlsx,xls,csv|max:51200', // 50 MB
-        ]);
+        if ($invalid = $this->validateUploadedFile($request)) {
+            return $invalid;
+        }
 
         $file = $request->file('file');
         $tmpPath = $file->getRealPath();
@@ -75,7 +77,7 @@ class ContractImportController extends Controller
                 'ok'      => false,
                 'summary' => $registry->summary(),
                 'errors'  => $registry->errors,
-                'message' => 'Erro ao validar: ' . $e->getMessage(),
+                'message' => ImportErrorTranslator::friendly($e),
             ], 422);
         }
     }
@@ -87,9 +89,9 @@ class ContractImportController extends Controller
      */
     public function store(Request $request): JsonResponse|RedirectResponse
     {
-        $request->validate([
-            'file' => 'required|file|mimes:xlsx,xls,csv|max:51200',
-        ]);
+        if ($invalid = $this->validateUploadedFile($request)) {
+            return $invalid;
+        }
 
         $file = $request->file('file');
         $storedPath = $file->store('contract-imports', 'local');
@@ -108,6 +110,33 @@ class ContractImportController extends Controller
             'importId' => $import->id,
             'message'  => 'Importação enfileirada. Aguarde o processamento em background.',
         ]);
+    }
+
+    /**
+     * Valida o upload aplicando mensagens amigáveis em PT-BR.
+     * Devolve uma JsonResponse 422 quando inválido; null quando OK.
+     */
+    private function validateUploadedFile(Request $request): ?JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'file' => 'required|file|mimes:xlsx,xls,csv|max:51200', // 50 MB
+        ], [
+            'file.required' => 'Selecione um arquivo de planilha para enviar.',
+            'file.file'     => 'O upload enviado não é um arquivo válido.',
+            'file.mimes'    => 'Formato de arquivo inválido. Envie um arquivo .xlsx, .xls ou .csv.',
+            'file.max'      => 'O arquivo excede o tamanho máximo permitido (50 MB).',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'ok'      => false,
+                'summary' => null,
+                'errors'  => [],
+                'message' => $validator->errors()->first('file'),
+            ], 422);
+        }
+
+        return null;
     }
 
     /**

@@ -180,6 +180,12 @@ class BaseParcelasSheet implements OnEachRow, WithHeadingRow, WithStartRow, With
         } else {
             $this->import->successRows += 1;
         }
+        // Em modo validação a ContractImport recebida é uma instância "fantasma"
+        // (nunca salva no banco). Persistir aqui criaria um registro indesejado
+        // na tabela "Importações recentes".
+        if ($this->dryRun) {
+            return;
+        }
         // Em sheets grandes, evitamos saveQuietly() a cada linha para não
         // martelar o banco. Salvamos a cada 25 linhas para ainda dar feedback
         // razoável ao polling do frontend.
