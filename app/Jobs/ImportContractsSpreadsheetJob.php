@@ -6,6 +6,7 @@ use App\Imports\CarteiraContratosImport;
 use App\Models\Contract;
 use App\Models\ContractImport;
 use App\Support\ContractImportRegistry;
+use App\Support\ImportErrorTranslator;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -68,11 +69,17 @@ class ImportContractsSpreadsheetJob implements ShouldQueue
             Log::error("[ImportJob] Falha na importação {$import->id}: " . $e->getMessage(), [
                 'trace' => $e->getTraceAsString(),
             ]);
+            $friendly = ImportErrorTranslator::friendly($e);
             $import->status      = ContractImport::STATUS_FAILED;
             $import->finishedAt  = now();
             $import->errorsJson  = array_merge(
                 $registry->errors ?? [],
-                [['sheet' => 'job', 'row' => 0, 'message' => $e->getMessage(), 'severity' => 'fatal']]
+                [[
+                    'sheet'    => 'arquivo',
+                    'row'      => 0,
+                    'message'  => $friendly,
+                    'severity' => 'fatal',
+                ]]
             );
             $import->summaryJson = $registry->summary();
             $import->save();
