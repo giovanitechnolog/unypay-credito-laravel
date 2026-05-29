@@ -42,10 +42,26 @@ class ContractController extends Controller
 
         $rawContracts = $query->orderBy('contracts.id', 'desc')->get();
 
-        // 🚀 VERIFICAÇÃO MULTI-PDF: Lê o array JSON do banco de dados para saber se há anexos
-        $rawContracts->transform(function ($row) {
-            $paths = json_decode($row->contractPdfPath ?? '[]', true);
-            $row->hasContractPdf = !empty($paths) && count($paths) > 0;
+        // 🚀 VERIFICAÇÃO MULTI-PDF FÍSICA: Lê os arrays JSON e confirma que cada PDF
+        // realmente existe no disco. Arquivos ausentes são silenciosamente ignorados
+        // para que a UI não ofereça botões de visualização que vão dar 404.
+        $disk = Storage::disk(self::PDF_DISK);
+        $rawContracts->transform(function ($row) use ($disk) {
+            $paths = json_decode($row->contractPdfPath ?? '[]', true) ?: [];
+            $names = json_decode($row->sourcePdfName ?? '[]', true) ?: [];
+
+            $availablePdfs = [];
+            foreach ($paths as $i => $path) {
+                if (!empty($path) && $disk->exists($path)) {
+                    $availablePdfs[] = [
+                        'index' => $i,
+                        'name'  => $names[$i] ?? ('documento-' . ($i + 1) . '.pdf'),
+                    ];
+                }
+            }
+
+            $row->availablePdfs  = $availablePdfs;
+            $row->hasContractPdf = !empty($availablePdfs);
             return $row;
         });
 

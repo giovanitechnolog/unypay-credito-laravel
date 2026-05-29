@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Plus, Search, FileText, CheckCircle, X, Edit2, Trash2, Upload, Eye } from "lucide-react";
+import { Plus, Search, FileText, CheckCircle, X, Edit2, Trash2, Upload, Eye, Ban } from "lucide-react";
 import { Head, router } from "@inertiajs/react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
@@ -27,7 +27,7 @@ const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
 };
 
 const PAGE_SIZES = [20, 50, 100];
-const ACTIONS_WIDTH = 132;
+const ACTIONS_WIDTH = 160;
 const MAX_PDF_MB = 20;
 const MAX_PDF_BYTES = MAX_PDF_MB * 1024 * 1024;
 
@@ -113,13 +113,16 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   
   // 🚀 ESTADO PARA MÚLTIPLOS PDFs
   const [contractPdfFiles, setContractPdfFiles] = useState<File[]>([]);
-  const [existingPdfNames, setExistingPdfNames] = useState<string[]>([]);
-  
+  // Arquivos já gravados que EXISTEM fisicamente no servidor (vindos de `availablePdfs`)
+  const [existingPdfs, setExistingPdfs] = useState<Array<{ index: number; name: string }>>([]);
+
   const [submitting, setSubmitting] = useState(false);
-  
-  // Controle de preview de multiplos PDFs
-  const [pdfPreview, setPdfPreview] = useState<{ id: number; code: string; names: string[] } | null>(null);
-  const [activePdfIndex, setActivePdfIndex] = useState<number>(0);
+
+  // Controle de preview de múltiplos PDFs.
+  // `files` carrega o índice real do PDF no servidor (após filtragem dos inexistentes)
+  // junto com o nome de exibição.
+  const [pdfPreview, setPdfPreview] = useState<{ id: number; code: string; files: Array<{ index: number; name: string }> } | null>(null);
+  const [activePdfPos, setActivePdfPos] = useState<number>(0);
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -149,14 +152,24 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   // 🚀 Juros Total = ((p × n) / q) - 1
   // p = Valor da Prestação (installmentAmount)
   // n = Número de Meses (installmentCount)
-  // q = Valor Financiado (financedTotal)
-  const jurosTotal = useMemo(() => {
+  // q = Valor Financiado — usamos `financedTotal` quando preenchido; caso contrário
+  // caímos para `principalAmount` (campo obrigatório do formulário). Isso evita
+  // que o cálculo fique zerado quando o operador só informa o Valor Principal.
+  const jurosTotalInfo = useMemo(() => {
     const p = Number(form.installmentAmount) || 0;
     const n = Number(form.installmentCount) || 0;
-    const q = Number(form.financedTotal) || 0;
-    if (q <= 0 || n <= 0 || p <= 0) return null;
-    return (p * n) / q - 1;
-  }, [form.installmentAmount, form.installmentCount, form.financedTotal]);
+    const financed = Number(form.financedTotal) || 0;
+    const principal = Number(form.principalAmount) || 0;
+    const q = financed > 0 ? financed : principal;
+    const qSource: "financedTotal" | "principalAmount" | null =
+      financed > 0 ? "financedTotal" : principal > 0 ? "principalAmount" : null;
+
+    if (q <= 0 || n <= 0 || p <= 0 || !qSource) {
+      return { value: null as number | null, q: 0, qSource: null as typeof qSource };
+    }
+    return { value: (p * n) / q - 1, q, qSource };
+  }, [form.installmentAmount, form.installmentCount, form.financedTotal, form.principalAmount]);
+  const jurosTotal = jurosTotalInfo.value;
 
   const stickyOffsets = useMemo(() => {
     const offsets = new Map<ContractsColumnId, number>();
@@ -188,7 +201,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     setForm(emptyForm);
     setEditingId(null);
     setContractPdfFiles([]);
-    setExistingPdfNames([]);
+    setExistingPdfs([]);
     setActiveTab("basico");
   };
 
@@ -236,13 +249,12 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       observations: c.observations ?? "",
     });
     setContractPdfFiles([]);
-    
-    try {
-      const decodedNames = JSON.parse(c.sourcePdfName || "[]");
-      setExistingPdfNames(Array.isArray(decodedNames) ? decodedNames : []);
-    } catch {
-      setExistingPdfNames(c.sourcePdfName ? [c.sourcePdfName] : []);
-    }
+
+    // 🚀 `availablePdfs` vem do servidor já filtrado: contém apenas arquivos que
+    // realmente existem no disco. Cada item tem { index, name } onde `index`
+    // é a posição original no array salvo (necessária para a rota /pdf?index=N).
+    const available: Array<{ index: number; name: string }> = Array.isArray(c.availablePdfs) ? c.availablePdfs : [];
+    setExistingPdfs(available);
 
     setActiveTab("basico");
     setOpen(true);
@@ -312,23 +324,19 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
 
   const handleViewPdf = (item: any) => {
     const c = item.contract ?? item;
-    if (!c.hasContractPdf) {
-      toast.info("Este contrato não possui minutas digitais anexadas.");
+    // `availablePdfs` é montado no servidor após verificação física dos arquivos.
+    // Se a lista estiver vazia, nem chegamos a abrir o modal de visualização.
+    const available: Array<{ index: number; name: string }> = Array.isArray(c.availablePdfs) ? c.availablePdfs : [];
+    if (!c.hasContractPdf || available.length === 0) {
+      toast.info("Este contrato não possui minutas digitais disponíveis no servidor.");
       return;
     }
-    
-    let decodedNames: string[] = [];
-    try {
-      decodedNames = JSON.parse(c.sourcePdfName || "[]");
-    } catch {
-      decodedNames = [c.sourcePdfName || "documento.pdf"];
-    }
 
-    setActivePdfIndex(0); // Força a visualização a começar sempre no primeiro PDF da lista
+    setActivePdfPos(0);
     setPdfPreview({
       id: c.id,
       code: c.code ?? "",
-      names: decodedNames,
+      files: available,
     });
   };
 
@@ -339,6 +347,21 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       preserveScroll: true,
       onSuccess: () => toast.success("Contrato removido."),
       onError: () => toast.error("Falha ao deletar o registro."),
+    });
+  };
+
+  // 🚀 CANCELAR CONTRATO — apenas muda o status para "Cancelado" (sem apagar nada)
+  const handleCancel = (item: any) => {
+    const c = item.contract ?? item;
+    if (c.status === "Cancelado") {
+      toast.info("Este contrato já está cancelado.");
+      return;
+    }
+    if (!confirm(`Deseja realmente cancelar o contrato ${c.code}? O status será alterado para "Cancelado".`)) return;
+    router.post(`/contracts/${c.id}/cancel`, {}, {
+      preserveScroll: true,
+      onSuccess: () => toast.success("Contrato cancelado com sucesso."),
+      onError: () => toast.error("Não foi possível cancelar o contrato."),
     });
   };
 
@@ -590,7 +613,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                             {/* 🚀 ICONE DE DOCUMENTO (ABRE VIEWER MULTI-PDF) */}
                             <button
                               className="btn-icon"
-                              title={hasPdf ? "Visualizar PDFs anexados" : "Nenhum PDF anexado"}
+                              title={hasPdf ? "Visualizar PDFs anexados" : "Nenhum PDF disponível no servidor"}
                               onClick={() => handleViewPdf(item)}
                               disabled={!hasPdf}
                               style={{ opacity: hasPdf ? 1 : 0.4, cursor: hasPdf ? "pointer" : "not-allowed" }}
@@ -601,7 +624,22 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                             <button className="btn-icon" title="Editar contrato" onClick={() => handleOpenEdit(item)}>
                               <Edit2 size={11} />
                             </button>
-                           
+
+                            {/* 🚀 CANCELAR CONTRATO — altera somente o status */}
+                            <button
+                              className="btn-icon"
+                              title={c.status === "Cancelado" ? "Contrato já cancelado" : "Cancelar contrato"}
+                              onClick={() => handleCancel(item)}
+                              disabled={c.status === "Cancelado"}
+                              style={{
+                                color: "#b45309",
+                                opacity: c.status === "Cancelado" ? 0.4 : 1,
+                                cursor: c.status === "Cancelado" ? "not-allowed" : "pointer",
+                              }}
+                            >
+                              <Ban size={11} />
+                            </button>
+
                             <button className="btn-icon" title="Excluir contrato" onClick={() => handleDelete(item)} style={{ color: "#dc2626" }}>
                               <Trash2 size={11} />
                             </button>
@@ -786,19 +824,19 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                           </div>
                         )}
 
-                        {/* Listagem dos arquivos que já estão salvos e guardados no banco */}
-                        {existingPdfNames.length > 0 && (
+                        {/* Listagem dos arquivos que já estão salvos e existem no disco do servidor */}
+                        {existingPdfs.length > 0 && (
                           <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
                             <span style={{ fontSize: 10, fontWeight: 700, color: "#4b5563" }}>DOCUMENTOS JÁ ARQUIVADOS:</span>
-                            {existingPdfNames.map((name, idx) => (
-                              <span key={idx} style={{ fontSize: 11, color: "#4b5563", display: "inline-flex", alignItems: "center", gap: 4, background: "#f3f4f6", padding: "2px 6px", borderRadius: 4, width: "fit-content" }}>
-                                <FileText size={12} /> {name}
+                            {existingPdfs.map((file, pos) => (
+                              <span key={`${file.index}-${pos}`} style={{ fontSize: 11, color: "#4b5563", display: "inline-flex", alignItems: "center", gap: 4, background: "#f3f4f6", padding: "2px 6px", borderRadius: 4, width: "fit-content" }}>
+                                <FileText size={12} /> {file.name}
                                 {editingId && (
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      setActivePdfIndex(idx);
-                                      setPdfPreview({ id: editingId, code: form.code, names: existingPdfNames });
+                                      setActivePdfPos(pos);
+                                      setPdfPreview({ id: editingId, code: form.code, files: existingPdfs });
                                     }}
                                     style={{ background: "none", border: "none", cursor: "pointer", color: "#2563eb", display: "flex" }}
                                     title="Visualizar este PDF específico"
@@ -860,14 +898,22 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                             className="sigx-input mono"
                             readOnly
                             value={jurosTotal === null ? "" : fmtPct(jurosTotal)}
-                            placeholder="Preencha Valor Financiado, Nº de Parcelas e Valor da Parcela"
+                            placeholder="Preencha o Valor Principal (ou Total Financiado), Nº de Parcelas e Valor da Parcela"
                             style={{ background: "white", color: "#0f172a", fontWeight: 700, maxWidth: 220 }}
                           />
-                          <span style={{ fontSize: 10, color: "#475569", lineHeight: 1.35 }}>
-                            Fórmula: <strong>((p × n) ÷ q) − 1</strong> &nbsp;|&nbsp;
-                            p = valor da parcela ({fmt(form.installmentAmount || 0)}),&nbsp;
-                            n = nº de meses ({form.installmentCount || 0}),&nbsp;
-                            q = valor financiado ({fmt(form.financedTotal || 0)}).
+                          <span style={{ fontSize: 10, color: "#475569", lineHeight: 1.45 }}>
+                            Fórmula: <strong>((p × n) ÷ q) − 1</strong><br />
+                            p = valor da parcela = <strong>{fmt(form.installmentAmount || 0)}</strong>&nbsp;|&nbsp;
+                            n = nº de meses = <strong>{form.installmentCount || 0}</strong>&nbsp;|&nbsp;
+                            q = valor financiado = <strong>{fmt(jurosTotalInfo.q)}</strong>
+                            {jurosTotalInfo.qSource === "principalAmount" && (
+                              <em style={{ color: "#92400e" }}> (usando Valor Principal — preencha Total Financiado para sobrescrever)</em>
+                            )}
+                            {jurosTotalInfo.qSource === "financedTotal" && (
+                              <em style={{ color: "#065f46" }}> (usando Total Financiado)</em>
+                            )}
+                            <br />
+                            Total pago no contrato = p × n = <strong>{fmt((form.installmentAmount || 0) * (form.installmentCount || 0))}</strong>
                           </span>
                         </div>
                       </div>
@@ -1044,7 +1090,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   {/* 🚀 BOTÃO "VER COMPLETO" EM NOVA ABA */}
                   <a
-                    href={`/contracts/${pdfPreview.id}/pdf?index=${activePdfIndex}`}
+                    href={`/contracts/${pdfPreview.id}/pdf?index=${pdfPreview.files[activePdfPos]?.index ?? 0}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="btn-secondary"
@@ -1062,36 +1108,36 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
               {/* Corpo Split (Abas na Esquerda, Visualização na Direita) */}
               <div style={{ flex: 1, minHeight: 0, display: "flex", background: "#1f2937" }}>
                 
-                {/* Menu lateral esquerdo de abas de arquivos */}
+                {/* Menu lateral esquerdo de abas de arquivos (somente os existentes no servidor) */}
                 <div style={{ width: 250, background: "#111827", borderRight: "1px solid #374151", padding: 12, display: "flex", flexDirection: "column", gap: 6, overflowY: "auto" }}>
                   <span style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", letterSpacing: "0.05em", marginBottom: 6 }}>ARQUIVOS COMPONENTES:</span>
-                  {pdfPreview.names.map((name, index) => (
+                  {pdfPreview.files.map((file, pos) => (
                     <button
-                      key={index}
+                      key={`${file.index}-${pos}`}
                       type="button"
-                      onClick={() => setActivePdfIndex(index)}
+                      onClick={() => setActivePdfPos(pos)}
                       style={{
                         width: "100%", padding: "10px 12px", borderRadius: 4, border: "none",
                         textAlign: "left", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
-                        background: activePdfIndex === index ? "#2563eb" : "#1f2937",
-                        color: activePdfIndex === index ? "white" : "#d1d5db",
+                        background: activePdfPos === pos ? "#2563eb" : "#1f2937",
+                        color: activePdfPos === pos ? "white" : "#d1d5db",
                         transition: "all 0.1s"
                       }}
                     >
-                      <FileText size={12} style={{ flexShrink: 0, color: activePdfIndex === index ? "white" : "#9ca3af" }} />
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={name}>
-                        {name}
+                      <FileText size={12} style={{ flexShrink: 0, color: activePdfPos === pos ? "white" : "#9ca3af" }} />
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={file.name}>
+                        {file.name}
                       </span>
                     </button>
                   ))}
                 </div>
 
-                {/* Área Dinâmica do Iframe carregando o index selecionado */}
+                {/* Área Dinâmica do Iframe carregando o index real do servidor */}
                 <div style={{ flex: 1, height: "100%", background: "#1f2937" }}>
                   <iframe
-                    key={`${pdfPreview.id}-${activePdfIndex}`} // Recarrega o frame de forma limpa mudando a key baseada no index
-                    src={`/contracts/${pdfPreview.id}/pdf?index=${activePdfIndex}#toolbar=1&navpanes=0&view=FitH`}
-                    title={`Visualizador do PDF ${activePdfIndex}`}
+                    key={`${pdfPreview.id}-${activePdfPos}`}
+                    src={`/contracts/${pdfPreview.id}/pdf?index=${pdfPreview.files[activePdfPos]?.index ?? 0}#toolbar=1&navpanes=0&view=FitH`}
+                    title={`Visualizador do PDF ${pdfPreview.files[activePdfPos]?.name ?? ""}`}
                     style={{ width: "100%", height: "100%", border: "none", display: "block" }}
                   />
                 </div>
