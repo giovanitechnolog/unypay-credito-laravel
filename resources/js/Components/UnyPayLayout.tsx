@@ -4,7 +4,7 @@ import {
   LayoutDashboard, List, Users, FileText, Calculator,
   TrendingUp, ClipboardList, LogOut, Menu, Bell,
   ChevronDown, Shield, CreditCard, ChevronRight, History,
-  UserCog
+  UserCog, FileBadge
 } from "lucide-react";
 
 const NAV_SECTIONS = [
@@ -36,7 +36,8 @@ const NAV_SECTIONS = [
   {
     label: "GESTÃO INTERNA",
     items: [
-      { href: "/usuarios", label: "Usuários", icon: UserCog },
+      { href: "/usuarios",       label: "Usuários",          icon: UserCog },
+      { href: "/tipos-contrato", label: "Tipos de Contrato", icon: FileBadge },
     ],
   },
 ];
@@ -55,6 +56,7 @@ function getPageTitle(url: string) {
   if (url === "/serasa") return "Monitor Serasa";
   if (url === "/audit") return "Auditoria";
   if (url === "/usuarios") return "Usuários";
+  if (url === "/tipos-contrato") return "Tipos de Contrato";
   return "UnyPay® Crédito";
 }
 
@@ -73,6 +75,7 @@ function getBreadcrumb(url: string) {
   if (url === "/serasa") return [base, { label: "Monitor Serasa" }];
   if (url === "/audit") return [base, { label: "Auditoria" }];
   if (url === "/usuarios") return [base, { label: "Gestão Interna" }, { label: "Usuários" }];
+  if (url === "/tipos-contrato") return [base, { label: "Gestão Interna" }, { label: "Tipos de Contrato" }];
   return [base];
 }
 

@@ -6,6 +6,7 @@ use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\ContractController;
 use App\Http\Controllers\ContractImportController;
+use App\Http\Controllers\ContractTypeController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\IpcaController;
 use App\Http\Controllers\LancamentosController;
@@ -121,6 +122,24 @@ Route::middleware('auth')->group(function () {
     Route::post  ('/api/users',         [UserController::class, 'store'])->name('users.store');
     Route::put   ('/api/users/{user}',  [UserController::class, 'update'])->name('users.update');
     Route::delete('/api/users/{user}',  [UserController::class, 'destroy'])->name('users.destroy');
+
+    /*
+    |--------------------------------------------------------------------------
+    | CRUD de Tipos de Contrato (Gestão Interna)
+    |--------------------------------------------------------------------------
+    |
+    | Lista, cadastra, edita e desativa/exclui tipos de contrato. A página
+    | Inertia em /tipos-contrato consome a API /api/contract-types para
+    | manter a UX igual à de Usuários (refresh sem reload completo).
+    |
+    */
+    Route::get('/tipos-contrato', [ContractTypeController::class, 'index'])->name('contract-types.index');
+
+    Route::get   ('/api/contract-types',                         [ContractTypeController::class, 'list'])->name('contract-types.list');
+    Route::post  ('/api/contract-types',                         [ContractTypeController::class, 'store'])->name('contract-types.store');
+    Route::put   ('/api/contract-types/{contractType}',          [ContractTypeController::class, 'update'])->name('contract-types.update');
+    Route::patch ('/api/contract-types/{contractType}/toggle',   [ContractTypeController::class, 'toggleActive'])->name('contract-types.toggle');
+    Route::delete('/api/contract-types/{contractType}',          [ContractTypeController::class, 'destroy'])->name('contract-types.destroy');
 
     /*
     |--------------------------------------------------------------------------

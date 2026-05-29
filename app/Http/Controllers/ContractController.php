@@ -49,7 +49,13 @@ class ContractController extends Controller
             return $row;
         });
 
-        $contractTypes = DB::table('contract_types')->orderBy('name', 'asc')->get();
+        // Apenas tipos ATIVOS aparecem no dropdown de criação/edição de
+        // contrato. Tipos desativados continuam refletidos no JOIN acima
+        // para que contratos antigos preservem o nome correto na listagem.
+        $contractTypes = DB::table('contract_types')
+            ->where('is_active', true)
+            ->orderBy('name', 'asc')
+            ->get();
         $clients = DB::table('clients')->orderBy('name', 'asc')->get(['id', 'name']);
 
         return Inertia::render('Contracts', [
