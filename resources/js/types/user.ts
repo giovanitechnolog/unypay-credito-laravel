@@ -4,6 +4,9 @@ export interface User {
   id: number;
   name: string;
   email: string;
+  document?: string | null;
+  birthDate?: string | null;
+  phone?: string | null;
   photo?: string | null;
   photoUrl?: string | null;
   role: UserRole;
@@ -15,7 +18,11 @@ export interface User {
 export interface UserFormValues {
   name: string;
   email: string;
+  document: string;
+  birthDate: string;
+  phone: string;
   password: string;
+  passwordConfirmation: string;
   role: UserRole;
   photo?: File | null;
 }

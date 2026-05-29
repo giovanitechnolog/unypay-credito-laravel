@@ -23,6 +23,9 @@ class User extends Authenticatable
         'openId',
         'name',
         'email',
+        'document',
+        'birthDate',
+        'phone',
         'password',
         'photo',
         'loginMethod',
@@ -46,6 +49,7 @@ class User extends Authenticatable
             'password'          => 'hashed',
             'email_verified_at' => 'datetime',
             'lastSignedIn'      => 'datetime',
+            'birthDate'         => 'date:Y-m-d',
         ];
     }
 

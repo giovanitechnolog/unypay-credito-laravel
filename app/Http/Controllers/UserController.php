@@ -37,12 +37,17 @@ class UserController extends Controller
         $perPage = (int) $request->input('per_page', 25);
 
         $query = User::query()
-            ->select(['id', 'created_by', 'name', 'email', 'photo', 'role', 'createdAt', 'updatedAt', 'lastSignedIn']);
+            ->select([
+                'id', 'created_by', 'name', 'email', 'document', 'birthDate', 'phone',
+                'photo', 'role', 'createdAt', 'updatedAt', 'lastSignedIn',
+            ]);
 
         if ($search !== '') {
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%");
+                  ->orWhere('email', 'like', "%{$search}%")
+                  ->orWhere('document', 'like', "%{$search}%")
+                  ->orWhere('phone', 'like', "%{$search}%");
             });
         }
 
@@ -62,6 +67,9 @@ class UserController extends Controller
             'created_by'   => Auth::id(), // 🚀 INJEÇÃO DE AUDITORIA: Grava o ID do admin logado que clicou em criar
             'name'         => $request->string('name'),
             'email'        => $request->string('email')->lower(),
+            'document'     => $request->input('document'),
+            'birthDate'    => $request->input('birthDate'),
+            'phone'        => $request->input('phone'),
             'password'     => $request->string('password'),
             'photo'        => $photoPath,
             'role'         => $request->input('role', 'admin'),
@@ -71,7 +79,10 @@ class UserController extends Controller
 
         return response()->json([
             'message' => 'Usuário criado com sucesso.',
-            'user'    => $user->only(['id', 'name', 'email', 'photo', 'photoUrl', 'role']),
+            'user'    => $user->only([
+                'id', 'name', 'email', 'document', 'birthDate', 'phone',
+                'photo', 'photoUrl', 'role',
+            ]),
         ], 201);
     }
 
@@ -81,9 +92,12 @@ class UserController extends Controller
     public function update(UpdateUserRequest $request, User $user): JsonResponse
     {
         $payload = [
-            'name'  => $request->string('name'),
-            'email' => $request->string('email')->lower(),
-            'role'  => $request->input('role', $user->role),
+            'name'      => $request->string('name'),
+            'email'     => $request->string('email')->lower(),
+            'document'  => $request->input('document'),
+            'birthDate' => $request->input('birthDate'),
+            'phone'     => $request->input('phone'),
+            'role'      => $request->input('role', $user->role),
         ];
 
         if ($request->filled('password')) {
@@ -103,7 +117,10 @@ class UserController extends Controller
 
         return response()->json([
             'message' => 'Usuário atualizado com sucesso.',
-            'user'    => $user->only(['id', 'name', 'email', 'photo', 'photoUrl', 'role']),
+            'user'    => $user->only([
+                'id', 'name', 'email', 'document', 'birthDate', 'phone',
+                'photo', 'photoUrl', 'role',
+            ]),
         ]);
     }
 
