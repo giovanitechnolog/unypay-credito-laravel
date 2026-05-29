@@ -50,7 +50,13 @@ class ContractController extends Controller
         });
 
         $contractTypes = DB::table('contract_types')->orderBy('name', 'asc')->get();
-        $clients = DB::table('clients')->orderBy('name', 'asc')->get(['id', 'name']);
+
+        // 🚀 Carrega os clientes com os dados que o CRUD de contratos precisa
+        // exibir nas guias "Dados Básicos" (endereço, CEP, CNPJ/CPF) e
+        // "Dados Bancários" (notes contém bankAccounts e pixKey em JSON).
+        $clients = DB::table('clients')
+            ->orderBy('name', 'asc')
+            ->get(['id', 'name', 'document', 'address', 'city', 'state', 'zipCode', 'personType', 'notes']);
 
         return Inertia::render('Contracts', [
             'contracts'     => $rawContracts,
@@ -253,6 +259,8 @@ class ContractController extends Controller
             'accelerationAlternateThreshold'   => $request->input('accelerationAlternateThreshold'),
             'guarantees'                       => $request->input('guarantees'),
             'guarantors'                       => $request->input('guarantors'),
+            'confessionOfDebt'                 => filter_var($request->input('confessionOfDebt', false), FILTER_VALIDATE_BOOLEAN),
+            'forum'                            => $request->input('forum'),
             'validationUrl'                    => $request->input('validationUrl'),
             'observations'                     => $request->input('observations'),
         ];

@@ -47,7 +47,10 @@ const emptyForm = {
   correctionIndex: "IPCA", honoraryRate: 0, accelerates: false,
   accelerationRule: "", accelerationConsecutiveThreshold: undefined as number | undefined,
   accelerationAlternateThreshold: undefined as number | undefined,
-  guarantees: "", guarantors: "", validationUrl: "", observations: "",
+  guarantees: "", guarantors: "",
+  confessionOfDebt: false,
+  forum: "",
+  validationUrl: "", observations: "",
 };
 
 const TABS = [
@@ -56,7 +59,39 @@ const TABS = [
   { key: "taxas", label: "Taxas e Encargos" },
   { key: "garantias", label: "Garantias e Fiadores" },
   { key: "regras", label: "Regras Contratuais" },
+  { key: "bancarios", label: "Dados Bancários" },
 ];
+
+// Tradução amigável dos tipos de conta para exibição na aba "Dados Bancários"
+const ACCOUNT_TYPE_LABELS: Record<string, string> = {
+  corrente: "Corrente",
+  poupanca: "Poupança",
+  pagamentos: "Pagamentos",
+  salario: "Conta Salário",
+  conjunta: "Conta Conjunta",
+};
+
+// Lê os dados financeiros que estão guardados (JSON) na coluna `notes` do cliente
+function parseClientNotes(notes: string | null | undefined): {
+  bankAccounts?: Array<{ banco?: string; agencia?: string; conta?: string; tipo?: string }>;
+  pixKey?: string;
+} {
+  if (!notes) return {};
+  try {
+    const parsed = JSON.parse(notes);
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+// Tenta separar o código do banco do nome (formato salvo no cliente: "001 - Banco do Brasil S.A.")
+function splitBank(label?: string): { code: string; name: string } {
+  if (!label) return { code: "", name: "" };
+  const match = label.match(/^\s*(\d{3,4})\s*[-–]\s*(.+)$/);
+  if (match) return { code: match[1], name: match[2].trim() };
+  return { code: "", name: label.trim() };
+}
 
 const headerCellStyle: React.CSSProperties = {
   background: "#f1f5f9", color: "#334155",
@@ -98,6 +133,30 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     () => CONTRACTS_COLUMNS.filter((c) => visibleIds.has(c.id)),
     [visibleIds]
   );
+
+  // 🚀 Cliente vinculado no formulário (usado nas guias "Dados Básicos" e "Dados Bancários")
+  const selectedClient = useMemo(() => {
+    if (!form.clientId) return null;
+    return (clients ?? []).find((c: any) => Number(c.id) === Number(form.clientId)) ?? null;
+  }, [clients, form.clientId]);
+
+  // Dados financeiros (contas/PIX) do cliente vinculado, decodificados do JSON salvo em `notes`
+  const selectedClientNotes = useMemo(
+    () => parseClientNotes(selectedClient?.notes),
+    [selectedClient]
+  );
+
+  // 🚀 Juros Total = ((p × n) / q) - 1
+  // p = Valor da Prestação (installmentAmount)
+  // n = Número de Meses (installmentCount)
+  // q = Valor Financiado (financedTotal)
+  const jurosTotal = useMemo(() => {
+    const p = Number(form.installmentAmount) || 0;
+    const n = Number(form.installmentCount) || 0;
+    const q = Number(form.financedTotal) || 0;
+    if (q <= 0 || n <= 0 || p <= 0) return null;
+    return (p * n) / q - 1;
+  }, [form.installmentAmount, form.installmentCount, form.financedTotal]);
 
   const stickyOffsets = useMemo(() => {
     const offsets = new Map<ContractsColumnId, number>();
@@ -171,6 +230,8 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       accelerationAlternateThreshold: c.accelerationAlternateThreshold ?? undefined,
       guarantees: c.guarantees ?? "",
       guarantors: c.guarantors ?? "",
+      confessionOfDebt: !!c.confessionOfDebt,
+      forum: c.forum ?? "",
       validationUrl: c.validationUrl ?? "",
       observations: c.observations ?? "",
     });
@@ -621,6 +682,45 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                           {clients?.map((c: any) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
                         </select>
                       </div>
+
+                      {/* 🚀 Campos do cliente vinculado (somente exibição, vindos do CRUD de Clientes) */}
+                      <div>
+                        <label className="sigx-label">CNPJ/CPF</label>
+                        <input
+                          className="sigx-input"
+                          value={selectedClient?.document ?? ""}
+                          readOnly
+                          placeholder={selectedClient ? "—" : "Selecione um cliente"}
+                          style={{ background: "#f9fafb", color: "#4b5563" }}
+                        />
+                      </div>
+                      <div>
+                        <label className="sigx-label">CEP</label>
+                        <input
+                          className="sigx-input"
+                          value={selectedClient?.zipCode ?? ""}
+                          readOnly
+                          placeholder={selectedClient ? "—" : "Selecione um cliente"}
+                          style={{ background: "#f9fafb", color: "#4b5563" }}
+                        />
+                      </div>
+                      <div style={{ gridColumn: "span 2" }}>
+                        <label className="sigx-label">ENDEREÇO</label>
+                        <input
+                          className="sigx-input"
+                          value={
+                            selectedClient
+                              ? [selectedClient.address, selectedClient.city, selectedClient.state]
+                                  .filter(Boolean)
+                                  .join(" — ")
+                              : ""
+                          }
+                          readOnly
+                          placeholder={selectedClient ? "—" : "Selecione um cliente"}
+                          style={{ background: "#f9fafb", color: "#4b5563" }}
+                        />
+                      </div>
+
                       <div><label className="sigx-label">CÓDIGO *</label><input className="sigx-input" value={form.code} onChange={n("code")} required placeholder="Ex: BeloSanta1" /></div>
                       <div><label className="sigx-label">DATA DO CONTRATO</label><input type="date" className="sigx-input" value={form.contractDate} onChange={n("contractDate")} /></div>
                       <div style={{ gridColumn: "span 2" }}><label className="sigx-label">NOME DO CONTRATO *</label><input className="sigx-input" value={form.contractName} onChange={n("contractName")} required /></div>
@@ -751,12 +851,47 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                           <option value="IPCA">IPCA</option><option value="IGPM">IGPM</option><option value="Nenhuma">Nenhuma</option>
                         </select>
                       </div>
+
+                      {/* 🚀 JUROS TOTAL — calculado automaticamente: ((p × n) / q) - 1 */}
+                      <div style={{ gridColumn: "span 3", marginTop: 6, padding: 12, borderRadius: 6, background: "#f8fafc", border: "1px dashed #cbd5e1" }}>
+                        <label className="sigx-label" style={{ color: "#1e293b" }}>JUROS TOTAL (CALCULADO)</label>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <input
+                            className="sigx-input mono"
+                            readOnly
+                            value={jurosTotal === null ? "" : fmtPct(jurosTotal)}
+                            placeholder="Preencha Valor Financiado, Nº de Parcelas e Valor da Parcela"
+                            style={{ background: "white", color: "#0f172a", fontWeight: 700, maxWidth: 220 }}
+                          />
+                          <span style={{ fontSize: 10, color: "#475569", lineHeight: 1.35 }}>
+                            Fórmula: <strong>((p × n) ÷ q) − 1</strong> &nbsp;|&nbsp;
+                            p = valor da parcela ({fmt(form.installmentAmount || 0)}),&nbsp;
+                            n = nº de meses ({form.installmentCount || 0}),&nbsp;
+                            q = valor financiado ({fmt(form.financedTotal || 0)}).
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   )}
                   {activeTab === "garantias" && (
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                       <div style={{ gridColumn: "span 2" }}><label className="sigx-label">GARANTIAS REAIS</label><textarea className="sigx-input" value={form.guarantees} onChange={n("guarantees")} rows={3} /></div>
                       <div style={{ gridColumn: "span 2" }}><label className="sigx-label">FIADORES</label><textarea className="sigx-input" value={form.guarantors} onChange={n("guarantors")} rows={3} /></div>
+
+                      {/* 🚀 CONFISSÃO DE DÍVIDA */}
+                      <div style={{ gridColumn: "span 2", display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6 }}>
+                        <input
+                          type="checkbox"
+                          id="confessionOfDebt"
+                          checked={form.confessionOfDebt}
+                          onChange={e => setForm(p => ({ ...p, confessionOfDebt: e.target.checked }))}
+                          style={{ width: 14, height: 14 }}
+                        />
+                        <label htmlFor="confessionOfDebt" className="sigx-label" style={{ marginBottom: 0, cursor: "pointer" }}>
+                          Contrato contém cláusula de Confissão de Dívida
+                        </label>
+                      </div>
+
                       <div style={{ gridColumn: "span 2" }}><label className="sigx-label">OBSERVAÇÕES</label><textarea className="sigx-input" value={form.observations} onChange={n("observations")} rows={3} /></div>
                     </div>
                   )}
@@ -771,6 +906,104 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                           <div><label className="sigx-label">PARCELAS CONSECUTIVAS</label><input type="number" min="1" className="sigx-input" value={form.accelerationConsecutiveThreshold ?? ""} onChange={e => setForm(p => ({ ...p, accelerationConsecutiveThreshold: parseInt(e.target.value) || undefined }))} /></div>
                           <div><label className="sigx-label">PARCELAS ALTERNADAS</label><input type="number" min="1" className="sigx-input" value={form.accelerationAlternateThreshold ?? ""} onChange={e => setForm(p => ({ ...p, accelerationAlternateThreshold: parseInt(e.target.value) || undefined }))} /></div>
                           <div style={{ gridColumn: "span 2" }}><label className="sigx-label">REGRA DE ATRASO (TEXTO)</label><textarea className="sigx-input" value={form.accelerationRule} onChange={n("accelerationRule")} rows={3} /></div>
+                        </>
+                      )}
+
+                      {/* 🚀 FORO */}
+                      <div style={{ gridColumn: "span 2" }}>
+                        <label className="sigx-label">FORO</label>
+                        <input
+                          className="sigx-input"
+                          value={form.forum}
+                          onChange={n("forum")}
+                          placeholder="Ex: Comarca de São Paulo / SP"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 🚀 NOVA GUIA - DADOS BANCÁRIOS (somente exibição, vindos do cliente) */}
+                  {activeTab === "bancarios" && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                      {!selectedClient && (
+                        <div style={{ padding: 12, background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 6, fontSize: 11, color: "#92400e" }}>
+                          Selecione um cliente na guia <strong>Dados Básicos</strong> para visualizar os dados bancários.
+                        </div>
+                      )}
+
+                      {selectedClient && (
+                        <>
+                          <div style={{ fontSize: 11, color: "#475569", fontStyle: "italic" }}>
+                            Estes dados são <strong>somente leitura</strong> e refletem o que está cadastrado na guia
+                            <em> Dados Financeiros</em> do cliente <strong>{selectedClient.name}</strong>.
+                          </div>
+
+                          {(!selectedClientNotes.bankAccounts || selectedClientNotes.bankAccounts.length === 0) && (
+                            <div style={{ padding: 12, background: "#f3f4f6", border: "1px solid #e5e7eb", borderRadius: 6, fontSize: 11, color: "#6b7280" }}>
+                              Este cliente ainda não possui contas bancárias cadastradas.
+                            </div>
+                          )}
+
+                          {selectedClientNotes.bankAccounts?.map((acc, idx) => {
+                            const { code, name } = splitBank(acc.banco);
+                            const tipoLabel = ACCOUNT_TYPE_LABELS[(acc.tipo || "").toLowerCase()] ?? acc.tipo ?? "—";
+                            return (
+                              <div key={idx} style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 6, background: "#fafafa" }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: "#1e293b", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
+                                  Conta Bancária {idx + 1}
+                                </div>
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                                  <div>
+                                    <label className="sigx-label">CÓDIGO BANCO</label>
+                                    <input className="sigx-input mono" value={code} readOnly style={{ background: "white", color: "#4b5563" }} />
+                                  </div>
+                                  <div style={{ gridColumn: "span 2" }}>
+                                    <label className="sigx-label">NOME BANCO</label>
+                                    <input className="sigx-input" value={name} readOnly style={{ background: "white", color: "#4b5563" }} />
+                                  </div>
+                                  <div>
+                                    <label className="sigx-label">AGÊNCIA</label>
+                                    <input className="sigx-input mono" value={acc.agencia ?? ""} readOnly style={{ background: "white", color: "#4b5563" }} />
+                                  </div>
+                                  <div>
+                                    <label className="sigx-label">Nº CONTA</label>
+                                    <input className="sigx-input mono" value={acc.conta ?? ""} readOnly style={{ background: "white", color: "#4b5563" }} />
+                                  </div>
+                                  <div>
+                                    <label className="sigx-label">TIPO CONTA</label>
+                                    <input className="sigx-input" value={tipoLabel} readOnly style={{ background: "white", color: "#4b5563" }} />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          <div style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 6, background: "#fafafa" }}>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: "#1e293b", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
+                              PIX
+                            </div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                              <div>
+                                <label className="sigx-label">CHAVE PIX</label>
+                                <input
+                                  className="sigx-input mono"
+                                  value={selectedClientNotes.pixKey ?? ""}
+                                  readOnly
+                                  placeholder="—"
+                                  style={{ background: "white", color: "#4b5563" }}
+                                />
+                              </div>
+                              <div>
+                                <label className="sigx-label">PIX</label>
+                                <input
+                                  className="sigx-input"
+                                  value={selectedClientNotes.pixKey ? "Cadastrado" : "Não cadastrado"}
+                                  readOnly
+                                  style={{ background: "white", color: selectedClientNotes.pixKey ? "#065f46" : "#9ca3af", fontWeight: 600 }}
+                                />
+                              </div>
+                            </div>
+                          </div>
                         </>
                       )}
                     </div>
