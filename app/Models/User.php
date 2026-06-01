@@ -19,6 +19,10 @@ class User extends Authenticatable
      */
     public static $snakeAttributes = false;
 
+    /**
+     * 🚀 ATRIBUIÇÃO EM MASSA ATUALIZADA
+     * Liberados os novos campos para que o UserController consiga gravar e atualizar!
+     */
     protected $fillable = [
         'openId',
         'name',
@@ -27,7 +31,14 @@ class User extends Authenticatable
         'photo',
         'loginMethod',
         'role',
+        'status',      // 👈 Novo status ativo/inativo
+        'created_by',  // 👈 ID do admin que criou o registro (Auditoria)
         'lastSignedIn',
+        'cpf',         // 👈 Novo campo CPF
+        'rg',          // 👈 Novo campo RG
+        'phone',       // 👈 Novo campo Telefone
+        'birthDate',   // 👈 Novo campo Data de Nascimento
+        'gender',      // 👈 Novo campo Gênero
     ];
 
     protected $hidden = [
@@ -52,11 +63,6 @@ class User extends Authenticatable
     /**
      * URL pública para exibir a foto na UI. Retorna null caso o usuário ainda
      * não tenha foto cadastrada.
-     *
-     * Usamos um caminho host-relative (`/storage/...`) em vez de
-     * `Storage::disk('public')->url()` para que a foto seja servida pelo
-     * mesmo host/porta em que a aplicação está sendo acessada, independente
-     * do que estiver configurado em APP_URL.
      */
     protected function photoUrl(): Attribute
     {

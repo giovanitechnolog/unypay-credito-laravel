@@ -2,26 +2,21 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Requests\Users\StoreUserRequest;
-use App\Http\Requests\Users\UpdateUserRequest;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class UserController extends Controller
 {
-    /**
-     * Diretório onde as fotos dos usuários são salvas no disk "public".
-     */
     private const PHOTO_DIR = 'users/photos';
 
     /**
      * Renderiza a página /usuarios via Inertia.
-     * A lista é carregada via /api/users (JSON), permitindo refresh sem reload.
      */
     public function index(): Response
     {
@@ -37,12 +32,17 @@ class UserController extends Controller
         $perPage = (int) $request->input('per_page', 25);
 
         $query = User::query()
-            ->select(['id', 'created_by', 'name', 'email', 'photo', 'role', 'createdAt', 'updatedAt', 'lastSignedIn']);
+            ->select([
+                'id', 'created_by', 'name', 'email', 'photo', 'role', 
+                'status', 'cpf', 'rg', 'phone', 'birthDate', 'gender',
+                'createdAt', 'updatedAt', 'lastSignedIn'
+            ]);
 
         if ($search !== '') {
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%");
+                  ->orWhere('email', 'like', "%{$search}%")
+                  ->orWhere('cpf', 'like', "%{$search}%");
             });
         }
 
@@ -54,40 +54,91 @@ class UserController extends Controller
     /**
      * POST /api/users — cria um novo usuário administrativo.
      */
-    public function store(StoreUserRequest $request): JsonResponse
+    public function store(Request $request): JsonResponse
     {
-        $photoPath = $request->file('photo')->store(self::PHOTO_DIR, 'public');
+        $request->validate([
+            'name'      => 'required|string|max:255',
+            'email'     => 'required|email|unique:users,email',
+            'password'  => 'required|string|min:6',
+            'role'      => 'required|in:user,admin',
+            'status'    => 'required|in:Ativo,Inativo',
+            'photo'     => 'nullable|file|image|max:2048',
+            'cpf'       => 'nullable|string|max:14|unique:users,cpf',
+            'rg'        => 'nullable|string|max:20',
+            'phone'     => 'nullable|string|max:15',
+            'birthDate' => 'nullable|date',
+            'gender'    => 'nullable|string|max:20',
+        ]);
+
+        $photoPath = null;
+        if ($request->hasFile('photo')) {
+            $photoPath = $request->file('photo')->store(self::PHOTO_DIR, 'public');
+        }
+
+        $cpf   = $request->input('cpf') ? preg_replace('/\D/', '', $request->input('cpf')) : null;
+        $phone = $request->input('phone') ? preg_replace('/\D/', '', $request->input('phone')) : null;
 
         $user = User::create([
-            'created_by'   => Auth::id(), // 🚀 INJEÇÃO DE AUDITORIA: Grava o ID do admin logado que clicou em criar
-            'name'         => $request->string('name'),
-            'email'        => $request->string('email')->lower(),
-            'password'     => $request->string('password'),
+            'created_by'   => Auth::id(),
+            'name'         => $request->input('name'),
+            'email'        => Str::lower($request->input('email')),
+            'password'     => $request->input('password'), 
             'photo'        => $photoPath,
-            'role'         => $request->input('role', 'admin'),
+            'role'         => $request->input('role', 'user'),
+            'status'       => $request->input('status', 'Ativo'),
             'loginMethod'  => 'password',
+            'cpf'          => $cpf,
+            'rg'           => $request->input('rg'),
+            'phone'        => $phone,
+            'birthDate'    => $request->input('birthDate'),
+            'gender'       => $request->input('gender'),
             'lastSignedIn' => now(),
         ]);
 
         return response()->json([
             'message' => 'Usuário criado com sucesso.',
-            'user'    => $user->only(['id', 'name', 'email', 'photo', 'photoUrl', 'role']),
+            'user'    => $user->append('photoUrl'), // 🚀 Injeta a URL virtual amigável na resposta imediata
         ], 201);
     }
 
     /**
-     * PUT/POST /api/users/{user} — atualiza nome/e-mail/foto e, opcionalmente, senha.
+     * PUT/POST /api/users/{id} — atualiza a ficha do operador.
      */
-    public function update(UpdateUserRequest $request, User $user): JsonResponse
+    public function update(Request $request, int $id): JsonResponse
     {
+        $user = User::findOrFail($id);
+
+        $request->validate([
+            'name'      => 'required|string|max:255',
+            'email'     => 'required|email|unique:users,email,' . $user->id,
+            'password'  => 'nullable|string|min:6',
+            'role'      => 'required|in:user,admin',
+            'status'    => 'required|in:Ativo,Inativo',
+            'photo'     => 'nullable|file|image|max:2048',
+            'cpf'       => 'nullable|string|max:14|unique:users,cpf,' . $user->id,
+            'rg'        => 'nullable|string|max:20',
+            'phone'     => 'nullable|string|max:15',
+            'birthDate' => 'nullable|date',
+            'gender'    => 'nullable|string|max:20',
+        ]);
+
+        $cpf   = $request->input('cpf') ? preg_replace('/\D/', '', $request->input('cpf')) : null;
+        $phone = $request->input('phone') ? preg_replace('/\D/', '', $request->input('phone')) : null;
+
         $payload = [
-            'name'  => $request->string('name'),
-            'email' => $request->string('email')->lower(),
-            'role'  => $request->input('role', $user->role),
+            'name'      => $request->input('name'),
+            'email'     => Str::lower($request->input('email')),
+            'role'      => $request->input('role', $user->role),
+            'status'    => $request->input('status', $user->status),
+            'cpf'       => $cpf,
+            'rg'        => $request->input('rg'),
+            'phone'     => $phone,
+            'birthDate' => $request->input('birthDate'),
+            'gender'    => $request->input('gender'),
         ];
 
         if ($request->filled('password')) {
-            $payload['password'] = $request->string('password');
+            $payload['password'] = $request->input('password');
         }
 
         if ($request->hasFile('photo')) {
@@ -102,20 +153,21 @@ class UserController extends Controller
         $user->update($payload);
 
         return response()->json([
-            'message' => 'Usuário atualizado com sucesso.',
-            'user'    => $user->only(['id', 'name', 'email', 'photo', 'photoUrl', 'role']),
+            'message' => 'Usuário actualizado com sucesso.',
+            'user'    => $user->append('photoUrl'), // 🚀 Injeta a URL virtual amigável na resposta imediata
         ]);
     }
 
     /**
-     * DELETE /api/users/{user} — remove o usuário.
-     * Não permite que o próprio usuário se exclua.
+     * DELETE /api/users/{id} — remove o usuário administrativo.
      */
-    public function destroy(Request $request, User $user): JsonResponse
+    public function destroy(Request $request, int $id): JsonResponse
     {
+        $user = User::findOrFail($id);
+
         if ($request->user()->id === $user->id) {
             return response()->json([
-                'message' => 'Você não pode excluir o próprio usuário.',
+                'message' => 'Você não pode excluir o próprio usuário operacional.',
             ], 422);
         }
 
