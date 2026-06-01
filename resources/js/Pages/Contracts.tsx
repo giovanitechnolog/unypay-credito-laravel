@@ -48,8 +48,6 @@ const emptyForm = {
   accelerationRule: "", accelerationConsecutiveThreshold: undefined as number | undefined,
   accelerationAlternateThreshold: undefined as number | undefined,
   guarantees: "", guarantors: "", validationUrl: "", observations: "",
-  
-  // Novos campos estruturados de recebimento e juizado
   chosenBankAccount: "",
   paymentMethod: "Boleto Bancário",
   forumLocation: "Belo Horizonte / MG", 
@@ -70,6 +68,7 @@ const headerCellStyle: React.CSSProperties = {
   whiteSpace: "nowrap", borderBottom: "2px solid #cbd5e1",
 };
 const tdBase: React.CSSProperties = { padding: "3px 7px", borderBottom: "1px solid #f1f5f9", fontSize: 11, verticalAlign: "middle" };
+// 🛠️ FIX 1: Recolocada a constante tdNum para formatação alinhada à direita dos valores financeiros
 const tdNum: React.CSSProperties = { ...tdBase, fontFamily: "'IBM Plex Mono',monospace", textAlign: "right" };
 const tdCenter: React.CSSProperties = { ...tdBase, textAlign: "center" };
 
@@ -93,16 +92,11 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   const [sortCol, setSortCol] = useState<string>("code");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
-  // Captura as configurações e metadados financeiros do cliente selecionado no form
   const selectedClientMeta = useMemo(() => {
     if (!form.clientId) return null;
     const clientFound = clients?.find((c: any) => c.id === form.clientId);
     if (!clientFound || !clientFound.notes) return null;
-    try {
-      return JSON.parse(clientFound.notes);
-    } catch {
-      return null;
-    }
+    try { return JSON.parse(clientFound.notes); } catch { return null; }
   }, [form.clientId, clients]);
 
   const { visibleIds, toggleColumn, setColumnsVisible, resetDefaults } =
@@ -136,6 +130,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   }, [visibleOrdered]);
 
   const handleFilterChange = (newSearch: string, newStatus: string) => {
+    setPage(1);
     router.get("/contracts", { search: newSearch, statusFilter: newStatus }, { preserveState: true, replace: true });
   };
 
@@ -269,10 +264,8 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       toast.info("Este contrato não possui minutas digitais anexadas.");
       return;
     }
-    
     let decodedNames: string[] = [];
     try { decodedNames = JSON.parse(c.sourcePdfName || "[]"); } catch { decodedNames = [c.sourcePdfName || "documento.pdf"]; }
-
     setActivePdfIndex(0);
     setPdfPreview({ id: c.id, code: c.code ?? "", names: decodedNames });
   };
@@ -301,7 +294,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       .filter((item: any) => {
         const q = search.toLowerCase();
         const contractObj = item.contract ?? item;
-        const cName = item.clientName ?? item.client_name ?? "";
+        const cName = item.client_name ?? item.clientName ?? "";
         return (
           (!search || contractObj.contractName.toLowerCase().includes(q) || contractObj.code.toLowerCase().includes(q) || cName.toLowerCase().includes(q)) &&
           (statusFilter === "Todos" || contractObj.status === statusFilter)
@@ -311,7 +304,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
         let va: any, vb: any;
         const cA = a.contract ?? a; const cB = b.contract ?? b;
         if (sortCol === "code") { va = cA.code; vb = cB.code; }
-        else if (sortCol === "client") { va = a.clientName ?? ""; vb = b.clientName ?? ""; }
+        else if (sortCol === "client") { va = a.client_name ?? a.clientName ?? ""; vb = b.client_name ?? b.clientName ?? ""; }
         else if (sortCol === "principal") { va = +cA.principalAmount; vb = +cB.principalAmount; }
         else if (sortCol === "status") { va = cA.status; vb = cB.status; }
         else { va = cA.code; vb = cB.code; }
@@ -321,56 +314,28 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       });
   }, [contracts, search, statusFilter, sortCol, sortDir]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
-
-  const doSort = (col: string) => {
-    if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
-    else { setSortCol(col); setSortDir("asc"); }
-  };
+  const totalRows = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const paginated = useMemo(() => filtered.slice((page - 1) * pageSize, page * pageSize), [filtered, page, pageSize]);
 
   const renderCellContent = (col: ContractsColumnDef, item: any): React.ReactNode => {
     const contract = item.contract ?? item;
     const sc = STATUS_BADGE[contract.status] ?? STATUS_BADGE["Ativo"];
     switch (col.id) {
-      case "code":
-        return <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: "#6b7280", fontWeight: 500 }}>{contract.code}</span>;
-      case "client":
-        return (
-          <div style={{ maxWidth: col.width - 14, fontWeight: 700, fontSize: 11, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {item.client_name ?? item.clientName ?? "—"}
-          </div>
-        );
-      case "contractType":
-        return (
-          <span style={{ fontSize: 10, padding: "2px 6px", background: "#f3f4f6", borderRadius: 4, fontWeight: 500, color: "#4b5563" }}>
-            {contract.contract_type_name ?? contract.contractType ?? "Mútuo"}
-          </span>
-        );
-      case "contractName":
-        return <span style={{ fontSize: 11, color: "#374151" }}>{contract.contractName}</span>;
-      case "creditor":
-        return <span style={{ fontSize: 10, color: "#6b7280" }}>{contract.creditor}</span>;
-      case "principal":
-        return <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700, fontSize: 11 }}>{fmt(contract.principalAmount)}</span>;
-      case "financed":
-        return <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#6b7280" }}>{fmt(contract.financedTotal)}</span>;
-      case "installments":
-        return <span style={{ color: "#6b7280" }}>{contract.installmentCount}×</span>;
-      case "installmentAmt":
-        return <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#6b7280" }}>{fmt(contract.installmentAmount)}</span>;
-      case "status":
-        return <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 4, fontSize: 9, fontWeight: 700, textTransform: "uppercase", background: sc.bg, color: sc.color }}>{contract.status}</span>;
-      case "validated":
-        return contract.validated
-          ? <CheckCircle size={12} style={{ color: "#059669" }} />
-          : <span style={{ color: "#9ca3af" }}>—</span>;
-      case "firstDue":
-        return <span style={{ fontSize: 10, whiteSpace: "nowrap" }}>{fmtDate(contract.firstDueDate)}</span>;
-      case "moraRate":
-        return <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10 }}>{fmtPct(contract.moraRateMonthly)}</span>;
-      default:
-        return null;
+      case "code": return <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: "#6b7280", fontWeight: 500 }}>{contract.code}</span>;
+      case "client": return <div style={{ maxWidth: col.width - 14, fontWeight: 700, fontSize: 11, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.client_name ?? item.clientName ?? "—"}</div>;
+      case "contractType": return <span style={{ fontSize: 10, padding: "2px 6px", background: "#f3f4f6", borderRadius: 4, fontWeight: 500, color: "#4b5563" }}>{contract.contract_type_name ?? contract.contractType ?? "Mútuo"}</span>;
+      case "contractName": return <span style={{ fontSize: 11, color: "#374151" }}>{contract.contractName}</span>;
+      case "creditor": return <span style={{ fontSize: 10, color: "#6b7280" }}>{contract.creditor}</span>;
+      case "principal": return <span style={{ ...tdNum, fontWeight: 700, fontSize: 11 }}>{fmt(contract.principalAmount)}</span>;
+      case "financed": return <span style={{ ...tdNum, fontSize: 11, color: "#6b7280" }}>{fmt(contract.financedTotal)}</span>;
+      case "installments": return <span style={{ color: "#6b7280" }}>{contract.installmentCount}×</span>;
+      case "installmentAmt": return <span style={{ ...tdNum, fontSize: 11, color: "#6b7280" }}>{fmt(contract.installmentAmount)}</span>;
+      case "status": return <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 4, fontSize: 9, fontWeight: 700, textTransform: "uppercase", background: sc.bg, color: sc.color }}>{contract.status}</span>;
+      case "validated": return contract.validated ? <CheckCircle size={12} style={{ color: "#059669" }} /> : <span style={{ color: "#9ca3af" }}>—</span>;
+      case "firstDue": return <span style={{ fontSize: 10, whiteSpace: "nowrap" }}>{fmtDate(contract.firstDueDate)}</span>;
+      case "moraRate": return <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10 }}>{fmtPct(contract.moraRateMonthly)}</span>;
+      default: return null;
     }
   };
 
@@ -380,7 +345,6 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
 
       <div style={{ padding: "12px 20px 16px 20px", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", gap: 12 }}>
 
-        {/* Topo da página */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#111827" }}>Contratos e Ativos</h1>
           <button onClick={handleOpenCreate} className="btn-primary" style={{ padding: "6px 14px", fontSize: 11 }}>
@@ -388,14 +352,13 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
           </button>
         </div>
 
-        {/* Filtros */}
         <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 6, padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 auto", minWidth: 0 }}>
             <div style={{ position: "relative", flexShrink: 0 }}>
               <Search size={12} style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "#9ca3af" }} />
               <input style={{ paddingLeft: 26, width: 260, fontSize: 11, height: 28, border: "1px solid #d1d5db", borderRadius: 6, outline: "none", color: "#374151" }} placeholder="Buscar contratos..." value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />
             </div>
-            <select style={{ width: 150, fontSize: 11, height: 28, background: "white", border: "1px solid #d1d5db", borderRadius: 6, color: "#374151", cursor: "pointer", flexShrink: 0 }} value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); handleFilterChange(search, e.target.value); }}>
+            <select style={{ width: 150, fontSize: 11, height: 28, background: "white", border: "1px solid #d1d5db", borderRadius: 6, color: "#374151", cursor: "pointer", flexShrink: 0 }} value={statusFilter} onChange={e => { setStatusFilter(e.target.value); handleFilterChange(search, e.target.value); }}>
               <option value="Todos">Todos os status</option>
               <option value="Ativo">Ativo</option>
               <option value="Inadimplente">Inadimplente</option>
@@ -403,42 +366,98 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
               <option value="Renegociado">Renegociado</option>
               <option value="Cancelado">Cancelado</option>
             </select>
+            <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 500, flexShrink: 0 }}>{totalRows} contratos</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+            <TableGroupBadges allColumns={CONTRACTS_COLUMNS} groupOrder={CONTRACTS_GROUP_ORDER} groupMeta={CONTRACTS_GROUP_META} visibleIds={visibleIds} setColumnsVisible={setColumnsVisible} />
+            <TableColumnPicker allColumns={CONTRACTS_COLUMNS} groupOrder={CONTRACTS_GROUP_ORDER} groupMeta={CONTRACTS_GROUP_META} visibleIds={visibleIds} toggleColumn={toggleColumn} setColumnsVisible={setColumnsVisible} resetDefaults={resetDefaults} />
           </div>
         </div>
 
-        {/* Tabela de listagem */}
-        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", border: "1px solid #e5e7eb", borderRadius: 6, overflow: "hidden", background: "white" }}>
+        <div style={{ border: "1px solid #e5e7eb", borderRadius: 6, flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden", background: "white" }}>
           <div style={{ flex: 1, overflow: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11, minWidth: 900 }}>
+              <colgroup>
+                {visibleOrdered.map(col => <col key={col.id} style={{ width: col.width }} />)}
+                <col style={{ width: ACTIONS_WIDTH }} />
+              </colgroup>
               <thead>
                 <tr>
-                  {visibleOrdered.map(col => <th key={col.id} style={headerCellStyle}>{col.label}</th>)}
+                  {visibleGroupRuns.map((run, i) => {
+                    const meta = CONTRACTS_GROUP_META[run.group];
+                    return (
+                      <th key={`${run.group}-${i}`} colSpan={run.count} style={{ background: meta.bg, color: meta.color, textAlign: "center", padding: "4px 8px", fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                        {meta.label}
+                      </th>
+                    );
+                  })}
+                  <th style={{ background: "#1e2139", color: "white", textAlign: "center", padding: "4px 8px", fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>Ações</th>
+                </tr>
+                <tr>
+                  {visibleOrdered.map(col => {
+                    const stickyStyle: React.CSSProperties = col.sticky ? { position: "sticky", left: stickyOffsets.get(col.id), zIndex: 2, background: "#f1f5f9" } : {};
+                    return <th key={col.id} style={{ ...headerCellStyle, textAlign: col.align, ...stickyStyle }}>{col.label.toUpperCase()}</th>;
+                  })}
                   <th style={{ ...headerCellStyle, textAlign: "center" }}>AÇÕES</th>
                 </tr>
               </thead>
               <tbody>
-                {paginated.map((item: any) => {
-                  const c = item.contract ?? item;
-                  return (
-                    <tr key={c.id}>
-                      {visibleOrdered.map(col => <td key={col.id} style={tdBase}>{renderCellContent(col, item)}</td>)}
-                      <td style={tdCenter}>
-                        <div style={{ display: "flex", gap: 3, justifyContent: "center" }}>
-                          {/* 🚀 O ÍCONE DO OLHINHO DO CONTRATO SÓ FICA VISÍVEL SE TIVER CONTRATO ANEXADO */}
-                          {c.hasContractPdf && (
-                            <button type="button" className="btn-icon" onClick={() => handleViewPdf(item)} title="Visualizar Minutas Anexas">
-                              <Eye size={11} style={{ color: "#2563eb" }} />
-                            </button>
-                          )}
-                          <button type="button" className="btn-icon" onClick={() => handleOpenEdit(item)}><Edit2 size={11} /></button>
-                          <button type="button" className="btn-icon text-danger" onClick={() => handleDelete(item)}><Trash2 size={11} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {paginated.length === 0 ? (
+                  <tr>
+                    <td colSpan={visibleOrdered.length + 1} style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>
+                      <FileText size={28} style={{ margin: "0 auto 8px", display: "block", opacity: 0.3 }} /> Nenhum contrato localizado
+                    </td>
+                  </tr>
+                ) : (
+                  paginated.map((item: any, rowIdx: number) => {
+                    const c = item.contract ?? item;
+                    const rowBg = rowIdx % 2 === 1 ? "#fafafa" : "white";
+                    return (
+                      <tr key={c.id} style={{ background: rowBg }} onMouseOver={e => (e.currentTarget.style.background = "#eff6ff")} onMouseOut={e => (e.currentTarget.style.background = rowBg)}>
+                        {visibleOrdered.map(col => {
+                          const stickyStyle: React.CSSProperties = col.sticky ? { position: "sticky", left: stickyOffsets.get(col.id), zIndex: 1, background: "inherit" } : {};
+                          const base = col.align === "right" ? { ...tdBase, textAlign: "right" as const } : col.align === "center" ? tdCenter : tdBase;
+                          return <td key={col.id} style={{ ...base, ...stickyStyle }}>{renderCellContent(col, item)}</td>;
+                        })}
+                        <td style={tdCenter}>
+                          <div style={{ display: "flex", gap: 3, justifyContent: "center" }}>
+                            {c.hasContractPdf && (
+                              <button type="button" className="btn-icon" onClick={() => handleViewPdf(item)} title="Visualizar Minutas Anexas">
+                                <Eye size={11} style={{ color: "#2563eb" }} />
+                              </button>
+                            )}
+                            <button type="button" className="btn-icon" onClick={() => handleOpenEdit(item)}><Edit2 size={11} /></button>
+                            <button type="button" className="btn-icon text-danger" onClick={() => handleDelete(item)}><Trash2 size={11} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
+          </div>
+
+          <div style={{ padding: "6px 12px", background: "#fafbfc", borderTop: "1px solid #e5e7eb", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6b7280" }}>
+              <span>Exibir</span>
+              <select style={{ padding: "2px 6px", border: "1px solid #d1d5db", borderRadius: 4, fontSize: 11, background: "white" }} value={pageSize} onChange={e => { setPageSize(+e.target.value); setPage(1); }}>
+                {PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <span>por página</span>
+            </div>
+            <span style={{ fontSize: 11, color: "#6b7280" }}>Mostrando {Math.min((page - 1) * pageSize + 1, totalRows)}–{Math.min(page * pageSize, totalRows)} de {totalRows}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+              <button type="button" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} style={{ padding: "3px 10px", border: "1px solid #d1d5db", borderRadius: 4, background: "white", fontSize: 11, cursor: page === 1 ? "not-allowed" : "pointer", color: page === 1 ? "#9ca3af" : "#374151" }}>← Anterior</button>
+              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                const n = page <= 3 ? i + 1 : page - 2 + i;
+                if (n < 1 || n > totalPages) return null;
+                return (
+                  <button type="button" key={n} onClick={() => setPage(n)} style={{ width: 28, height: 26, borderRadius: 4, border: "1px solid", fontSize: 11, background: n === page ? "#1a2035" : "white", color: n === page ? "white" : "#374151", borderColor: n === page ? "#1a2035" : "#d1d5db", fontWeight: n === page ? 700 : 400, cursor: "pointer" }}>{n}</button>
+                );
+              })}
+              <button type="button" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} style={{ padding: "3px 10px", border: "1px solid #d1d5db", borderRadius: 4, background: "white", fontSize: 11, cursor: page >= totalPages ? "not-allowed" : "pointer", color: page >= totalPages ? "#9ca3af" : "#374151" }}>Próxima →</button>
+            </div>
           </div>
         </div>
 
@@ -480,7 +499,6 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                         </select>
                       </div>
                       
-                      {/* 🚀 SELETOR DE STATUS OPERACIONAL DO CONTRATO COMPATÍVEL NO LUGAR IDEAL */}
                       <div style={{ gridColumn: "span 2" }}>
                         <label className="sigx-label">STATUS OPERACIONAL DO CONTRATO *</label>
                         <select className="sigx-input" value={form.status} onChange={n("status")} required>
@@ -492,7 +510,6 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                         </select>
                       </div>
                       
-                      {/* ⚖️ FORO DE ELEIÇÃO JURÍDICA */}
                       <div style={{ gridColumn: "span 2" }}>
                         <label className="sigx-label" style={{ display: "flex", alignItems: "center", gap: 4 }}><Scale size={12} style={{ color: "#0d9488" }} /> FORO ELEITO DE ELEIÇÃO (COMARCA COBRANÇA)</label>
                         <input className="sigx-input" value={form.forumLocation} onChange={n("forumLocation")} placeholder="Ex: Belo Horizonte / MG" />
@@ -503,7 +520,6 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                         <label className="sigx-label">ANEXAR DOCUMENTOS E ATIVOS (PDF)</label>
                         <input type="file" accept=".pdf" onChange={handlePdfFilesChange} multiple style={{ fontSize: 12 }} />
                         
-                        {/* 🚀 EXIBIÇÃO EM TEMPO REAL DOS NOMES DOS ARQUIVOS SELECIONADOS OU JÁ EXISTENTES */}
                         {(contractPdfFiles.length > 0 || existingPdfNames.length > 0) && (
                           <div style={{ marginTop: 10, padding: 10, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, display: "flex", flexDirection: "column", gap: 4 }}>
                             <span style={{ fontSize: 10, fontWeight: 700, color: "#64748b" }}>DOCUMENTOS SELECIONADOS PARA ESTE INSTRUMENTO:</span>
@@ -523,7 +539,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                     </div>
                   )}
 
-                  {/* TAB 2: VALORES E BANCOS DINÂMICOS */}
+                  {/* TAB 2: FINANCEIRO */}
                   {activeTab === "financeiro" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
@@ -532,7 +548,6 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                         <div><label className="sigx-label">VALOR DA PARCELA (R$) *</label><input type="number" step="0.01" className="sigx-input" value={form.installmentAmount || ""} onChange={num("installmentAmount")} required /></div>
                       </div>
 
-                      {/* CAPTURA E CARTÕES DE CONTAS BANCÁRIAS DO DEVEDOR */}
                       <div style={{ borderTop: "1px dashed #cbd5e1", paddingTop: 14 }}>
                         <label className="sigx-label" style={{ display: "flex", alignItems: "center", gap: 4, fontWeight: 700, color: "#1e293b" }}><CreditCard size={13} /> CONTA DE DESTINO PARA LIQUIDAÇÃO</label>
                         <span style={{ fontSize: 11, color: "#64748b", marginBottom: 10, display: "block" }}>Selecione abaixo uma das contas homologadas no cadastro do devedor e defina a esteira de cobrança:</span>
@@ -585,11 +600,9 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                     </div>
                   )}
 
-                  {/* TAB 3: TAXAS E INDEXADORES */}
+                  {/* TAB 3: TAXAS */}
                   {activeTab === "taxas" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                      
-                      {/* Linha Principal de Configuração Económica */}
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
                         <div>
                           <label className="sigx-label">INDEXADOR DE CORREÇÃO MONETÁRIA</label>
@@ -603,15 +616,12 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                           <label className="sigx-label">DATA DO 1º VENCIMENTO</label>
                           <input type="date" className="sigx-input" value={form.firstDueDate || ""} onChange={n("firstDueDate")} />
                         </div>
-                        
-                        {/* 💎 TROCA CIRÚRGICA: HONORÁRIOS DE COBRANÇA SUBSTITUÍDOS NATIVAMENTE PELA TARIFA DE ESTRUTURAÇÃO (TAC) */}
                         <div>
                           <label className="sigx-label" style={{ color: "#2563eb", fontWeight: 700 }}>TARIFA DE ESTRUTURAÇÃO (TAC R$)</label>
                           <input type="number" step="0.01" className="sigx-input" style={{ borderColor: "#2563eb" }} value={form.tacAmount || ""} onChange={num("tacAmount")} placeholder="Ex: 500.00" />
                         </div>
                       </div>
 
-                      {/* Linha de Penalidades por Atraso (Mora, Multa, Juros) */}
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, borderTop: "1px dashed #e2e8f0", paddingTop: 14 }}>
                         <div>
                           <label className="sigx-label">JUROS REMUNERATÓRIOS MENSAL (%)</label>
@@ -626,15 +636,13 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                           <input type="number" step="0.001" className="sigx-input" value={form.penaltyRate ? (form.penaltyRate * 100).toFixed(3) : ""} onChange={e => setForm(p => ({ ...p, penaltyRate: parseFloat(e.target.value) / 100 || 0 }))} />
                         </div>
                       </div>
-
                     </div>
                   )}
 
-                  {/* TAB 4: GARANTIAS E FIADORES AUTOMÁTICOS */}
+                  {/* TAB 4: GARANTIAS */}
                   {activeTab === "garantias" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                      
-                      {/* BOTÕES RÁPIDOS DE INJEÇÃO DE FIADORES */}
+                      {/* 🛠️ FIX 2: Removido o teste 'allFiadores' que quebrava o escopo e mantida a verificação limpa de metadados do cliente devedor */}
                       {selectedClientMeta && (selectedClientMeta.fiador1Nome || selectedClientMeta.fiador2Nome) && (
                         <div style={{ padding: 10, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, marginBottom: 4 }}>
                           <span style={{ fontSize: 11, fontWeight: 700, color: "#1e293b", display: "block", marginBottom: 6 }}>Fiadores localizados no cadastro deste devedor:</span>
@@ -660,9 +668,8 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                           </div>
                         </div>
                       )}
-
                       <div><label className="sigx-label">GARANTIAS REAIS ACOPLADAS</label><textarea className="sigx-input" value={form.guarantees} onChange={n("guarantees")} rows={3} /></div>
-                      <div><label className="sigx-label">MINUTA DETALHADA DOS FIADORES / COOBRIGADOS</label><textarea className="sigx-input" value={form.guarantors} onChange={n("guarantors")} rows={4} placeholder="Clique nos botões acima para puxar os fiadores cadastrados na ficha do cliente de forma automática..." /></div>
+                      <div><label className="sigx-label">MINUTA DETALHADA DOS FIADORES / COOBRIGADOS</label><textarea className="sigx-input" value={form.guarantors} onChange={n("guarantors")} rows={4} placeholder="Clique nos botões acima para puxar os fiadores cadastrados na ficha do cliente..." /></div>
                     </div>
                   )}
 
@@ -688,8 +695,8 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
               <div className="sigx-modal-header" style={{ flexShrink: 0 }}>
                 <span className="sigx-modal-title" style={{ display: "flex", alignItems: "center", gap: 8 }}><FileText size={14} /> Documentos Digitais — Contrato {pdfPreview.code}</span>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <a href={`/contracts/${pdfPreview.id}/pdf?index=${activePdfIndex}`} target="_blank" rel="noopener noreferrer" className="btn-secondary" style={{ fontSize: 11, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }} title="Abrir o PDF selecionado em tamanho completo"><Upload size={11} style={{ transform: "rotate(180deg)" }} /> Ver Completo / Imprimir</a>
-                  <button type="button" onClick={() => setPdfPreview(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", display: "flex" }}><X size={18} /></button>
+                  <a href={`/contracts/${pdfPreview.id}/pdf?index=${activePdfIndex}`} target="_blank" rel="noopener noreferrer" className="btn-secondary" style={{ fontSize: 11, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}><Upload size={11} style={{ transform: "rotate(180deg)" }} /> Ver Completo / Imprimir</a>
+                <button type="button" onClick={() => setPdfPreview(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", display: "flex" }}><X size={18} /></button>
                 </div>
               </div>
               <div style={{ flex: 1, minHeight: 0, display: "flex", background: "#1f2937" }}>
