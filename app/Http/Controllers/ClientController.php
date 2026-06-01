@@ -55,7 +55,7 @@ class ClientController extends Controller
         ]);
 
         DB::table('clients')->insert([
-            'user_id'    => Auth::id(), // 🚀 INJEÇÃO DE AUDITORIA: Salva quem cadastrou
+            'user_id'    => Auth::id(),
             'name'       => $validated['name'],
             'document'   => $validated['document'],
             'personType' => $validated['personType'],
@@ -66,9 +66,9 @@ class ClientController extends Controller
             'city'       => $validated['city'],
             'state'      => $validated['state'],
             'zipCode'    => $validated['zipCode'],
-            'notes'      => $validated['notes'], // JSON reativo com os fiadores 1 e 2 armazenados aqui
-            'createdAt' => now(),
-            'updatedAt' => now()
+            'notes'      => $validated['notes'], // JSON contendo as Contas + PIX + Fiadores
+            'createdAt'  => now(),
+            'updatedAt'  => now()
         ]);
 
         return redirect()->back();
@@ -94,7 +94,7 @@ class ClientController extends Controller
         ]);
 
         DB::table('clients')->where('id', $id)->update([
-            'user_id'    => Auth::id(), // 🚀 INJEÇÃO DE AUDITORIA: Atualiza com quem fez a última alteração
+            'user_id'    => Auth::id(),
             'name'       => $validated['name'],
             'document'   => $validated['document'],
             'personType' => $validated['personType'],
@@ -105,8 +105,8 @@ class ClientController extends Controller
             'city'       => $validated['city'],
             'state'      => $validated['state'],
             'zipCode'    => $validated['zipCode'],
-            'notes'      => $validated['notes'], // Atualiza o payload com os fiadores modificados
-            'updatedAt' => now()
+            'notes'      => $validated['notes'], 
+            'updatedAt'  => now() // 🚀 Garantido Letra Maiúscula conforme a imagem do HeidiSQL
         ]);
 
         return redirect()->back();
@@ -122,7 +122,7 @@ class ClientController extends Controller
     }
 
     /**
-     * Simulação de OCR para preenchimento via PDF
+     * OCR para preenchimento via PDF
      */
     public function parseOcr(Request $request)
     {

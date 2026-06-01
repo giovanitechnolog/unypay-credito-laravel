@@ -129,7 +129,7 @@ class PaymentController extends Controller
         ]);
     }
 
-    public function getSchedule(Request $request, int $contractId)
+   public function getSchedule(Request $request, int $contractId)
     {
         $contract = Contract::findOrFail($contractId);
         $baseDate = Carbon::parse($request->input('baseDate', now()->toDateString()));
@@ -149,13 +149,10 @@ class PaymentController extends Controller
             $dueDate = $dbInst ? Carbon::parse($dbInst->dueDate) : $firstDue->copy()->addMonths($i - 1);
             $originalAmount = $dbInst ? (double)$dbInst->originalAmount : (double)$contract->installmentAmount;
             
-            // Mantemos o número do laço como referência caso a parcela não exista fisicamente ainda
             $installmentIdForAction = $dbInst ? $dbInst->id : $i;
-
             $paymentRow = null;
             
-            // 🚀 CORREÇÃO DA BUSCA DE PAGAMENTO: 
-            // Se a parcela existe no banco, busca pelo ID dela. Se for virtual, busca pelo par Contrato + Número
+            // 🚀 BUSCA DE PAGAMENTO CALIBRADA E BLINDADA
             if ($dbInst) {
                 $paymentRow = DB::table('payments')
                     ->where('installmentId', $dbInst->id)
@@ -169,7 +166,11 @@ class PaymentController extends Controller
                     ->first();
             }
 
-            $isPago = ($dbInst && $dbInst->status === 'Pago') || !is_null($paymentRow);
+            // 🚀 CORREÇÃO CRÍTICA DA TRAVA LOGICAL:
+            // Compara usando strtolower para aceitar 'Pago', 'pago' ou a existência real do recibo na tabela payments
+            $isDbPago = $dbInst && (strtolower(trim($dbInst->status)) === 'pago');
+            $isPago = $isDbPago || !is_null($paymentRow);
+            
             $isOverdue = !$isPago && $dueDate->isBefore($baseDate);
             
             $daysOverdue = $isOverdue ? (int)ceil($dueDate->diffInDays($baseDate, false)) : 0;
@@ -189,6 +190,7 @@ class PaymentController extends Controller
                 'installmentNumber' => $i,
                 'dueDate' => $dueDate->toDateString(),
                 'originalAmount' => $originalAmount,
+                // Força o status correto baseado na conferência exata
                 'status' => $isPago ? 'Pago' : ($isOverdue ? 'Vencido' : 'A vencer'),
                 'paidAmount' => $isPago ? (double)($paymentRow->amount ?? $originalAmount) : 0,
                 'openBalance' => $isPago ? 0 : $updatedAmount,
@@ -198,7 +200,7 @@ class PaymentController extends Controller
                 'penaltyAmount' => $isPago ? 0 : $penaltyAmount,
                 'updatedAmount' => $isPago ? (double)($paymentRow->amount ?? $originalAmount) : $updatedAmount,
                 'isAccelerated' => $contract->accelerates && $isOverdue,
-                'payments' => $isPago ? [['paidAt' => $paymentRow->paidAt ?? $dueDate->toDateString()]] : []
+                'payments' => $isPago ? [['paidAt' => $paymentRow->paidAt ?? ($dbInst->updatedAt ?? $dueDate->toDateString())]] : []
             ];
         }
 
