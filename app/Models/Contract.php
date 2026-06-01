@@ -16,6 +16,8 @@ class Contract extends Model
         'honoraryRate', 'accelerates', 'accelerationRule', 'accelerationConsecutiveThreshold',
         'accelerationAlternateThreshold', 'guarantees', 'guarantors', 'validationUrl',
         'sourcePdfName', 'contractPdfPath', 'observations', 'contract_type_id',
+        'chosenBankAccount', 'paymentMethod', 'forumLocation',
+        'confessionOfDebt',
     ];
 
     const CREATED_AT = 'createdAt';
@@ -24,6 +26,7 @@ class Contract extends Model
     protected $casts = [
         'validated' => 'boolean',
         'accelerates' => 'boolean',
+        'confessionOfDebt' => 'boolean',
     ];
 
     public function client(): BelongsTo

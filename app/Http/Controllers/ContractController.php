@@ -49,9 +49,15 @@ class ContractController extends Controller
         });
 
         $contractTypes = DB::table('contract_types')->orderBy('name', 'asc')->get();
-        
-        // 🚀 CRÍTICO: Carrega a tabela de clientes trazendo o campo 'notes' para o React extrair as contas e fiadores
-        $clients = DB::table('clients')->orderBy('name', 'asc')->get(['id', 'name', 'document', 'notes']);
+
+        // 🚀 CRÍTICO: Carrega a tabela de clientes trazendo:
+        //   - notes       → para o React extrair contas, PIX e fiadores
+        //   - document    → CNPJ/CPF (somente leitura) na guia "Dados Básicos" do contrato
+        //   - address/city/state/zipCode → exibir Endereço e CEP (somente leitura) na guia "Dados Básicos"
+        //   - personType  → ajustes futuros de labels PF/PJ
+        $clients = DB::table('clients')
+            ->orderBy('name', 'asc')
+            ->get(['id', 'name', 'document', 'address', 'city', 'state', 'zipCode', 'personType', 'notes']);
 
         return Inertia::render('Contracts', [
             'contracts'     => $rawContracts,
@@ -229,6 +235,10 @@ class ContractController extends Controller
             
             'guarantees'                       => $request->input('guarantees'),
             'guarantors'                       => $request->input('guarantors'),
+
+            // 🚀 Confissão de Dívida (checkbox da guia "Garantias e Fiadores")
+            'confessionOfDebt'                 => filter_var($request->input('confessionOfDebt', false), FILTER_VALIDATE_BOOLEAN),
+
             'validationUrl'                    => $request->input('validationUrl'),
             'observations'                     => $request->input('observations'),
         ];
