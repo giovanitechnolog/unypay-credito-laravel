@@ -498,7 +498,8 @@ export default function Clients({ clients, filters }: any) {
                           </div>
                           
                           {/* Grade da Conta Tradicional */}
-                          <div style={{ display: "grid", gridTemplateColumns: "2.5fr 1fr 2fr 1.2fr", gap: 10, marginBottom: 12 }}>
+                          {/* 🚀 Coluna do TIPO ampliada (1.6fr) para acomodar os 5 rótulos completos */}
+                          <div style={{ display: "grid", gridTemplateColumns: "2.4fr 0.9fr 1.8fr 1.6fr", gap: 10, marginBottom: 12 }}>
                             <div style={{ position: "relative" }}>
                               <input className="sigx-input" value={acc.banco} placeholder="Buscar banco..." onFocus={() => setFocusedBankIdx(idx)} onBlur={() => setTimeout(() => setFocusedBankIdx(null), 200)}
                                 onChange={e => setForm(p => ({ ...p, bankAccounts: form.bankAccounts.map((a, i) => i === idx ? { ...a, banco: e.target.value } : a) }))} />
@@ -513,7 +514,11 @@ export default function Clients({ clients, filters }: any) {
                             <input className="sigx-input" value={acc.agencia} placeholder="Agência" onChange={e => setForm(p => ({ ...p, bankAccounts: form.bankAccounts.map((a, i) => i === idx ? { ...a, agencia: e.target.value } : a) }))} />
                             <input className="sigx-input" value={acc.conta} placeholder="Número Conta" onChange={e => setForm(p => ({ ...p, bankAccounts: form.bankAccounts.map((a, i) => i === idx ? { ...a, conta: e.target.value } : a) }))} />
                             <select className="sigx-input" value={acc.tipo} onChange={e => setForm(p => ({ ...p, bankAccounts: form.bankAccounts.map((a, i) => i === idx ? { ...a, tipo: e.target.value } : a) }))}>
-                              <option value="corrente">C/ Corrente</option><option value="poupanca">C/ Poupança</option>
+                              <option value="corrente">Corrente</option>
+                              <option value="poupanca">Poupança</option>
+                              <option value="pagamentos">Pagamentos</option>
+                              <option value="salario">Conta Salário</option>
+                              <option value="conjunta">Conta Conjunta</option>
                             </select>
                           </div>
 
