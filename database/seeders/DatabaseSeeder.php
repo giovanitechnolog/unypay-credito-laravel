@@ -24,6 +24,10 @@ class DatabaseSeeder extends Seeder
 
             // 4. Injeta as baixas financeiras históricas, datas e valores reais da Planilha
             PopuleEcosistemaPlanilhaSeeder::class, 
+
+            LoadAdicionaisAuditoriaSeeder::class,
+
+            LoadContratosPendentesSeeder::class,
         ]);
     }
 }
