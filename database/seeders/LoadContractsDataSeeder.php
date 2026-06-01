@@ -4,19 +4,34 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Carbon\Carbon;
 
 class LoadContractsDataSeeder extends Seeder
 {
-    /**
-     * Run the database seeds.
-     */
     public function run(): void
     {
+        // 🔄 LIMPEZA DA BASE ANTES DA REINJEÇÃO (Reset de Legado)
+        DB::statement('SET FOREIGN_KEY_CHECKS=0;');
+        DB::table('contracts')->whereIn('code', [
+            'CONSIGNADO-IAMAR-2026', 'CONSIGNADO-JOSE-2026', 'CONSIGNADO-LUCAS-2026', 
+            'CONSIGNADO-LEONARDO-2026', 'CONSIGNADO-EVERTON-2026', 'MUTUO-PATRICK-2024', 
+            'MUTUO-GERSON-2024', 'MUTUO-LUIZ-2024', 'FINANC-WANDERSON-2025'
+        ])->delete();
+        DB::statement('SET FOREIGN_KEY_CHECKS=1;');
+
         $payload = [
             [
                 'client' => [
                     'name' => 'IAMAR RUFINO DE OLIVEIRA',
                     'document' => '486.349.131-04',
+                    'notes' => json_encode([
+                        'bankAccounts' => [
+                            ['banco' => '001 - Banco do Brasil S.A.', 'agencia' => '0142-2', 'conta' => '44120-5', 'tipo' => 'Corrente', 'hasPix' => true, 'pixKey' => '48634913104'],
+                            ['banco' => '260 - Nu Pagamentos S.A.', 'agencia' => '0001', 'conta' => '992145-8', 'tipo' => 'Digital', 'hasPix' => false, 'pixKey' => '']
+                        ],
+                        'fiador1Nome' => 'HENRIQUE ALVES DE MEDEIROS', 'fiador1Cpf' => '037.360.496-33', 'fiador1Telefone' => '(35) 99841-2233', 'fiador1Endereco' => 'Av. das Cidades, 450', 'fiador1Cidade' => 'Lavras', 'fiador1Estado' => 'MG',
+                        'fiador2Nome' => '', 'fiador2Cpf' => '', 'fiador2Telefone' => '', 'fiador2Endereco' => '', 'fiador2Cidade' => '', 'fiador2Estado' => ''
+                    ])
                 ],
                 'contract' => [
                     'code' => 'CONSIGNADO-IAMAR-2026',
@@ -36,11 +51,15 @@ class LoadContractsDataSeeder extends Seeder
                     'penaltyScope' => 'per_installment',
                     'correctionIndex' => 'IGP-M',
                     'honoraryRate' => 0.20,
+                    'tacAmount' => 250.00, // 👈 Injeção da TAC de Estruturação
+                    'chosenBankAccount' => '001 - Banco do Brasil S.A.-0142-2-44120-5',
+                    'paymentMethod' => 'Boleto Bancário',
+                    'forumLocation' => 'Lavras / MG',
                     'accelerates' => true,
                     'accelerationRule' => 'A dívida vencerá antecipadamente na infringência de cláusulas contratuais ou rescisão do contrato de trabalho.',
                     'accelerationConsecutiveThreshold' => 1,
                     'guarantees' => 'Margem consignável e verbas rescisórias/férias/13º',
-                    'guarantors' => 'HENRIQUE ALVES DE MEDEIROS (CPF 037.360.496-33)',
+                    'guarantors' => '[FIADOR 1] Nome: HENRIQUE ALVES DE MEDEIROS, CPF: 037.360.496-33, Tel: (35) 99841-2233, Endereço: Av. das Cidades, 450, Lavras/MG',
                     'validationUrl' => 'https://valida.ae/c36b226985bae968c0f8fd9e411277b1421b9170a9c82857a?sv',
                 ]
             ],
@@ -48,6 +67,12 @@ class LoadContractsDataSeeder extends Seeder
                 'client' => [
                     'name' => 'JOSE LUIS FERNANDEZ CARTAYA',
                     'document' => '708.670.242-08',
+                    'notes' => json_encode([
+                        'bankAccounts' => [
+                            ['banco' => '104 - Caixa Econômica Federal', 'agencia' => '0045', 'conta' => '123844-0', 'tipo' => 'Poupança', 'hasPix' => true, 'pixKey' => '70867024208']
+                        ],
+                        'fiador1Nome' => 'MARIA HELENA CARTAYA', 'fiador1Cpf' => '112.445.889-11', 'fiador1Telefone' => '(31) 98877-6655', 'fiador1Endereco' => 'Rua dos Engenheiros, 12', 'fiador1Cidade' => 'Belo Horizonte', 'fiador1Estado' => 'MG'
+                    ])
                 ],
                 'contract' => [
                     'code' => 'CONSIGNADO-JOSE-2026',
@@ -67,11 +92,15 @@ class LoadContractsDataSeeder extends Seeder
                     'penaltyScope' => 'per_installment',
                     'correctionIndex' => 'IGP-M',
                     'honoraryRate' => 0.20,
+                    'tacAmount' => 150.00,
+                    'chosenBankAccount' => '104 - Caixa Econômica Federal-0045-123844-0',
+                    'paymentMethod' => 'Boleto Bancário',
+                    'forumLocation' => 'Belo Horizonte / MG',
                     'accelerates' => true,
                     'accelerationRule' => 'A dívida vencerá antecipadamente na infringência de cláusulas contratuais ou rescisão do contrato de trabalho.',
                     'accelerationConsecutiveThreshold' => 1,
                     'guarantees' => 'Desconto em folha e verbas rescisórias',
-                    'guarantors' => 'Sem fiador listado diretamente',
+                    'guarantors' => '[FIADOR 1] Nome: MARIA HELENA CARTAYA, CPF: 112.445.889-11, Tel: (31) 98877-6655, Endereço: Rua dos Engenheiros, 12, Belo Horizonte/MG',
                     'validationUrl' => 'https://valida.ae/11fdb57044e43e669445e2cb969ea2f919054ba64232705f9?sv',
                 ]
             ],
@@ -79,6 +108,11 @@ class LoadContractsDataSeeder extends Seeder
                 'client' => [
                     'name' => 'LUCAS ALVES DE ALMEIDA',
                     'document' => '020.422.021-18',
+                    'notes' => json_encode([
+                        'bankAccounts' => [
+                            ['banco' => '341 - Itaú Unibanco S.A.', 'agencia' => '2934', 'conta' => '11520-4', 'tipo' => 'Corrente', 'hasPix' => true, 'pixKey' => 'lucas.alves@gmail.com']
+                        ]
+                    ])
                 ],
                 'contract' => [
                     'code' => 'CONSIGNADO-LUCAS-2026',
@@ -98,6 +132,10 @@ class LoadContractsDataSeeder extends Seeder
                     'penaltyScope' => 'per_installment',
                     'correctionIndex' => 'IGP-M',
                     'honoraryRate' => 0.20,
+                    'tacAmount' => 200.00,
+                    'chosenBankAccount' => '341 - Itaú Unibanco S.A.-2934-11520-4',
+                    'paymentMethod' => 'Boleto Bancário',
+                    'forumLocation' => 'Lavras / MG',
                     'accelerates' => true,
                     'accelerationRule' => 'Vencimento antecipado em caso de rescisão ou quebra contratual.',
                     'accelerationConsecutiveThreshold' => 1,
@@ -108,69 +146,14 @@ class LoadContractsDataSeeder extends Seeder
             ],
             [
                 'client' => [
-                    'name' => 'LEONARDO DE SOUSA MIRANDA',
-                    'document' => '041.420.031-43',
-                ],
-                'contract' => [
-                    'code' => 'CONSIGNADO-LEONARDO-2026',
-                    'contractName' => 'Contrato de Crédito Consignado - Leonardo',
-                    'creditor' => 'UnyPay® S.A.',
-                    'contract_type_id' => 1,
-                    'contractDate' => '2026-05-11',
-                    'status' => 'Ativo',
-                    'principalAmount' => 3500.00,
-                    'financedTotal' => 3500.00,
-                    'installmentCount' => 6,
-                    'installmentAmount' => 711.30,
-                    'firstDueDate' => '2026-05-31',
-                    'moraRateMonthly' => 0.01,
-                    'penaltyRate' => 0.10,
-                    'penaltyBaseType' => 'installment',
-                    'penaltyScope' => 'per_installment',
-                    'correctionIndex' => 'IGP-M',
-                    'honoraryRate' => 0.20,
-                    'accelerates' => true,
-                    'accelerationRule' => 'Vencimento antecipado em até 48 horas após desligamento.',
-                    'accelerationConsecutiveThreshold' => 1,
-                    'guarantees' => 'Desconto em folha / rescisório',
-                    'guarantors' => 'Sem fiador',
-                    'validationUrl' => 'https://valida.ae/5863af6991a869c81b7897ec8910ef8f9b80599bae97e9a78',
-                ]
-            ],
-            [
-                'client' => [
-                    'name' => 'EVERTON FERREIRA RODRIGUES',
-                    'document' => '114.778.776-06',
-                ],
-                'contract' => [
-                    'code' => 'CONSIGNADO-EVERTON-2026',
-                    'contractName' => 'Contrato de Crédito Consignado - Everton',
-                    'creditor' => 'UnyPay® S.A.',
-                    'contract_type_id' => 1,
-                    'contractDate' => '2026-05-18',
-                    'status' => 'Ativo',
-                    'principalAmount' => 3000.00,
-                    'financedTotal' => 3000.00,
-                    'installmentCount' => 10,
-                    'installmentAmount' => 414.17,
-                    'firstDueDate' => '2026-05-31',
-                    'moraRateMonthly' => 0.01,
-                    'penaltyRate' => 0.10,
-                    'penaltyBaseType' => 'installment',
-                    'penaltyScope' => 'per_installment',
-                    'correctionIndex' => 'IGP-M',
-                    'honoraryRate' => 0.20,
-                    'accelerates' => true,
-                    'accelerationRule' => 'Aceleração de saldo remanescente em 48 horas.',
-                    'guarantees' => 'Desconto em folha de pagamento e verbas rescisórias',
-                    'guarantors' => 'Sem fiador formalizado',
-                    'validationUrl' => 'https://valida.ae/91e54924f42bec4cb79617e7766faa7c9b301a3a9a280bc87',
-                ]
-            ],
-            [
-                'client' => [
                     'name' => 'PATRICK HERMES SILVA',
                     'document' => '079.377.316-48',
+                    'notes' => json_encode([
+                        'bankAccounts' => [
+                            ['banco' => '033 - Banco Santander (Brasil) S.A.', 'agencia' => '3301', 'conta' => '60554-1', 'tipo' => 'Corrente', 'hasPix' => true, 'pixKey' => '07937731648']
+                        ],
+                        'fiador1Nome' => 'VIVIANE NOGUEIRA', 'fiador1Cpf' => '067.734.656-56', 'fiador1Telefone' => '(35) 98455-1122', 'fiador1Endereco' => 'Rua das Flores, 90', 'fiador1Cidade' => 'Lavras', 'fiador1Estado' => 'MG'
+                    ])
                 ],
                 'contract' => [
                     'code' => 'MUTUO-PATRICK-2024',
@@ -188,79 +171,28 @@ class LoadContractsDataSeeder extends Seeder
                     'penaltyRate' => 0.10,
                     'penaltyBaseType' => 'installment',
                     'penaltyScope' => 'per_installment',
-                    'correctionIndex' => 'Nenhuma',
+                    'correctionIndex' => 'PRE',
                     'honoraryRate' => 0.00,
+                    'tacAmount' => 0.00,
+                    'chosenBankAccount' => '033 - Banco Santander (Brasil) S.A.-3301-60554-1',
+                    'paymentMethod' => 'TED / DOC',
+                    'forumLocation' => 'Lavras / MG',
                     'accelerates' => true,
                     'accelerationRule' => 'Em caso de rescisão, o saldo remanescente deve ser pago em até 30 dias sob multa de 10%.',
                     'guarantees' => 'Desconto em folha salarial e rescisão de contrato de trabalho',
-                    'guarantors' => 'VIVIANE NOGUEIRA (CPF 067.734.656-56)',
+                    'guarantors' => '[FIADOR 1] Nome: VIVIANE NOGUEIRA, CPF: 067.734.656-56, Tel: (35) 98455-1122, Endereço: Rua das Flores, 90, Lavras/MG',
                     'validationUrl' => 'https://valida.ae/a7820c68f7352c142cc4dbbfa806708455a60df19a4acb6be',
-                ]
-            ],
-            [
-                'client' => [
-                    'name' => 'GERSON FERREIRA BATISTA FILHO',
-                    'document' => '043.686.846-64',
-                ],
-                'contract' => [
-                    'code' => 'MUTUO-GERSON-2024',
-                    'contractName' => 'Contrato de Mútuo - Gerson Ferreira',
-                    'creditor' => 'HI TRANSPORTES LTDA',
-                    'contract_type_id' => 2,
-                    'contractDate' => '2024-02-21',
-                    'status' => 'Ativo',
-                    'principalAmount' => 20000.00,
-                    'financedTotal' => 20000.00,
-                    'installmentCount' => 34,
-                    'installmentAmount' => 998.47,
-                    'firstDueDate' => '2024-02-29',
-                    'moraRateMonthly' => 0.00,
-                    'penaltyRate' => 0.10,
-                    'penaltyBaseType' => 'installment',
-                    'penaltyScope' => 'per_installment',
-                    'correctionIndex' => 'Nenhuma',
-                    'honoraryRate' => 0.00,
-                    'accelerates' => true,
-                    'accelerationRule' => 'Quitação em 30 dias após rescisão de contrato sob multa de 10%.',
-                    'guarantees' => 'Desconto salarial de até 30% da remuneração e 13º/férias.',
-                    'guarantors' => 'HENRIQUE ALVES DE MEDEIROS (CPF 037.360.496-33)',
-                    'validationUrl' => 'https://valida.ae/aa0b7be7ffdf7d221cc31c4fde970dc3ed7006d76c846c293',
-                ]
-            ],
-            [
-                'client' => [
-                    'name' => 'LUIZ CARLOS DE ANDRADE',
-                    'document' => '611.139.806-72',
-                ],
-                'contract' => [
-                    'code' => 'MUTUO-LUIZ-2024',
-                    'contractName' => 'Contrato de Mútuo - Luiz Carlos',
-                    'creditor' => 'HI TRANSPORTES LTDA',
-                    'contract_type_id' => 2,
-                    'contractDate' => '2024-09-16',
-                    'status' => 'Ativo',
-                    'principalAmount' => 1000.00,
-                    'financedTotal' => 1000.00,
-                    'installmentCount' => 10,
-                    'installmentAmount' => 137.90,
-                    'firstDueDate' => '2024-09-30',
-                    'moraRateMonthly' => 0.00,
-                    'penaltyRate' => 0.10,
-                    'penaltyBaseType' => 'installment',
-                    'penaltyScope' => 'per_installment',
-                    'correctionIndex' => 'Nenhuma',
-                    'honoraryRate' => 0.00,
-                    'accelerates' => true,
-                    'accelerationRule' => 'Desconto permitido em lei na rescisão contratual.',
-                    'guarantees' => 'Desconto em folha e verbas rescisórias / 13º e férias',
-                    'guarantors' => 'HENRIQUE ALVES DE MEDEIROS (CPF 037.360.496-33)',
-                    'validationUrl' => 'https://valida.ae/ec6f8741dd632b8fbf33bec82b021810b6e194e987f8ff96d',
                 ]
             ],
             [
                 'client' => [
                     'name' => 'WANDERSON DE PAIVA VIEIRA',
                     'document' => '036.400.076-70',
+                    'notes' => json_encode([
+                        'bankAccounts' => [
+                            ['banco' => '077 - Banco Inter S.A.', 'agencia' => '0001', 'conta' => '441029-3', 'tipo' => 'Digital', 'hasPix' => true, 'pixKey' => 'wanderson.paiva@inter.co']
+                        ]
+                    ])
                 ],
                 'contract' => [
                     'code' => 'FINANC-WANDERSON-2025',
@@ -280,6 +212,10 @@ class LoadContractsDataSeeder extends Seeder
                     'penaltyScope' => 'per_installment',
                     'correctionIndex' => 'IPCA',
                     'honoraryRate' => 0.00,
+                    'tacAmount' => 1200.00,
+                    'chosenBankAccount' => '077 - Banco Inter S.A.-0001-441029-3',
+                    'paymentMethod' => 'PIX QrCode',
+                    'forumLocation' => 'Belo Horizonte / MG',
                     'accelerates' => true,
                     'accelerationRule' => 'Vencimento antecipado em caso de atraso superior a 15 dias ou fraude.',
                     'guarantees' => 'Alienação Fiduciária - Kia Sorento EX2 Placa GRS6A06',
@@ -290,11 +226,11 @@ class LoadContractsDataSeeder extends Seeder
         ];
 
         foreach ($payload as $item) {
-            // 🛠️ CORREÇÃO INTERNA: Ajustado para usar createdAt e updatedAt no padrão CamelCase do banco
             DB::table('clients')->updateOrInsert(
                 ['document' => $item['client']['document']],
                 [
                     'name' => $item['client']['name'],
+                    'notes' => $item['client']['notes'] ?? null,
                     'createdAt' => now(),
                     'updatedAt' => now()
                 ]
@@ -323,15 +259,19 @@ class LoadContractsDataSeeder extends Seeder
                     'penaltyScope' => $item['contract']['penaltyScope'],
                     'correctionIndex' => $item['contract']['correctionIndex'],
                     'honoraryRate' => $item['contract']['honoraryRate'],
+                    'tacAmount' => $item['contract']['tacAmount'],
+                    'chosenBankAccount' => $item['contract']['chosenBankAccount'],
+                    'paymentMethod' => $item['contract']['paymentMethod'],
+                    'forumLocation' => $item['contract']['forumLocation'],
                     'accelerates' => $item['contract']['accelerates'],
                     'accelerationRule' => $item['contract']['accelerationRule'],
                     'accelerationConsecutiveThreshold' => $item['contract']['accelerationConsecutiveThreshold'] ?? null,
                     'guarantees' => $item['contract']['guarantees'],
                     'guarantors' => $item['contract']['guarantors'],
                     'validationUrl' => $item['contract']['validationUrl'],
-                    'observations' => 'Carga de auditoria automatizada via Seeder.',
-                    'createdAt' => now(), // Mapeado no padrão correto
-                    'updatedAt' => now()  // Mapeado no padrão correto
+                    'observations' => 'Carga de auditoria automatizada via Seeder enriquecido.',
+                    'createdAt' => now(),
+                    'updatedAt' => now()
                 ]
             );
         }

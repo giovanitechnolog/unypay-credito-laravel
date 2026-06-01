@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Plus, Search, FileText, CheckCircle, X, Edit2, Trash2, Upload, Eye } from "lucide-react";
+import { Plus, Search, FileText, CheckCircle, X, Edit2, Trash2, Upload, Eye, CreditCard, QrCode, UserCheck, Scale } from "lucide-react";
 import { Head, router } from "@inertiajs/react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
@@ -48,11 +48,16 @@ const emptyForm = {
   accelerationRule: "", accelerationConsecutiveThreshold: undefined as number | undefined,
   accelerationAlternateThreshold: undefined as number | undefined,
   guarantees: "", guarantors: "", validationUrl: "", observations: "",
+  
+  // Novos campos estruturados de recebimento e juizado
+  chosenBankAccount: "",
+  paymentMethod: "Boleto Bancário",
+  forumLocation: "Belo Horizonte / MG", 
 };
 
 const TABS = [
   { key: "basico", label: "Dados Básicos" },
-  { key: "financeiro", label: "Valores Financeiros" },
+  { key: "financeiro", label: "Valores e Bancos" }, 
   { key: "taxas", label: "Taxas e Encargos" },
   { key: "garantias", label: "Garantias e Fiadores" },
   { key: "regras", label: "Regras Contratuais" },
@@ -76,13 +81,10 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   
-  // 🚀 ESTADO PARA MÚLTIPLOS PDFs
   const [contractPdfFiles, setContractPdfFiles] = useState<File[]>([]);
   const [existingPdfNames, setExistingPdfNames] = useState<string[]>([]);
-  
   const [submitting, setSubmitting] = useState(false);
   
-  // Controle de preview de multiplos PDFs
   const [pdfPreview, setPdfPreview] = useState<{ id: number; code: string; names: string[] } | null>(null);
   const [activePdfIndex, setActivePdfIndex] = useState<number>(0);
 
@@ -90,6 +92,18 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   const [pageSize, setPageSize] = useState(20);
   const [sortCol, setSortCol] = useState<string>("code");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  // Captura as configurações e metadados financeiros do cliente selecionado no form
+  const selectedClientMeta = useMemo(() => {
+    if (!form.clientId) return null;
+    const clientFound = clients?.find((c: any) => c.id === form.clientId);
+    if (!clientFound || !clientFound.notes) return null;
+    try {
+      return JSON.parse(clientFound.notes);
+    } catch {
+      return null;
+    }
+  }, [form.clientId, clients]);
 
   const { visibleIds, toggleColumn, setColumnsVisible, resetDefaults } =
     useColumnVisibility<ContractsColumnId>("unypay.contracts.columns.v1", CONTRACTS_COLUMNS);
@@ -173,6 +187,9 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       guarantors: c.guarantors ?? "",
       validationUrl: c.validationUrl ?? "",
       observations: c.observations ?? "",
+      chosenBankAccount: c.chosenBankAccount ?? "",
+      paymentMethod: c.paymentMethod ?? "Boleto Bancário",
+      forumLocation: c.forumLocation ?? "Belo Horizonte / MG",
     });
     setContractPdfFiles([]);
     
@@ -187,7 +204,6 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     setOpen(true);
   };
 
-  // 🚀 SELEÇÃO MULTIPLA DE PDFs COM FILTRAGEM DE SEGURANÇA
   const handlePdfFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -206,7 +222,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       validFiles.push(file);
     }
     setContractPdfFiles(prev => [...prev, ...validFiles]);
-    e.target.value = ""; // Reseta o input para permitir selecionar o mesmo arquivo se quiser
+    e.target.value = "";
   };
 
   const buildFormData = (): FormData => {
@@ -216,8 +232,6 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       if (typeof v === "boolean") fd.append(k, v ? "1" : "0");
       else fd.append(k, String(v));
     });
-    
-    // Alimenta o array de arquivos esperado pelo PHP
     contractPdfFiles.forEach((file) => {
       fd.append("contractPdfs[]", file);
     });
@@ -257,18 +271,10 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     }
     
     let decodedNames: string[] = [];
-    try {
-      decodedNames = JSON.parse(c.sourcePdfName || "[]");
-    } catch {
-      decodedNames = [c.sourcePdfName || "documento.pdf"];
-    }
+    try { decodedNames = JSON.parse(c.sourcePdfName || "[]"); } catch { decodedNames = [c.sourcePdfName || "documento.pdf"]; }
 
-    setActivePdfIndex(0); // Força a visualização a começar sempre no primeiro PDF da lista
-    setPdfPreview({
-      id: c.id,
-      code: c.code ?? "",
-      names: decodedNames,
-    });
+    setActivePdfIndex(0);
+    setPdfPreview({ id: c.id, code: c.code ?? "", names: decodedNames });
   };
 
   const handleDelete = (item: any) => {
@@ -332,7 +338,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       case "client":
         return (
           <div style={{ maxWidth: col.width - 14, fontWeight: 700, fontSize: 11, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {item.clientName ?? item.client_name ?? "—"}
+            {item.client_name ?? item.clientName ?? "—"}
           </div>
         );
       case "contractType":
@@ -368,12 +374,6 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     }
   };
 
-  const SortIco = ({ col }: { col: string }) => (
-    <span style={{ marginLeft: 2, opacity: sortCol === col ? 1 : 0.4, fontSize: 8 }}>
-      {sortCol === col ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
-    </span>
-  );
-
   return (
     <UnyPayLayout>
       <Head title="Carteira de Contratos" />
@@ -383,29 +383,19 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
         {/* Topo da página */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#111827" }}>Contratos e Ativos</h1>
-          <button onClick={handleOpenCreate}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 6, border: "none", background: "#1a2035", color: "white", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+          <button onClick={handleOpenCreate} className="btn-primary" style={{ padding: "6px 14px", fontSize: 11 }}>
             <Plus size={12} /> Novo Contrato
           </button>
         </div>
 
-        {/* Filtros e Picker de colunas */}
-        <div style={{
-          background: "white", border: "1px solid #e5e7eb", borderRadius: 6,
-          padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0,
-        }}>
+        {/* Filtros */}
+        <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 6, padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 auto", minWidth: 0 }}>
             <div style={{ position: "relative", flexShrink: 0 }}>
               <Search size={12} style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "#9ca3af" }} />
-              <input
-                style={{ paddingLeft: 26, width: 260, fontSize: 11, height: 28, border: "1px solid #d1d5db", borderRadius: 6, outline: "none", color: "#374151" }}
-                placeholder="Buscar contratos..." value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
-              />
+              <input style={{ paddingLeft: 26, width: 260, fontSize: 11, height: 28, border: "1px solid #d1d5db", borderRadius: 6, outline: "none", color: "#374151" }} placeholder="Buscar contratos..." value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />
             </div>
-            <select
-              style={{ width: 150, fontSize: 11, height: 28, background: "white", border: "1px solid #d1d5db", borderRadius: 6, color: "#374151", cursor: "pointer", flexShrink: 0 }}
-              value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); handleFilterChange(search, e.target.value); }}
-            >
+            <select style={{ width: 150, fontSize: 11, height: 28, background: "white", border: "1px solid #d1d5db", borderRadius: 6, color: "#374151", cursor: "pointer", flexShrink: 0 }} value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); handleFilterChange(search, e.target.value); }}>
               <option value="Todos">Todos os status</option>
               <option value="Ativo">Ativo</option>
               <option value="Inadimplente">Inadimplente</option>
@@ -413,457 +403,309 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
               <option value="Renegociado">Renegociado</option>
               <option value="Cancelado">Cancelado</option>
             </select>
-            <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 500, flexShrink: 0 }}>{filtered.length} contratos</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-            <TableGroupBadges
-              allColumns={CONTRACTS_COLUMNS}
-              groupOrder={CONTRACTS_GROUP_ORDER}
-              groupMeta={CONTRACTS_GROUP_META}
-              visibleIds={visibleIds}
-              setColumnsVisible={setColumnsVisible}
-            />
-            <TableColumnPicker
-              allColumns={CONTRACTS_COLUMNS}
-              groupOrder={CONTRACTS_GROUP_ORDER}
-              groupMeta={CONTRACTS_GROUP_META}
-              visibleIds={visibleIds}
-              toggleColumn={toggleColumn}
-              setColumnsVisible={setColumnsVisible}
-              resetDefaults={resetDefaults}
-            />
           </div>
         </div>
 
         {/* Tabela de listagem */}
-        <div style={{
-          flex: 1, minHeight: 0, display: "flex", flexDirection: "column",
-          border: "1px solid #e5e7eb", borderRadius: 6, overflow: "hidden", background: "white",
-        }}>
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", border: "1px solid #e5e7eb", borderRadius: 6, overflow: "hidden", background: "white" }}>
           <div style={{ flex: 1, overflow: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11, minWidth: 900 }}>
-              <colgroup>
-                {visibleOrdered.map(col => <col key={col.id} style={{ width: col.width }} />)}
-                <col style={{ width: ACTIONS_WIDTH }} />
-              </colgroup>
-
               <thead>
                 <tr>
-                  {visibleGroupRuns.map((run, i) => {
-                    const meta = CONTRACTS_GROUP_META[run.group];
-                    return (
-                      <th
-                        key={`${run.group}-${i}`}
-                        colSpan={run.count}
-                        style={{
-                          background: meta.bg, color: meta.color,
-                          textAlign: "center", padding: "4px 8px",
-                          fontSize: 9, fontWeight: 700, letterSpacing: "0.06em",
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        {meta.label}
-                      </th>
-                    );
-                  })}
-                  <th style={{ background: "#1e2139", color: "white", textAlign: "center", padding: "4px 8px", fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>
-                    Ações
-                  </th>
-                </tr>
-                <tr>
-                  {visibleOrdered.map(col => {
-                    const stickyStyle: React.CSSProperties = col.sticky
-                      ? { position: "sticky", left: stickyOffsets.get(col.id), zIndex: 2, background: "#f1f5f9" }
-                      : {};
-                    const clickable = !!col.sortable;
-                    return (
-                      <th
-                        key={col.id}
-                        onClick={clickable ? () => doSort(col.sortKey || col.id) : undefined}
-                        style={{
-                          ...headerCellStyle,
-                          textAlign: col.align,
-                          cursor: clickable ? "pointer" : "default",
-                          ...stickyStyle,
-                        }}
-                      >
-                        {col.label.toUpperCase()}
-                        {clickable && <SortIco col={col.sortKey || col.id} />}
-                      </th>
-                    );
-                  })}
+                  {visibleOrdered.map(col => <th key={col.id} style={headerCellStyle}>{col.label}</th>)}
                   <th style={{ ...headerCellStyle, textAlign: "center" }}>AÇÕES</th>
                 </tr>
               </thead>
-
               <tbody>
-                {paginated.length === 0 ? (
-                  <tr>
-                    <td colSpan={visibleOrdered.length + 1} style={{ textAlign: "center", padding: 48, color: "#9ca3af" }}>
-                      <FileText size={28} style={{ margin: "0 auto 8px", display: "block", opacity: 0.2 }} /> Nenhum contrato encontrado
-                    </td>
-                  </tr>
-                ) : (
-                  paginated.map((item: any, rowIdx: number) => {
-                    const rowBg = rowIdx % 2 === 1 ? "#fafafa" : "white";
-                    const c = item.contract ?? item;
-                    const hasPdf = !!c.hasContractPdf;
-                    return (
-                      <tr key={c.id} style={{ background: rowBg }}
-                        onMouseOver={e => (e.currentTarget.style.background = "#eff6ff")}
-                        onMouseOut={e => (e.currentTarget.style.background = rowBg)}
-                      >
-                        {visibleOrdered.map(col => {
-                          const stickyStyle: React.CSSProperties = col.sticky
-                            ? { position: "sticky", left: stickyOffsets.get(col.id), zIndex: 1, background: "inherit" }
-                            : {};
-                          const base = col.align === "right" ? tdNum : col.align === "center" ? tdCenter : tdBase;
-                          return (
-                            <td key={col.id} style={{ ...base, ...stickyStyle }}>
-                              {renderCellContent(col, item)}
-                            </td>
-                          );
-                        })}
-                        <td style={tdCenter}>
-                          <div style={{ display: "flex", gap: 3, justifyContent: "center" }}>
-                            {/* 🚀 ICONE DE DOCUMENTO (ABRE VIEWER MULTI-PDF) */}
-                            <button
-                              className="btn-icon"
-                              title={hasPdf ? "Visualizar PDFs anexados" : "Nenhum PDF anexado"}
-                              onClick={() => handleViewPdf(item)}
-                              disabled={!hasPdf}
-                              style={{ opacity: hasPdf ? 1 : 0.4, cursor: hasPdf ? "pointer" : "not-allowed" }}
-                            >
-                              <FileText size={11} />
+                {paginated.map((item: any) => {
+                  const c = item.contract ?? item;
+                  return (
+                    <tr key={c.id}>
+                      {visibleOrdered.map(col => <td key={col.id} style={tdBase}>{renderCellContent(col, item)}</td>)}
+                      <td style={tdCenter}>
+                        <div style={{ display: "flex", gap: 3, justifyContent: "center" }}>
+                          {/* 🚀 O ÍCONE DO OLHINHO DO CONTRATO SÓ FICA VISÍVEL SE TIVER CONTRATO ANEXADO */}
+                          {c.hasContractPdf && (
+                            <button type="button" className="btn-icon" onClick={() => handleViewPdf(item)} title="Visualizar Minutas Anexas">
+                              <Eye size={11} style={{ color: "#2563eb" }} />
                             </button>
-
-                            <button className="btn-icon" title="Editar contrato" onClick={() => handleOpenEdit(item)}>
-                              <Edit2 size={11} />
-                            </button>
-                           
-                            <button className="btn-icon" title="Excluir contrato" onClick={() => handleDelete(item)} style={{ color: "#dc2626" }}>
-                              <Trash2 size={11} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
+                          )}
+                          <button type="button" className="btn-icon" onClick={() => handleOpenEdit(item)}><Edit2 size={11} /></button>
+                          <button type="button" className="btn-icon text-danger" onClick={() => handleDelete(item)}><Trash2 size={11} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-
-          {/* Paginação da tabela */}
-          <div style={{
-            padding: "6px 12px", background: "#fafbfc", borderTop: "1px solid #e5e7eb",
-            display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, flexShrink: 0,
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6b7280" }}>
-              <span>Exibir</span>
-              <select style={{ padding: "2px 6px", border: "1px solid #d1d5db", borderRadius: 4, fontSize: 11, background: "white" }} value={pageSize} onChange={e => { setPageSize(+e.target.value); setPage(1); }}>
-                {PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <span>por página</span>
-            </div>
-            <span style={{ fontSize: 11, color: "#6b7280" }}>
-              Mostrando {Math.min((page - 1) * pageSize + 1, filtered.length)}–{Math.min(page * pageSize, filtered.length)} de {filtered.length}
-            </span>
-            <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-              <button type="button" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                style={{ padding: "3px 10px", border: "1px solid #d1d5db", borderRadius: 4, background: "white", fontSize: 11, cursor: page === 1 ? "not-allowed" : "pointer" }}>
-                ← Anterior
-              </button>
-              {Array.from({ length: totalPages }).map((_, i) => (
-                <button type="button" key={i} onClick={() => setPage(i + 1)}
-                  style={{
-                    width: 28, height: 26, borderRadius: 4, border: "1px solid",
-                    fontSize: 11, background: i + 1 === page ? "#1a2035" : "white",
-                    color: i + 1 === page ? "white" : "#374151",
-                    borderColor: i + 1 === page ? "#1a2035" : "#d1d5db",
-                    fontWeight: i + 1 === page ? 700 : 400, cursor: "pointer"
-                  }}>
-                  {i + 1}
-                </button>
-              ))}
-              <button type="button" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
-                style={{ padding: "3px 10px", border: "1px solid #d1d5db", borderRadius: 4, background: "white", fontSize: 11, cursor: page >= totalPages ? "not-allowed" : "pointer" }}>
-                Próxima →
-              </button>
-            </div>
-          </div>
         </div>
 
-        {/* Modal Cadastro / Edição */}
+        {/* Modal Principal Cadastro / Edição */}
         {open && (
           <div className="sigx-modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setOpen(false); }}>
             <div className="sigx-modal" style={{ maxWidth: 860 }} onMouseDown={e => e.stopPropagation()}>
               <div className="sigx-modal-header">
                 <span className="sigx-modal-title">{editingId ? "Editar Contrato" : "Novo Contrato"}</span>
-                <button type="button" onClick={() => { setOpen(false); resetModal(); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", display: "flex" }}><X size={18} /></button>
+                <button type="button" onClick={() => { setOpen(false); resetModal(); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)" }}><X size={18} /></button>
               </div>
               <div className="sigx-tabs" style={{ display: "flex", gap: 2, background: "#f3f4f6", padding: 4 }}>
                 {TABS.map(tab => (
-                  <div key={tab.key} className={`sigx-tab${activeTab === tab.key ? " active" : ""}`} onClick={() => setActiveTab(tab.key)}
-                    style={{ padding: "6px 12px", fontSize: 11, cursor: "pointer", borderRadius: 4, background: activeTab === tab.key ? "white" : "transparent", fontWeight: activeTab === tab.key ? 700 : 400 }}>
-                    {tab.label}
-                  </div>
+                  <div key={tab.key} className={`sigx-tab${activeTab === tab.key ? " active" : ""}`} onClick={() => setActiveTab(tab.key)} style={{ padding: "6px 12px", fontSize: 11, cursor: "pointer", borderRadius: 4, background: activeTab === tab.key ? "white" : "transparent", fontWeight: activeTab === tab.key ? 700 : 400 }}>{tab.label}</div>
                 ))}
               </div>
               <form onSubmit={handleSubmit}>
                 <div className="sigx-modal-body" style={{ padding: 20, maxHeight: "55vh", overflowY: "auto" }}>
+                  
+                  {/* TAB 1: BÁSICO */}
                   {activeTab === "basico" && (
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                       <div style={{ gridColumn: "span 2" }}>
-                        <label className="sigx-label">CLIENTE *</label>
-                        <select className="sigx-input" value={String(form.clientId || "")} onChange={e => setForm(p => ({ ...p, clientId: Number(e.target.value) }))}>
+                        <label className="sigx-label">CLIENTE DEVEDOR *</label>
+                        <select className="sigx-input" value={String(form.clientId || "")} onChange={e => setForm(p => ({ ...p, clientId: Number(e.target.value), chosenBankAccount: "" }))}>
                           <option value="">Selecione o cliente</option>
-                          {clients?.map((c: any) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
+                          {clients?.map((c: any) => <option key={c.id} value={String(c.id)}>{c.name} ({c.document})</option>)}
                         </select>
                       </div>
-                      <div><label className="sigx-label">CÓDIGO *</label><input className="sigx-input" value={form.code} onChange={n("code")} required placeholder="Ex: BeloSanta1" /></div>
-                      <div><label className="sigx-label">DATA DO CONTRATO</label><input type="date" className="sigx-input" value={form.contractDate} onChange={n("contractDate")} /></div>
-                      <div style={{ gridColumn: "span 2" }}><label className="sigx-label">NOME DO CONTRATO *</label><input className="sigx-input" value={form.contractName} onChange={n("contractName")} required /></div>
-                      <div><label className="sigx-label">CREDOR *</label><input className="sigx-input" value={form.creditor} onChange={n("creditor")} required /></div>
+                      <div><label className="sigx-label">CÓDIGO INTERNO *</label><input className="sigx-input" value={form.code} onChange={n("code")} required /></div>
+                      <div><label className="sigx-label">DATA DE EMISSÃO</label><input type="date" className="sigx-input" value={form.contractDate} onChange={n("contractDate")} /></div>
+                      <div style={{ gridColumn: "span 2" }}><label className="sigx-label">NOME OU OBJETO DO CONTRATO *</label><input className="sigx-input" value={form.contractName} onChange={n("contractName")} required /></div>
+                      <div><label className="sigx-label">CREDOR DA DÍVIDA</label><input className="sigx-input" value={form.creditor} onChange={n("creditor")} /></div>
                       <div>
-                        <label className="sigx-label">TIPO DE CONTRATO *</label>
+                        <label className="sigx-label">TIPO ESTRUTURAL *</label>
                         <select className="sigx-input" required value={form.contract_type_id} onChange={e => setForm(p => ({ ...p, contract_type_id: e.target.value }))}>
-                          <option value="">Selecione o Tipo...</option>
-                          {contractTypes.map((type: any) => (
-                            <option key={type.id} value={type.id}>{type.name}</option>
-                          ))}
+                          <option value="">Selecione...</option>
+                          {contractTypes.map((type: any) => <option key={type.id} value={type.id}>{type.name}</option>)}
                         </select>
                       </div>
-                      <div>
-                        <label className="sigx-label">STATUS</label>
-                        <select className="sigx-input" value={form.status} onChange={n("status") as any}>
-                          {["Ativo", "Quitado", "Inadimplente", "Renegociado", "Cancelado"].map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 20 }}>
-                        <input type="checkbox" id="validated" checked={form.validated} onChange={e => setForm(p => ({ ...p, validated: e.target.checked }))} style={{ width: 14, height: 14 }} />
-                        <label htmlFor="validated" className="sigx-label" style={{ marginBottom: 0, cursor: "pointer" }}>Contrato validado digitalmente</label>
-                      </div>
-                      <div style={{ gridColumn: "span 2" }}><label className="sigx-label">URL DE VALIDAÇÃO</label><input className="sigx-input" value={form.validationUrl} onChange={n("validationUrl")} placeholder="https://valida.ae/..." /></div>
-
-                      {/* 🚀 GERENCIADOR DE MÚLTIPLOS COMPONENTES DE PDF */}
+                      
+                      {/* 🚀 SELETOR DE STATUS OPERACIONAL DO CONTRATO COMPATÍVEL NO LUGAR IDEAL */}
                       <div style={{ gridColumn: "span 2" }}>
-                        <label className="sigx-label">ANEXAR DOCUMENTOS E ADITIVOS DO CONTRATO (PDF)</label>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                          <label
-                            htmlFor="contract-pdf-input"
-                            style={{
-                              display: "inline-flex", alignItems: "center", gap: 6,
-                              padding: "6px 12px", borderRadius: 6, cursor: "pointer",
-                              background: "#f3f4f6", border: "1px solid #d1d5db",
-                              fontSize: 11, fontWeight: 600, color: "#374151",
-                            }}
-                          >
-                            <Upload size={12} /> Adicionar PDFs
-                          </label>
-                          <input
-                            id="contract-pdf-input"
-                            type="file"
-                            accept="application/pdf,.pdf"
-                            onChange={handlePdfFilesChange}
-                            multiple // 👈 PERMITE SELECIONAR VÁRIOS ARQUIVOS JUNTOS
-                            style={{ display: "none" }}
-                          />
-                        </div>
+                        <label className="sigx-label">STATUS OPERACIONAL DO CONTRATO *</label>
+                        <select className="sigx-input" value={form.status} onChange={n("status")} required>
+                          <option value="Ativo">Ativo / Regular</option>
+                          <option value="Inadimplente">Inadimplente / Jurídico</option>
+                          <option value="Quitado">Quitado / Baixado</option>
+                          <option value="Renegociado">Renegociado</option>
+                          <option value="Cancelado">Cancelado</option>
+                        </select>
+                      </div>
+                      
+                      {/* ⚖️ FORO DE ELEIÇÃO JURÍDICA */}
+                      <div style={{ gridColumn: "span 2" }}>
+                        <label className="sigx-label" style={{ display: "flex", alignItems: "center", gap: 4 }}><Scale size={12} style={{ color: "#0d9488" }} /> FORO ELEITO DE ELEIÇÃO (COMARCA COBRANÇA)</label>
+                        <input className="sigx-input" value={form.forumLocation} onChange={n("forumLocation")} placeholder="Ex: Belo Horizonte / MG" />
+                        <span style={{ fontSize: 10, color: "#94a3b8" }}>Define o município jurídico responsável pela resolução de litígios e execução judicial deste ativo.</span>
+                      </div>
 
-                        {/* Listagem temporária dos arquivos recém-selecionados */}
-                        {contractPdfFiles.length > 0 && (
-                          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: "#065f46" }}>NOVOS DOCUMENTOS SELECIONADOS:</span>
-                            {contractPdfFiles.map((file, idx) => (
-                              <span key={idx} style={{ fontSize: 11, color: "#065f46", display: "inline-flex", alignItems: "center", gap: 4, background: "#ecfdf5", padding: "2px 6px", borderRadius: 4, width: "fit-content" }}>
-                                <FileText size={12} /> {file.name}
-                                <button type="button" onClick={() => setContractPdfFiles(prev => prev.filter((_, i) => i !== idx))} style={{ background: "none", border: "none", cursor: "pointer", color: "#6b7280", display: "flex" }}>
-                                  <X size={11} />
-                                </button>
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Listagem dos arquivos que já estão salvos e guardados no banco */}
-                        {existingPdfNames.length > 0 && (
-                          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: "#4b5563" }}>DOCUMENTOS JÁ ARQUIVADOS:</span>
+                      <div style={{ gridColumn: "span 2" }}>
+                        <label className="sigx-label">ANEXAR DOCUMENTOS E ATIVOS (PDF)</label>
+                        <input type="file" accept=".pdf" onChange={handlePdfFilesChange} multiple style={{ fontSize: 12 }} />
+                        
+                        {/* 🚀 EXIBIÇÃO EM TEMPO REAL DOS NOMES DOS ARQUIVOS SELECIONADOS OU JÁ EXISTENTES */}
+                        {(contractPdfFiles.length > 0 || existingPdfNames.length > 0) && (
+                          <div style={{ marginTop: 10, padding: 10, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: "#64748b" }}>DOCUMENTOS SELECIONADOS PARA ESTE INSTRUMENTO:</span>
                             {existingPdfNames.map((name, idx) => (
-                              <span key={idx} style={{ fontSize: 11, color: "#4b5563", display: "inline-flex", alignItems: "center", gap: 4, background: "#f3f4f6", padding: "2px 6px", borderRadius: 4, width: "fit-content" }}>
-                                <FileText size={12} /> {name}
-                                {editingId && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setActivePdfIndex(idx);
-                                      setPdfPreview({ id: editingId, code: form.code, names: existingPdfNames });
-                                    }}
-                                    style={{ background: "none", border: "none", cursor: "pointer", color: "#2563eb", display: "flex" }}
-                                    title="Visualizar este PDF específico"
-                                  >
-                                    <Eye size={11} />
-                                  </button>
-                                )}
-                              </span>
+                              <div key={`exist-${idx}`} style={{ fontSize: 11, color: "#0f172a", display: "flex", alignItems: "center", gap: 4 }}>
+                                <FileText size={12} style={{ color: "#2563eb" }} /> {name} <span style={{ fontSize: 9, color: "#059669", background: "#d1fae5", padding: "1px 4px", borderRadius: 3 }}>Salvo no Banco</span>
+                              </div>
+                            ))}
+                            {contractPdfFiles.map((file, idx) => (
+                              <div key={`new-${idx}`} style={{ fontSize: 11, color: "#0f172a", display: "flex", alignItems: "center", gap: 4 }}>
+                                <FileText size={12} style={{ color: "#ea580c" }} /> {file.name} <span style={{ fontSize: 9, color: "#ea580c", background: "#ffedd5", padding: "1px 4px", borderRadius: 3 }}>Aguardando Gravação</span>
+                              </div>
                             ))}
                           </div>
                         )}
-                        <span style={{ fontSize: 10, color: "#9ca3af", marginTop: 6, display: "block" }}>
-                          Tamanho máximo: {MAX_PDF_MB} MB por arquivo. Você pode carregar quantos aditivos ou PDFs forem necessários.
-                        </span>
                       </div>
                     </div>
                   )}
+
+                  {/* TAB 2: VALORES E BANCOS DINÂMICOS */}
                   {activeTab === "financeiro" && (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
-                      <div><label className="sigx-label">VALOR PRINCIPAL (R$) *</label><input type="number" step="0.01" className="sigx-input" value={form.principalAmount || ""} onChange={num("principalAmount")} required /></div>
-                      <div><label className="sigx-label">TOTAL FINANCIADO (R$)</label><input type="number" step="0.01" className="sigx-input" value={form.financedTotal || ""} onChange={num("financedTotal")} /></div>
-                      <div><label className="sigx-label">TAC (R$)</label><input type="number" step="0.01" className="sigx-input" value={form.tacAmount || ""} onChange={num("tacAmount")} /></div>
-                      <div><label className="sigx-label">IOF (R$)</label><input type="number" step="0.01" className="sigx-input" value={form.iofAmount || ""} onChange={num("iofAmount")} /></div>
-                      <div><label className="sigx-label">Nº DE PARCELAS *</label><input type="number" min="1" className="sigx-input" value={form.installmentCount} onChange={numI("installmentCount")} required /></div>
-                      <div><label className="sigx-label">VALOR DA PARCELA (R$) *</label><input type="number" step="0.01" className="sigx-input" value={form.installmentAmount || ""} onChange={num("installmentAmount")} required /></div>
-                      <div><label className="sigx-label">PRIMEIRO VENCIMENTO</label><input type="date" className="sigx-input" value={form.firstDueDate} onChange={n("firstDueDate")} /></div>
-                      <div><label className="sigx-label">JUROS MENSAL (%)</label><input type="number" step="0.001" className="sigx-input" value={(form.monthlyInterestRate * 100).toFixed(3)} onChange={e => setForm(p => ({ ...p, monthlyInterestRate: parseFloat(e.target.value) / 100 || 0 }))} /></div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+                        <div><label className="sigx-label">VALOR PRINCIPAL (R$) *</label><input type="number" step="0.01" className="sigx-input" value={form.principalAmount || ""} onChange={num("principalAmount")} required /></div>
+                        <div><label className="sigx-label">Nº DE PARCELAS *</label><input type="number" className="sigx-input" value={form.installmentCount} onChange={numI("installmentCount")} required /></div>
+                        <div><label className="sigx-label">VALOR DA PARCELA (R$) *</label><input type="number" step="0.01" className="sigx-input" value={form.installmentAmount || ""} onChange={num("installmentAmount")} required /></div>
+                      </div>
+
+                      {/* CAPTURA E CARTÕES DE CONTAS BANCÁRIAS DO DEVEDOR */}
+                      <div style={{ borderTop: "1px dashed #cbd5e1", paddingTop: 14 }}>
+                        <label className="sigx-label" style={{ display: "flex", alignItems: "center", gap: 4, fontWeight: 700, color: "#1e293b" }}><CreditCard size={13} /> CONTA DE DESTINO PARA LIQUIDAÇÃO</label>
+                        <span style={{ fontSize: 11, color: "#64748b", marginBottom: 10, display: "block" }}>Selecione abaixo uma das contas homologadas no cadastro do devedor e defina a esteira de cobrança:</span>
+                        
+                        {!form.clientId ? (
+                          <div style={{ padding: 12, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 11, color: "#94a3b8", textAlign: "center" }}>Selecione um cliente na aba "Dados Básicos" para ver as contas bancárias disponíveis.</div>
+                        ) : !selectedClientMeta?.bankAccounts || selectedClientMeta.bankAccounts.length === 0 ? (
+                          <div style={{ padding: 12, background: "#fff7ed", border: "1px solid #ffedd5", borderRadius: 6, fontSize: 11, color: "#c2410c" }}>Este cliente não possui nenhuma conta bancária cadastrada na sua ficha cadastral.</div>
+                        ) : (
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                            {selectedClientMeta.bankAccounts.map((acc: any, idx: number) => {
+                              const uniqueBankKey = `${acc.banco}-${acc.agencia}-${acc.conta}`;
+                              const isSelected = form.chosenBankAccount === uniqueBankKey;
+                              return (
+                                <div 
+                                  key={idx} 
+                                  onClick={() => setForm(p => ({ ...p, chosenBankAccount: uniqueBankKey }))}
+                                  style={{
+                                    padding: 10, borderRadius: 6, border: isSelected ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                                    background: isSelected ? "#eff6ff" : "white", cursor: "pointer", transition: "all 0.1s"
+                                  }}
+                                >
+                                  <div style={{ fontWeight: 700, fontSize: 12, color: "#0f172a" }}>{acc.banco || "Banco não informado"}</div>
+                                  <div style={{ fontSize: 11, color: "#475569", marginTop: 2 }}>Ag: {acc.agencia} | Conta: {acc.conta} ({acc.tipo})</div>
+                                  {acc.hasPix && acc.pixKey && (
+                                    <div style={{ fontSize: 10, color: "#0d9488", display: "flex", alignItems: "center", gap: 4, marginTop: 4, background: "#f0fdf4", padding: "1px 4px", borderRadius: 3, width: "fit-content" }}>
+                                      <QrCode size={10} /> PIX: {acc.pixKey}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {form.chosenBankAccount && (
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 12 }}>
+                            <div>
+                              <label className="sigx-label">ESTEIRA / MEIO DE PAGAMENTO</label>
+                              <select className="sigx-input" value={form.paymentMethod} onChange={n("paymentMethod")}>
+                                <option value="Boleto Bancário">Boleto Bancário Estruturado</option>
+                                <option value="PIX QrCode">PIX Dinâmico (QrCode)</option>
+                                <option value="TED / DOC">TED / Transferência Direta</option>
+                                <option value="Cheque Operacional">Cartula / Cheque Operacional</option>
+                              </select>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
+
+                  {/* TAB 3: TAXAS E INDEXADORES */}
                   {activeTab === "taxas" && (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
-                      <div><label className="sigx-label">MORA MENSAL (%)</label><input type="number" step="0.001" className="sigx-input" value={(form.moraRateMonthly * 100).toFixed(3)} onChange={e => setForm(p => ({ ...p, moraRateMonthly: parseFloat(e.target.value) / 100 || 0 }))} /></div>
-                      <div><label className="sigx-label">MULTA (%)</label><input type="number" step="0.001" className="sigx-input" value={(form.penaltyRate * 100).toFixed(3)} onChange={e => setForm(p => ({ ...p, penaltyRate: parseFloat(e.target.value) / 100 || 0 }))} /></div>
-                      <div><label className="sigx-label">HONORÁRIOS (%)</label><input type="number" step="0.001" className="sigx-input" value={(form.honoraryRate * 100).toFixed(3)} onChange={e => setForm(p => ({ ...p, honoraryRate: parseFloat(e.target.value) / 100 || 0 }))} /></div>
-                      <div>
-                        <label className="sigx-label">BASE DA MULTA</label>
-                        <select className="sigx-input" value={form.penaltyBaseType} onChange={n("penaltyBaseType") as any}>
-                          <option value="installment">Parcela</option><option value="debt">Débito atualizado</option><option value="contract">Contrato</option>
-                        </select>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                      
+                      {/* Linha Principal de Configuração Económica */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+                        <div>
+                          <label className="sigx-label">INDEXADOR DE CORREÇÃO MONETÁRIA</label>
+                          <select className="sigx-input" value={form.correctionIndex} onChange={n("correctionIndex")}>
+                            <option value="PRE">Pré-fixado (Sem Correção)</option>
+                            <option value="IPCA">IPCA (IBGE - Inflação Oficial)</option>
+                            <option value="IGPM">IGP-M (FGV - Mercado)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="sigx-label">DATA DO 1º VENCIMENTO</label>
+                          <input type="date" className="sigx-input" value={form.firstDueDate || ""} onChange={n("firstDueDate")} />
+                        </div>
+                        
+                        {/* 💎 TROCA CIRÚRGICA: HONORÁRIOS DE COBRANÇA SUBSTITUÍDOS NATIVAMENTE PELA TARIFA DE ESTRUTURAÇÃO (TAC) */}
+                        <div>
+                          <label className="sigx-label" style={{ color: "#2563eb", fontWeight: 700 }}>TARIFA DE ESTRUTURAÇÃO (TAC R$)</label>
+                          <input type="number" step="0.01" className="sigx-input" style={{ borderColor: "#2563eb" }} value={form.tacAmount || ""} onChange={num("tacAmount")} placeholder="Ex: 500.00" />
+                        </div>
                       </div>
-                      <div>
-                        <label className="sigx-label">ESCOPO DA MULTA</label>
-                        <select className="sigx-input" value={form.penaltyScope} onChange={n("penaltyScope") as any}>
-                          <option value="per_installment">Por parcela</option><option value="contract_once">Uma vez no contrato</option>
-                        </select>
+
+                      {/* Linha de Penalidades por Atraso (Mora, Multa, Juros) */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, borderTop: "1px dashed #e2e8f0", paddingTop: 14 }}>
+                        <div>
+                          <label className="sigx-label">JUROS REMUNERATÓRIOS MENSAL (%)</label>
+                          <input type="number" step="0.001" className="sigx-input" value={form.monthlyInterestRate ? (form.monthlyInterestRate * 100).toFixed(3) : ""} onChange={e => setForm(p => ({ ...p, monthlyInterestRate: parseFloat(e.target.value) / 100 || 0 }))} />
+                        </div>
+                        <div>
+                          <label className="sigx-label">MORA MENSAL (ATRASO) (%)</label>
+                          <input type="number" step="0.001" className="sigx-input" value={form.moraRateMonthly ? (form.moraRateMonthly * 100).toFixed(3) : ""} onChange={e => setForm(p => ({ ...p, moraRateMonthly: parseFloat(e.target.value) / 100 || 0 }))} />
+                        </div>
+                        <div>
+                          <label className="sigx-label">MULTA PENAL POR ATRASO (%)</label>
+                          <input type="number" step="0.001" className="sigx-input" value={form.penaltyRate ? (form.penaltyRate * 100).toFixed(3) : ""} onChange={e => setForm(p => ({ ...p, penaltyRate: parseFloat(e.target.value) / 100 || 0 }))} />
+                        </div>
                       </div>
-                      <div>
-                        <label className="sigx-label">CORREÇÃO MONETÁRIA</label>
-                        <select className="sigx-input" value={form.correctionIndex} onChange={n("correctionIndex")}>
-                          <option value="IPCA">IPCA</option><option value="IGPM">IGPM</option><option value="Nenhuma">Nenhuma</option>
-                        </select>
-                      </div>
+
                     </div>
                   )}
+
+                  {/* TAB 4: GARANTIAS E FIADORES AUTOMÁTICOS */}
                   {activeTab === "garantias" && (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                      <div style={{ gridColumn: "span 2" }}><label className="sigx-label">GARANTIAS REAIS</label><textarea className="sigx-input" value={form.guarantees} onChange={n("guarantees")} rows={3} /></div>
-                      <div style={{ gridColumn: "span 2" }}><label className="sigx-label">FIADORES</label><textarea className="sigx-input" value={form.guarantors} onChange={n("guarantors")} rows={3} /></div>
-                      <div style={{ gridColumn: "span 2" }}><label className="sigx-label">OBSERVAÇÕES</label><textarea className="sigx-input" value={form.observations} onChange={n("observations")} rows={3} /></div>
-                    </div>
-                  )}
-                  {activeTab === "regras" && (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                      <div style={{ gridColumn: "span 2", display: "flex", alignItems: "center", gap: 8 }}>
-                        <input type="checkbox" id="accelerates" checked={form.accelerates} onChange={e => setForm(p => ({ ...p, accelerates: e.target.checked }))} style={{ width: 14, height: 14 }} />
-                        <label htmlFor="accelerates" className="sigx-label" style={{ marginBottom: 0, cursor: "pointer" }}>Vencimento antecipado habilitado</label>
-                      </div>
-                      {form.accelerates && (
-                        <>
-                          <div><label className="sigx-label">PARCELAS CONSECUTIVAS</label><input type="number" min="1" className="sigx-input" value={form.accelerationConsecutiveThreshold ?? ""} onChange={e => setForm(p => ({ ...p, accelerationConsecutiveThreshold: parseInt(e.target.value) || undefined }))} /></div>
-                          <div><label className="sigx-label">PARCELAS ALTERNADAS</label><input type="number" min="1" className="sigx-input" value={form.accelerationAlternateThreshold ?? ""} onChange={e => setForm(p => ({ ...p, accelerationAlternateThreshold: parseInt(e.target.value) || undefined }))} /></div>
-                          <div style={{ gridColumn: "span 2" }}><label className="sigx-label">REGRA DE ATRASO (TEXTO)</label><textarea className="sigx-input" value={form.accelerationRule} onChange={n("accelerationRule")} rows={3} /></div>
-                        </>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                      
+                      {/* BOTÕES RÁPIDOS DE INJEÇÃO DE FIADORES */}
+                      {selectedClientMeta && (selectedClientMeta.fiador1Nome || selectedClientMeta.fiador2Nome) && (
+                        <div style={{ padding: 10, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, marginBottom: 4 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#1e293b", display: "block", marginBottom: 6 }}>Fiadores localizados no cadastro deste devedor:</span>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            {selectedClientMeta.fiador1Nome && (
+                              <button
+                                type="button"
+                                onClick={() => setForm(p => ({ ...p, guarantors: `[FIADOR 1] Nome: ${selectedClientMeta.fiador1Nome}, CPF: ${selectedClientMeta.fiador1Cpf}, Tel: ${selectedClientMeta.fiador1Telefone}, Endereço: ${selectedClientMeta.fiador1Endereco}, ${selectedClientMeta.fiador1Cidade}/${selectedClientMeta.fiador1Estado}\n${p.guarantors}` }))}
+                                className="btn-secondary" style={{ fontSize: 11, display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 8px" }}
+                              >
+                                <UserCheck size={12} color="#2563eb" /> Injetar {selectedClientMeta.fiador1Nome}
+                              </button>
+                            )}
+                            {selectedClientMeta.fiador2Nome && (
+                              <button
+                                type="button"
+                                onClick={() => setForm(p => ({ ...p, guarantors: `[FIADOR 2] Nome: ${selectedClientMeta.fiador2Nome}, CPF: ${selectedClientMeta.fiador2Cpf}, Tel: ${selectedClientMeta.fiador2Telefone}, Endereço: ${selectedClientMeta.fiador2Endereco}, ${selectedClientMeta.fiador2Cidade}/${selectedClientMeta.fiador2Estado}\n${p.guarantors}` }))}
+                                className="btn-secondary" style={{ fontSize: 11, display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 8px" }}
+                              >
+                                <UserCheck size={12} color="#6b21a8" /> Injetar {selectedClientMeta.fiador2Nome}
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       )}
+
+                      <div><label className="sigx-label">GARANTIAS REAIS ACOPLADAS</label><textarea className="sigx-input" value={form.guarantees} onChange={n("guarantees")} rows={3} /></div>
+                      <div><label className="sigx-label">MINUTA DETALHADA DOS FIADORES / COOBRIGADOS</label><textarea className="sigx-input" value={form.guarantors} onChange={n("guarantors")} rows={4} placeholder="Clique nos botões acima para puxar os fiadores cadastrados na ficha do cliente de forma automática..." /></div>
                     </div>
                   )}
+
+                  {/* TAB 5: REGRAS */}
+                  {activeTab === "regras" && (
+                    <div><label className="sigx-label">OBSERVAÇÕES INTERNAS E HISTÓRICOS</label><textarea className="sigx-input" value={form.observations} onChange={n("observations")} rows={4} /></div>
+                  )}
+
                 </div>
                 <div className="sigx-modal-footer">
-                  <button type="button" className="btn-secondary" onClick={() => { setOpen(false); resetModal(); }} disabled={submitting}>Cancelar</button>
-                  <button type="submit" className="btn-primary" disabled={submitting}>
-                    {submitting ? "Salvando..." : (editingId ? "Atualizar Contrato" : "Salvar Contrato")}
-                  </button>
+                  <button type="button" className="btn-secondary" onClick={() => { setOpen(false); resetModal(); }}>Cancelar</button>
+                  <button type="submit" className="btn-primary" disabled={submitting}>{submitting ? "Gravando..." : "Salvar Contrato"}</button>
                 </div>
               </form>
             </div>
           </div>
         )}
 
-        {/* 🚀 VISUALIZADOR AVANÇADO SPLIT-SCREEN PARA MÚLTIPLOS PDFs */}
+        {/* VISUALIZADOR MULTI-PDF SPLIT SCREEN */}
         {pdfPreview && (
           <div className="sigx-modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setPdfPreview(null); }}>
-            <div
-              className="sigx-modal"
-              style={{
-                width: "min(1250px, 96vw)",
-                maxWidth: "96vw",
-                height: "92vh",
-                display: "flex",
-                flexDirection: "column",
-                padding: 0,
-              }}
-              onMouseDown={e => e.stopPropagation()}
-            >
-              {/* Topo do Visualizador */}
+            <div className="sigx-modal" style={{ width: "min(1250px, 96vw)", maxWidth: "96vw", height: "92vh", display: "flex", flexDirection: "column", padding: 0 }} onMouseDown={e => e.stopPropagation()}>
               <div className="sigx-modal-header" style={{ flexShrink: 0 }}>
-                <span className="sigx-modal-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <FileText size={14} />
-                  Documentos Digitais — Contrato {pdfPreview.code}
-                </span>
+                <span className="sigx-modal-title" style={{ display: "flex", alignItems: "center", gap: 8 }}><FileText size={14} /> Documentos Digitais — Contrato {pdfPreview.code}</span>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  {/* 🚀 BOTÃO "VER COMPLETO" EM NOVA ABA */}
-                  <a
-                    href={`/contracts/${pdfPreview.id}/pdf?index=${activePdfIndex}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn-secondary"
-                    style={{ fontSize: 11, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}
-                    title="Abrir o PDF selecionado em tamanho completo"
-                  >
-                    <Upload size={11} style={{ transform: "rotate(180deg)" }} /> Ver Completo / Imprimir
-                  </a>
-                  <button type="button" onClick={() => setPdfPreview(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", display: "flex" }} title="Fechar">
-                    <X size={18} />
-                  </button>
+                  <a href={`/contracts/${pdfPreview.id}/pdf?index=${activePdfIndex}`} target="_blank" rel="noopener noreferrer" className="btn-secondary" style={{ fontSize: 11, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }} title="Abrir o PDF selecionado em tamanho completo"><Upload size={11} style={{ transform: "rotate(180deg)" }} /> Ver Completo / Imprimir</a>
+                  <button type="button" onClick={() => setPdfPreview(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", display: "flex" }}><X size={18} /></button>
                 </div>
               </div>
-
-              {/* Corpo Split (Abas na Esquerda, Visualização na Direita) */}
               <div style={{ flex: 1, minHeight: 0, display: "flex", background: "#1f2937" }}>
-                
-                {/* Menu lateral esquerdo de abas de arquivos */}
                 <div style={{ width: 250, background: "#111827", borderRight: "1px solid #374151", padding: 12, display: "flex", flexDirection: "column", gap: 6, overflowY: "auto" }}>
                   <span style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", letterSpacing: "0.05em", marginBottom: 6 }}>ARQUIVOS COMPONENTES:</span>
                   {pdfPreview.names.map((name, index) => (
-                    <button
-                      key={index}
-                      type="button"
-                      onClick={() => setActivePdfIndex(index)}
-                      style={{
-                        width: "100%", padding: "10px 12px", borderRadius: 4, border: "none",
-                        textAlign: "left", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
-                        background: activePdfIndex === index ? "#2563eb" : "#1f2937",
-                        color: activePdfIndex === index ? "white" : "#d1d5db",
-                        transition: "all 0.1s"
-                      }}
-                    >
+                    <button key={index} type="button" onClick={() => setActivePdfIndex(index)} style={{ width: "100%", padding: "10px 12px", borderRadius: 4, border: "none", textAlign: "left", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, background: activePdfIndex === index ? "#2563eb" : "#1f2937", color: activePdfIndex === index ? "white" : "#d1d5db", transition: "all 0.1s" }}>
                       <FileText size={12} style={{ flexShrink: 0, color: activePdfIndex === index ? "white" : "#9ca3af" }} />
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={name}>
-                        {name}
-                      </span>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={name}>{name}</span>
                     </button>
                   ))}
                 </div>
-
-                {/* Área Dinâmica do Iframe carregando o index selecionado */}
                 <div style={{ flex: 1, height: "100%", background: "#1f2937" }}>
-                  <iframe
-                    key={`${pdfPreview.id}-${activePdfIndex}`} // Recarrega o frame de forma limpa mudando a key baseada no index
-                    src={`/contracts/${pdfPreview.id}/pdf?index=${activePdfIndex}#toolbar=1&navpanes=0&view=FitH`}
-                    title={`Visualizador do PDF ${activePdfIndex}`}
-                    style={{ width: "100%", height: "100%", border: "none", display: "block" }}
-                  />
+                  <iframe key={`${pdfPreview.id}-${activePdfIndex}`} src={`/contracts/${pdfPreview.id}/pdf?index=${activePdfIndex}#toolbar=1&navpanes=0&view=FitH`} title={`Visualizador do PDF ${activePdfIndex}`} style={{ width: "100%", height: "100%", border: "none", display: "block" }} />
                 </div>
               </div>
-
             </div>
           </div>
         )}

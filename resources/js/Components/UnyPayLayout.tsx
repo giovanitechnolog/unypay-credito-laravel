@@ -37,6 +37,7 @@ const NAV_SECTIONS = [
     label: "GESTÃO INTERNA",
     items: [
       { href: "/usuarios", label: "Usuários", icon: UserCog },
+      { href: "/contract-types", label: "Tipos de Contrato", icon: FileText },
     ],
   },
 ];

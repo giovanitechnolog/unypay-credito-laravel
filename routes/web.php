@@ -13,6 +13,7 @@ use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\SerasaController;
 use App\Http\Controllers\SimulatorController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\ContractTypeController;
 use App\Models\UserColumnPreference; // 🚀 MODELO IMPORTADO PARA O UPSERT
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -121,6 +122,12 @@ Route::middleware('auth')->group(function () {
     Route::post  ('/api/users',         [UserController::class, 'store'])->name('users.store');
     Route::put   ('/api/users/{user}',  [UserController::class, 'update'])->name('users.update');
     Route::delete('/api/users/{user}',  [UserController::class, 'destroy'])->name('users.destroy');
+
+    Route::get('/contract-types', [ContractTypeController::class, 'index'])->name('contract-types.index');
+    Route::get('/api/contract-types', [ContractTypeController::class, 'list']);
+    Route::post('/api/contract-types', [ContractTypeController::class, 'store']);
+    Route::put('/api/contract-types/{id}', [ContractTypeController::class, 'update']);
+    Route::delete('/api/contract-types/{id}', [ContractTypeController::class, 'destroy']);
 
     /*
     |--------------------------------------------------------------------------
