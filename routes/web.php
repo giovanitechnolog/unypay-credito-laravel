@@ -58,21 +58,30 @@ Route::middleware('auth')->group(function () {
     Route::put   ('/clients/{id}', [ClientController::class, 'update'])->name('clients.update');
     Route::delete('/clients/{id}', [ClientController::class, 'destroy'])->name('clients.destroy');
 
-    // Contratos
-    Route::get   ('/contracts',                  [ContractController::class, 'index'])->name('contracts.index');
-    Route::post  ('/contracts',                  [ContractController::class, 'store'])->name('contracts.store');
-    Route::get   ('/contracts/{id}',             [ContractController::class, 'show'])->name('contracts.show');
-    Route::post  ('/contracts/{id}',             [ContractController::class, 'update'])->name('contracts.update');
-    Route::put   ('/contracts/{id}',             [ContractController::class, 'update']);
-    Route::post  ('/contracts/{id}/cancel',      [ContractController::class, 'cancel'])->name('contracts.cancel');
-    Route::post  ('/contracts/{id}/reactivate',  [ContractController::class, 'reactivate'])->name('contracts.reactivate');
-    Route::get   ('/contracts/{id}/pdf',         [ContractController::class, 'viewPdf'])->name('contracts.pdf');
-    Route::delete('/contracts/{id}',             [ContractController::class, 'destroy'])->name('contracts.destroy');
+    /*
+    |--------------------------------------------------------------------------
+    | 📝 Gerenciamento Estatutário de Contratos (UnyPay®)
+    |--------------------------------------------------------------------------
+    */
+    Route::get   ('/contracts',                [ContractController::class, 'index'])->name('contracts.index');
+    Route::post  ('/contracts/store',          [ContractController::class, 'store'])->name('contracts.store'); // 👈 Mapeado para o envio do formulário limpo
+    Route::post  ('/contracts',                [ContractController::class, 'store']); 
+    
+    // 🚀 CORREÇÃO CRÍTICA: Aponta o fallback parametrizado de ID diretamente para o index unificado tratando os dados reativos
+    Route::get   ('/contracts/{id}',           [ContractController::class, 'index'])->name('contracts.show');
+    
+    Route::post  ('/contracts/{id}/update',    [ContractController::class, 'update'])->name('contracts.update'); // 👈 Endpoint de edição do modal
+    Route::post  ('/contracts/{id}',           [ContractController::class, 'update']);
+    Route::put   ('/contracts/{id}',           [ContractController::class, 'update']);
+    Route::post  ('/contracts/{id}/cancel',     [ContractController::class, 'cancel'])->name('contracts.cancel');
+    Route::post  ('/contracts/{id}/reactivate', [ContractController::class, 'reactivate'])->name('contracts.reactivate');
+    Route::get   ('/contracts/{id}/pdf',        [ContractController::class, 'viewPdf'])->name('contracts.pdf');
+    Route::delete('/contracts/{id}',           [ContractController::class, 'destroy'])->name('contracts.destroy');
 
     // API auxiliar de lookup de clientes
     Route::get('/api/clients-lookup', [ContractController::class, 'clientsLookup']);
 
-    // Pagamentos
+    // Pagamentos e Amortizações
     Route::get('/payments',   [PaymentController::class, 'index'])->name('payments.index');
     Route::get('/pagamentos', [PaymentController::class, 'index'])->name('pagamentos.index');
 
@@ -101,7 +110,6 @@ Route::middleware('auth')->group(function () {
     |--------------------------------------------------------------------------
     | Importador de planilha de contratos (rota oculta - sem link no menu)
     |--------------------------------------------------------------------------
-    |
     */
     Route::prefix('sys/importar')->group(function () {
         Route::get ('importar-contratos',         [ContractImportController::class, 'page'])->name('contracts.importer');
@@ -112,9 +120,8 @@ Route::middleware('auth')->group(function () {
 
     /*
     |--------------------------------------------------------------------------
-    | CRUD de Usuários administrativos (rotas "ocultas" - sem link no menu)
+    | CRUD de Usuários administrativos
     |--------------------------------------------------------------------------
-    |
     */
     Route::get('/usuarios', [UserController::class, 'index'])->name('users.index');
 
@@ -123,6 +130,7 @@ Route::middleware('auth')->group(function () {
     Route::put   ('/api/users/{user}',  [UserController::class, 'update'])->name('users.update');
     Route::delete('/api/users/{user}',  [UserController::class, 'destroy'])->name('users.destroy');
 
+    // Tipificações Estruturais
     Route::get('/contract-types', [ContractTypeController::class, 'index'])->name('contract-types.index');
     Route::get('/api/contract-types', [ContractTypeController::class, 'list']);
     Route::post('/api/contract-types', [ContractTypeController::class, 'store']);
@@ -133,7 +141,6 @@ Route::middleware('auth')->group(function () {
     |--------------------------------------------------------------------------
     | 🚀 Preferências Globais do Operador Logado (Banco de Dados + React Hook)
     |--------------------------------------------------------------------------
-    |
     */
     Route::post('/api/user-preferences/columns', function (Request $request) {
         $request->validate([
@@ -141,7 +148,6 @@ Route::middleware('auth')->group(function () {
             'visible_columns' => 'required|array',
         ]);
 
-        // Executa o "Upsert" automático vinculando ao operador da sessão
         UserColumnPreference::updateOrCreate(
             [
                 'user_id'   => Auth::id(),
