@@ -57,7 +57,6 @@ class FinanceService
                 (1 - pow(1 + $r, -$installmentCount)) / ($r * $r)
             );
             
-            // Evitar divisão por zero caso a derivada seja nula
             if ($dpv == 0) break;
 
             $rNew = $r - ($pv - $netPrincipal) / $dpv;
@@ -130,5 +129,36 @@ class FinanceService
         }
 
         return $rows;
+    }
+
+    /**
+     * 🚀 NOVO MÉTODO: MOTOR DE CORREÇÃO MONETÁRIA IPCA
+     * Aplica o índice de inflação acumulado do período sobre a parcela pós-fixada.
+     * * @param float $originalAmount Valor original calculado pela Price
+     * @param string $indexType Tipo de correção mapeado no contrato (Ex: 'IPCA', 'IGPM', 'PRE')
+     * @param float $ipcaRate Taxa do IPCA oficial informada ou vinda de API (Ex: 0.0045 para 0.45%)
+     */
+    public static function applyIpcaCorrection(float $originalAmount, string $indexType, float $ipcaRate): array
+    {
+        // Se o contrato for Pré-fixado ou não usar IPCA, mantém o valor original intacto
+        if (strtoupper($indexType) !== 'IPCA' || $ipcaRate <= 0) {
+            return [
+                'isCorrected' => false,
+                'originalAmount' => $originalAmount,
+                'correctionValue' => 0.0,
+                'updatedAmount' => $originalAmount
+            ];
+        }
+
+        // Formula de Atualização Monetária Pós-Fixada de Mercado
+        $correctionValue = $originalAmount * $ipcaRate;
+        $updatedAmount = $originalAmount + $correctionValue;
+
+        return [
+            'isCorrected'     => true,
+            'originalAmount'  => round($originalAmount, 2),
+            'correctionValue' => round($correctionValue, 2), // O ganho real/inflacionário da UnyPay®
+            'updatedAmount'   => round($updatedAmount, 2)    // O novo valor de face que o cliente vai pagar
+        ];
     }
 }

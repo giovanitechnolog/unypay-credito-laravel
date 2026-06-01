@@ -42,7 +42,6 @@ class ContractController extends Controller
 
         $rawContracts = $query->orderBy('contracts.id', 'desc')->get();
 
-        // 🚀 VERIFICAÇÃO MULTI-PDF: Lê o array JSON do banco de dados para saber se há anexos
         $rawContracts->transform(function ($row) {
             $paths = json_decode($row->contractPdfPath ?? '[]', true);
             $row->hasContractPdf = !empty($paths) && count($paths) > 0;
@@ -50,7 +49,9 @@ class ContractController extends Controller
         });
 
         $contractTypes = DB::table('contract_types')->orderBy('name', 'asc')->get();
-        $clients = DB::table('clients')->orderBy('name', 'asc')->get(['id', 'name']);
+        
+        // 🚀 CRÍTICO: Carrega a tabela de clientes trazendo o campo 'notes' para o React extrair as contas e fiadores
+        $clients = DB::table('clients')->orderBy('name', 'asc')->get(['id', 'name', 'document', 'notes']);
 
         return Inertia::render('Contracts', [
             'contracts'     => $rawContracts,
@@ -60,12 +61,6 @@ class ContractController extends Controller
         ]);
     }
 
-    public function clientsLookup()
-    {
-        $clients = DB::table('clients')->orderBy('name', 'asc')->get(['id', 'name', 'document']);
-        return response()->json($clients);
-    }
-
     public function store(Request $request)
     {
         $request->validate([
@@ -73,7 +68,7 @@ class ContractController extends Controller
             'code'             => 'required|string',
             'clientId'         => 'required',
             'contract_type_id' => 'required',
-            'contractPdfs'     => 'nullable|array', // Valida como um array de arquivos
+            'contractPdfs'     => 'nullable|array',
             'contractPdfs.*'   => 'file|mimes:pdf|max:20480',
         ]);
 
@@ -117,7 +112,6 @@ class ContractController extends Controller
             'user_id' => \Illuminate\Support\Facades\Auth::id()
         ];
 
-        // Se o operador enviou um novo lote de arquivos, substitui os antigos
         if ($request->hasFile('contractPdfs')) {
             $pdfPaths = [];
             $pdfNames = [];
@@ -127,7 +121,6 @@ class ContractController extends Controller
                 $pdfNames[] = $file->getClientOriginalName();
             }
 
-            // Exclui fisicamente do disco os arquivos antigos para não entulhar o Laragon
             $oldPaths = json_decode($existing->contractPdfPath ?? '[]', true);
             if (is_array($oldPaths)) {
                 foreach ($oldPaths as $oldPath) {
@@ -148,27 +141,6 @@ class ContractController extends Controller
         return redirect()->route('contracts.index');
     }
 
-    public function cancel(int $id)
-    {
-        DB::table('contracts')->where('id', $id)->update([
-            'status' => 'Cancelado',
-            'user_id' => \Illuminate\Support\Facades\Auth::id()
-        ]);
-        return redirect()->back();
-    }
-
-    public function reactivate(int $id)
-    {
-        DB::table('contracts')->where('id', $id)->update([
-            'status' => 'Ativo',
-            'user_id' => \Illuminate\Support\Facades\Auth::id()
-        ]);
-        return redirect()->back();
-    }
-
-    /**
-     * 🚀 LEITURA DINÂMICA DE ARQUIVO POR ÍNDICE
-     */
     public function viewPdf(int $id, Request $request)
     {
         $contract = DB::table('contracts')->where('id', $id)->first();
@@ -178,8 +150,6 @@ class ContractController extends Controller
 
         $paths = json_decode($contract->contractPdfPath, true);
         $names = json_decode($contract->sourcePdfName, true);
-
-        // Captura o índice enviado pelo React (ex: ?index=2). Se não enviar nada, mostra o primeiro (0)
         $index = (int)$request->input('index', 0);
 
         if (!isset($paths[$index])) {
@@ -251,6 +221,12 @@ class ContractController extends Controller
             'accelerationRule'                 => $request->input('accelerationRule'),
             'accelerationConsecutiveThreshold' => $request->input('accelerationConsecutiveThreshold'),
             'accelerationAlternateThreshold'   => $request->input('accelerationAlternateThreshold'),
+            
+            // 🚀 NOVOS CAMPOS DINÂMICOS E AUDITORIA DE JUIZADO
+            'chosenBankAccount'                => $request->input('chosenBankAccount'),
+            'paymentMethod'                    => $request->input('paymentMethod', 'Boleto Bancário'),
+            'forumLocation'                    => $request->input('forumLocation'), // ⚖️ Foro de Eleição contratual
+            
             'guarantees'                       => $request->input('guarantees'),
             'guarantors'                       => $request->input('guarantors'),
             'validationUrl'                    => $request->input('validationUrl'),

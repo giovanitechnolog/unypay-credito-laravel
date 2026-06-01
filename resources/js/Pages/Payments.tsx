@@ -48,9 +48,25 @@ const tdBase: React.CSSProperties = {
 const tdNum: React.CSSProperties = { ...tdBase, fontFamily: "'IBM Plex Mono', monospace", textAlign: "right", fontSize: 11 };
 const tdCenter: React.CSSProperties = { ...tdBase, textAlign: "center" };
 
-// largura da coluna especial de chevron
-const CHEVRON_WIDTH = 28;
+// sub-tabela cabeçalhos customizados
+const subHeaderCellStyle: React.CSSProperties = {
+  background: "#f1f5f9",
+  color: "#334155",
+  padding: "5px 7px",
+  fontSize: 9,
+  fontWeight: 700,
+  textTransform: "uppercase",
+  borderBottom: "2px solid #cbd5e1",
+  whiteSpace: "nowrap",
+};
+const subBodyCellStyle: React.CSSProperties = {
+  padding: "5px 7px",
+  fontSize: 11,
+  borderBottom: "1px solid #e2e8f0",
+  whiteSpace: "nowrap",
+};
 
+const CHEVRON_WIDTH = 28;
 const PAGE_SIZES = [20, 50, 100];
 
 export default function Payments({ contracts, interestData, filters }: any) {
@@ -69,23 +85,18 @@ export default function Payments({ contracts, interestData, filters }: any) {
   const [payMethod, setPayMethod] = useState("PIX");
   const [baseDate] = useState(new Date().toISOString().slice(0, 10));
 
-  // ── Visibilidade de colunas (persistida no localStorage) ───────────────
-  const {
-    visibleIds, toggleColumn, setColumnsVisible, resetDefaults,
-  } = useColumnVisibility<PaymentsColumnId>(
-    "unypay.payments.columns.v1",
-    PAYMENTS_COLUMNS,
-  );
+  // ── Visibilidade de colunas (Restaurado hook original sem erros) ───────
+  const { visibleIds, toggleColumn, setColumnsVisible, resetDefaults } =
+    useColumnVisibility<PaymentsColumnId>("unypay.payments.columns.v1", PAYMENTS_COLUMNS);
 
   const visibleOrdered: PaymentsColumnDef[] = useMemo(
     () => PAYMENTS_COLUMNS.filter((c) => visibleIds.has(c.id)),
-    [visibleIds],
+    [visibleIds]
   );
 
-  // sticky offsets (esquerda)
   const stickyOffsets = useMemo(() => {
     const offsets = new Map<PaymentsColumnId, number>();
-    let acc = CHEVRON_WIDTH; // chevron column sempre antes
+    let acc = CHEVRON_WIDTH;
     for (const col of visibleOrdered) {
       if (col.sticky) {
         offsets.set(col.id, acc);
@@ -117,12 +128,14 @@ export default function Payments({ contracts, interestData, filters }: any) {
     return new Map(interestData.map((i: any) => [i.contractId, i]));
   }, [interestData]);
 
+  // 🚀 Totais acumulados da tabela filha mapeando as colunas separadas
   const schedTotals = useMemo(() => {
     if (!schedule) return null;
     const rows = schedule.schedule || [];
     const totals = schedule.totals || { totalPaid: 0 };
     const vencidas = rows.filter((r: any) => r.status === "Vencido" || r.status === "Atrasado");
     const pagas = rows.filter((r: any) => r.status === "Pago");
+    const totalOriginal = rows.reduce((s: number, r: any) => s + (r.originalAmount ?? 0), 0);
     const totalIpca = rows.reduce((s: number, r: any) => s + (r.ipcaCorrection ?? 0), 0);
     const totalMora = rows.reduce((s: number, r: any) => s + (r.moraAmount ?? 0), 0);
     const totalMulta = rows.reduce((s: number, r: any) => s + (r.penaltyAmount ?? 0), 0);
@@ -132,6 +145,7 @@ export default function Payments({ contracts, interestData, filters }: any) {
     return {
       parcVencidas: vencidas.length,
       parcPagas: pagas.length,
+      totalOriginal,
       totalPago: totals.totalPaid,
       totalIpca, totalMora, totalMulta, totalHonorarios, totalAtualizado, totalVencendoAcelerado,
       totalExigivel: totalAtualizado,
@@ -165,7 +179,6 @@ export default function Payments({ contracts, interestData, filters }: any) {
     });
   };
 
-  // ── células do corpo (data-driven) ─────────────────────────────────────
   const renderCellContent = (col: PaymentsColumnDef, row: any): React.ReactNode => {
     const contract = row.contract;
     const interest = interestMap.get(contract.id);
@@ -196,10 +209,8 @@ export default function Payments({ contracts, interestData, filters }: any) {
         return <>{contract.installmentCount}×</>;
       case "installmentAmt":
         return <span className="mono">{fmt(contract.installmentAmount)}</span>;
-      case "paid": {
-        const paidCount = Number(interest?.paidInstallments ?? 0);
-        return <span className="mono" style={{ color: "#059669", fontWeight: 600 }}>{paidCount}</span>;
-      }
+      case "paid":
+        return <span className="mono" style={{ color: "#059669", fontWeight: 600 }}>{Number(interest?.paidInstallments ?? 0)}</span>;
       case "overdue": {
         const totalInst = Number(contract.installmentCount ?? 0);
         const paidCount = Number(interest?.paidInstallments ?? 0);
@@ -236,10 +247,6 @@ export default function Payments({ contracts, interestData, filters }: any) {
     }
   };
 
-  const isRightAligned = (col: PaymentsColumnDef) => col.align === "right";
-  const isCenterAligned = (col: PaymentsColumnDef) => col.align === "center";
-
-  // ── agrupamento dos cabeçalhos visíveis para a 1ª linha do thead ───────
   const visibleGroupRuns = useMemo(() => {
     const runs: { group: typeof PAYMENTS_GROUP_ORDER[number]; count: number }[] = [];
     for (const col of visibleOrdered) {
@@ -250,12 +257,11 @@ export default function Payments({ contracts, interestData, filters }: any) {
     return runs;
   }, [visibleOrdered]);
 
-  // ── Paginação (client-side sobre a lista vinda do servidor) ────────────
   const totalRows = contracts?.length ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
   const paginated = useMemo(
     () => (contracts ?? []).slice((page - 1) * pageSize, page * pageSize),
-    [contracts, page, pageSize],
+    [contracts, page, pageSize]
   );
 
   return (
@@ -263,13 +269,10 @@ export default function Payments({ contracts, interestData, filters }: any) {
       <Head title="Controle de Pagamentos" />
 
       <div style={{ padding: "12px 20px 16px 20px", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", gap: 12 }}>
-
-        {/* Cabeçalho */}
         <div style={{ flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#111827" }}>Controle de Pagamentos</h1>
         </div>
 
-        {/* Barra de filtros (esquerda: search + status + contagem | direita: badges + picker) */}
         <div style={{
           background: "white", border: "1px solid #e5e7eb", borderRadius: 6,
           padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0,
@@ -317,7 +320,6 @@ export default function Payments({ contracts, interestData, filters }: any) {
           </div>
         </div>
 
-        {/* Tabela (cresce + scroll interno) */}
         <div style={{
           flex: 1, minHeight: 0, display: "flex", flexDirection: "column",
           border: "1px solid #e5e7eb", borderRadius: 6, overflow: "hidden", background: "white",
@@ -330,8 +332,6 @@ export default function Payments({ contracts, interestData, filters }: any) {
               </colgroup>
 
               <thead>
-                {/* Linha 1 — grupos. A célula vazia (acima do chevron) usa a cor do
-                    primeiro grupo visível para manter alinhamento visual e altura. */}
                 <tr>
                   {(() => {
                     const firstGroup = visibleGroupRuns[0]?.group;
@@ -367,28 +367,14 @@ export default function Payments({ contracts, interestData, filters }: any) {
                     );
                   })}
                 </tr>
-                {/* Linha 2 — cabeçalhos */}
                 <tr>
-                  <th
-                    style={{
-                      ...headerCellStyle,
-                      position: "sticky", left: 0, zIndex: 3,
-                      width: CHEVRON_WIDTH,
-                    }}
-                  />
+                  <th style={{ ...headerCellStyle, position: "sticky", left: 0, zIndex: 3, width: CHEVRON_WIDTH }} />
                   {visibleOrdered.map(col => {
                     const stickyStyle: React.CSSProperties = col.sticky
                       ? { position: "sticky", left: stickyOffsets.get(col.id), zIndex: 2, background: "#f1f5f9" }
                       : {};
                     return (
-                      <th
-                        key={col.id}
-                        style={{
-                          ...headerCellStyle,
-                          textAlign: col.align,
-                          ...stickyStyle,
-                        }}
-                      >
+                      <th key={col.id} style={{ ...headerCellStyle, textAlign: col.align, ...stickyStyle }}>
                         {col.label.toUpperCase()}
                       </th>
                     );
@@ -416,10 +402,7 @@ export default function Payments({ contracts, interestData, filters }: any) {
                           onMouseOver={e => (e.currentTarget.style.background = "#eff6ff")}
                           onMouseOut={e => (e.currentTarget.style.background = rowBg)}
                         >
-                          <td style={{
-                            ...tdCenter,
-                            position: "sticky", left: 0, zIndex: 1, background: "inherit",
-                          }}>
+                          <td style={{ ...tdCenter, position: "sticky", left: 0, zIndex: 1, background: "inherit" }}>
                             {isExpanded
                               ? <ChevronDown size={12} style={{ color: "#2563eb" }} />
                               : <ChevronRight size={12} style={{ color: "#9ca3af" }} />}
@@ -428,9 +411,7 @@ export default function Payments({ contracts, interestData, filters }: any) {
                             const stickyStyle: React.CSSProperties = col.sticky
                               ? { position: "sticky", left: stickyOffsets.get(col.id), zIndex: 1, background: "inherit" }
                               : {};
-                            const base =
-                              isRightAligned(col) ? tdNum :
-                              isCenterAligned(col) ? tdCenter : tdBase;
+                            const base = col.align === "right" ? tdNum : col.align === "center" ? tdCenter : tdBase;
                             return (
                               <td key={col.id} style={{ ...base, ...stickyStyle }}>
                                 {renderCellContent(col, row)}
@@ -439,7 +420,6 @@ export default function Payments({ contracts, interestData, filters }: any) {
                           })}
                         </tr>
 
-                        {/* Sub-painel expandido (mantém comportamento original) */}
                         {isExpanded && (
                           <tr key={`exp-${row.contract.id}`}>
                             <td colSpan={visibleOrdered.length + 1} style={{ padding: 0, borderBottom: "2px solid #1a2035" }}>
@@ -461,7 +441,6 @@ export default function Payments({ contracts, interestData, filters }: any) {
             </table>
           </div>
 
-          {/* Paginação */}
           <div style={{
             padding: "6px 12px", background: "#fafbfc", borderTop: "1px solid #e5e7eb",
             display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, flexShrink: 0,
@@ -505,7 +484,6 @@ export default function Payments({ contracts, interestData, filters }: any) {
           </div>
         </div>
 
-        {/* Modal de baixa */}
         {payOpen && (
           <div className="sigx-modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setPayOpen(false); }}>
             <div className="sigx-modal" style={{ maxWidth: 380 }} onMouseDown={e => e.stopPropagation()}>
@@ -538,13 +516,11 @@ export default function Payments({ contracts, interestData, filters }: any) {
             </div>
           </div>
         )}
-
       </div>
     </UnyPayLayout>
   );
 }
 
-// ── Sub-painel de detalhe do contrato (extraído para clareza) ─────────────
 interface ExpandedDetailProps {
   contract: any;
   schedule: any;
@@ -557,8 +533,6 @@ function ExpandedContractDetail({ contract, schedule, schedTotals, schedLoading,
   return (
     <div style={{ background: "#f8f9fa", padding: "4px 0" }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0, borderBottom: "1px solid #e5e7eb" }}>
-
-        {/* Parâmetros */}
         <div style={{ padding: 12, borderRight: "1px solid #e5e7eb" }}>
           <div style={{ fontSize: 9, fontWeight: 700, color: "white", background: "#1a2035", padding: "4px 8px", marginBottom: 6, borderRadius: 3 }}>
             PARÂMETROS DO CONTRATO
@@ -585,7 +559,6 @@ function ExpandedContractDetail({ contract, schedule, schedTotals, schedLoading,
           ))}
         </div>
 
-        {/* Demonstrativo */}
         <div style={{ padding: 12, borderRight: "1px solid #e5e7eb" }}>
           <div style={{ fontSize: 9, fontWeight: 700, color: "white", background: "#1e3a5f", padding: "4px 8px", marginBottom: 6, borderRadius: 3 }}>
             PAINEL DO CONTRATO
@@ -609,7 +582,6 @@ function ExpandedContractDetail({ contract, schedule, schedTotals, schedLoading,
           ))}
         </div>
 
-        {/* Cláusulas e Garantias */}
         <div style={{ padding: 12 }}>
           <div style={{ fontSize: 9, fontWeight: 700, color: "white", background: "#ea580c", padding: "4px 8px", marginBottom: 6, borderRadius: 3 }}>
             REGRA DE VENCIMENTO ANTECIPADO
@@ -626,7 +598,6 @@ function ExpandedContractDetail({ contract, schedule, schedTotals, schedLoading,
         </div>
       </div>
 
-      {/* Cronograma */}
       {schedLoading ? (
         <div style={{ padding: 16, textAlign: "center", fontSize: 12, color: "#6b7280" }}>
           Calculando indexadores e juros diários do banco...
@@ -692,7 +663,7 @@ function ExpandedContractDetail({ contract, schedule, schedTotals, schedLoading,
               <tfoot>
                 <tr style={{ background: "#1e2139", color: "white", fontWeight: 700 }}>
                   <td colSpan={2} style={{ padding: "6px 8px", fontSize: 10, textTransform: "uppercase" }}>TOTAL</td>
-                  <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "monospace" }}>{fmt((schedule?.schedule ?? []).reduce((s: number, r: any) => s + r.originalAmount, 0))}</td>
+                  <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "monospace" }}>{fmt(schedTotals.totalOriginal)}</td>
                   <td colSpan={7} />
                   <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "monospace", color: "#c4b5fd" }}>{fmt(schedTotals.totalIpca)}</td>
                   <td style={{ textAlign: "right", padding: "6px 8px", fontFamily: "monospace", color: "#fca5a5" }}>{fmt(schedTotals.totalMora)}</td>
