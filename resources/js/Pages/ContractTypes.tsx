@@ -3,6 +3,7 @@ import { Head } from "@inertiajs/react";
 import { Plus, Search, RefreshCw, FileText, Calendar, Edit2, Trash2, X, Layers, ShieldAlert, Key } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
+import ConfirmDialog from "../Components/ConfirmDialog";
 import { api, extractFirstError } from "../lib/api";
 
 interface ContractType {
@@ -208,26 +209,23 @@ export default function ContractTypes() {
         </div>
       )}
 
-      {/* ── MODAL: CONFIRMAR EXCLUSÃO ───────────────────────────────────────── */}
-      {deleteType && (
-        <div className="modal-overlay" style={{ display: "flex" }}>
-          <div className="modal-content" style={{ maxWidth: 420 }}>
-            <div className="modal-header">
-              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "#dc2626", display: "flex", alignItems: "center", gap: 6 }}><ShieldAlert size={16} /> Deletar Estrutura</h3>
-              <button onClick={() => setDeleteType(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8" }}><X size={16} /></button>
-            </div>
-            <div className="modal-body" style={{ fontSize: 12, color: "#475569", lineHeight: "1.5" }}>
-              Tem certeza que deseja remover o modelo <strong style={{ color: "#0f172a" }}>{deleteType.name}</strong>?<br />
-              O sistema só permitirá a remoção caso nenhum contrato esteja utilizando este tipo.
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setDeleteType(null)}>Voltar</button>
-              <button className="btn-danger" onClick={handleExecuteDelete}>Confirmar Exclusão</button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      <ConfirmDialog
+        open={!!deleteType}
+        tone="danger"
+        icon={ShieldAlert}
+        title="Remover Tipo de Contrato"
+        description="Esta ação remove permanentemente o modelo. O sistema só permitirá a operação caso nenhum contrato esteja utilizando este tipo."
+        entityLabel="Tipo de Contrato"
+        entityName={deleteType?.name}
+        entityDetail={deleteType?.slug ?? undefined}
+        consequences={[
+          "Modelos de cláusulas vinculados a este tipo serão desassociados.",
+          "Operadores deverão escolher um novo tipo ao cadastrar contratos similares.",
+        ]}
+        confirmLabel="Remover Tipo"
+        onConfirm={handleExecuteDelete}
+        onClose={() => setDeleteType(null)}
+      />
     </UnyPayLayout>
   );
 }

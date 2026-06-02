@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Contract;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -42,9 +43,41 @@ class ContractController extends Controller
 
         $rawContracts = $query->orderBy('contracts.id', 'desc')->get();
 
-        $rawContracts->transform(function ($row) {
+        // 🚀 Hidratação dos fiadores em uma única query auxiliar.
+        // Buscamos todos os pares (contractId, guarantor) de uma só vez e
+        // distribuímos por contrato — evita o clássico problema N+1.
+        $contractIds = $rawContracts->pluck('id')->all();
+
+        $guarantorsByContract = [];
+        if (!empty($contractIds)) {
+            $guarantorRows = DB::table('contract_guarantor')
+                ->join('guarantors', 'guarantors.id', '=', 'contract_guarantor.guarantorId')
+                ->whereIn('contract_guarantor.contractId', $contractIds)
+                ->select(
+                    'contract_guarantor.contractId as contractId',
+                    'guarantors.id',
+                    'guarantors.name',
+                    'guarantors.personType',
+                    'guarantors.cpf',
+                    'guarantors.cnpj'
+                )
+                ->orderBy('guarantors.name')
+                ->get();
+
+            foreach ($guarantorRows as $g) {
+                $guarantorsByContract[$g->contractId][] = [
+                    'id'         => $g->id,
+                    'name'       => $g->name,
+                    'personType' => $g->personType,
+                    'document'   => $g->personType === 'PJ' ? $g->cnpj : $g->cpf,
+                ];
+            }
+        }
+
+        $rawContracts->transform(function ($row) use ($guarantorsByContract) {
             $paths = json_decode($row->contractPdfPath ?? '[]', true);
             $row->hasContractPdf = !empty($paths) && count($paths) > 0;
+            $row->guarantors     = $guarantorsByContract[$row->id] ?? [];
             return $row;
         });
 
@@ -76,6 +109,9 @@ class ContractController extends Controller
             'contract_type_id' => 'required',
             'contractPdfs'     => 'nullable|array',
             'contractPdfs.*'   => 'file|mimes:pdf|max:20480',
+            // 🚀 Lista de fiadores selecionados na aba "Garantias e Fiadores"
+            'guarantor_ids'    => 'nullable|array',
+            'guarantor_ids.*'  => 'integer|exists:guarantors,id',
         ]);
 
         $pdfPaths = [];
@@ -94,7 +130,13 @@ class ContractController extends Controller
             'user_id'         => \Illuminate\Support\Facades\Auth::id(),
         ];
 
-        DB::table('contracts')->insert($this->buildContractPayload($request, $extras));
+        // 🚀 insertGetId devolve o ID do contrato recém-criado, necessário para
+        // sincronizar a pivot contract_guarantor logo abaixo.
+        $contractId = DB::table('contracts')->insertGetId(
+            $this->buildContractPayload($request, $extras)
+        );
+
+        $this->syncContractGuarantors($contractId, (array) $request->input('guarantor_ids', []));
 
         return redirect()->route('contracts.index');
     }
@@ -107,6 +149,8 @@ class ContractController extends Controller
             'clientId'         => 'required',
             'contract_type_id' => 'required',
             'contractPdfs'     => 'nullable|array',
+            'guarantor_ids'    => 'nullable|array',
+            'guarantor_ids.*'  => 'integer|exists:guarantors,id',
         ]);
 
         $existing = DB::table('contracts')->where('id', $id)->first();
@@ -172,7 +216,35 @@ class ContractController extends Controller
             ->where('id', $id)
             ->update($this->buildContractPayload($request, $extras, isUpdate: true));
 
+        // 🚀 Só sincroniza fiadores se o front enviou explicitamente o campo.
+        // Isso evita zerar a relação numa edição parcial que não tocou na aba.
+        if ($request->has('guarantor_ids')) {
+            $this->syncContractGuarantors($id, (array) $request->input('guarantor_ids', []));
+        }
+
         return redirect()->route('contracts.index');
+    }
+
+    /**
+     * Sincroniza a tabela pivot contract_guarantor usando o método
+     * sync() do Eloquent — assim ganhamos automaticamente:
+     *   • detach do que saiu;
+     *   • attach do que entrou;
+     *   • timestamps createdAt/updatedAt da pivot (configurados no model).
+     */
+    private function syncContractGuarantors(int $contractId, array $guarantorIds): void
+    {
+        $contract = Contract::find($contractId);
+        if (! $contract) {
+            return;
+        }
+
+        $clean = array_values(array_unique(array_filter(
+            array_map('intval', $guarantorIds),
+            fn ($id) => $id > 0
+        )));
+
+        $contract->guarantors()->sync($clean);
     }
 
     /**

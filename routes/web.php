@@ -14,6 +14,7 @@ use App\Http\Controllers\SerasaController;
 use App\Http\Controllers\SimulatorController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\ContractTypeController;
+use App\Http\Controllers\GuarantorController;
 use App\Models\UserColumnPreference; // 🚀 MODELO IMPORTADO PARA O UPSERT
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -54,6 +55,9 @@ Route::middleware('auth')->group(function () {
     // Clientes
     Route::get   ('/clients',      [ClientController::class, 'index'])->name('clients.index');
     Route::post  ('/clients',      [ClientController::class, 'store'])->name('clients.store');
+    // 🚀 JSON dedicado: fiadores vinculados ao cliente (alimenta "Fiadores Sugeridos"
+    // do modal de Contratos). Declarado antes de /clients/{id} de propósito.
+    Route::get   ('/api/clients/{id}/guarantors', [ClientController::class, 'guarantors'])->name('clients.guarantors');
     Route::get   ('/clients/{id}', [ClientController::class, 'show'])->name('clients.show');
     Route::put   ('/clients/{id}', [ClientController::class, 'update'])->name('clients.update');
     Route::delete('/clients/{id}', [ClientController::class, 'destroy'])->name('clients.destroy');
@@ -129,6 +133,25 @@ Route::middleware('auth')->group(function () {
     Route::post  ('/api/users',         [UserController::class, 'store'])->name('users.store');
     Route::put   ('/api/users/{user}',  [UserController::class, 'update'])->name('users.update');
     Route::delete('/api/users/{user}',  [UserController::class, 'destroy'])->name('users.destroy');
+
+    /*
+    |--------------------------------------------------------------------------
+    | CRUD de Fiadores (Guarantors)
+    |--------------------------------------------------------------------------
+    */
+    Route::get('/fiadores', [GuarantorController::class, 'page'])->name('guarantors.index');
+
+    Route::get   ('/api/guarantors',                    [GuarantorController::class, 'index'])->name('guarantors.list');
+    // 🚀 Autocomplete leve usado pelo modal de Contratos (declarado ANTES de /{guarantor}
+    // para não cair no model binding como guarantor=search).
+    Route::get   ('/api/guarantors/search',             [GuarantorController::class, 'search'])->name('guarantors.search');
+    Route::post  ('/api/guarantors',                    [GuarantorController::class, 'store'])->name('guarantors.store');
+    Route::get   ('/api/guarantors/{guarantor}',        [GuarantorController::class, 'show'])->name('guarantors.show');
+    Route::put   ('/api/guarantors/{guarantor}',        [GuarantorController::class, 'update'])->name('guarantors.update');
+    Route::delete('/api/guarantors/{guarantor}',        [GuarantorController::class, 'destroy'])->name('guarantors.destroy');
+
+    // Lookup auxiliar para o multi-select de clientes no modal
+    Route::get('/api/guarantors-clients-lookup', [GuarantorController::class, 'clientsLookup'])->name('guarantors.clients-lookup');
 
     // Tipificações Estruturais
     Route::get('/contract-types', [ContractTypeController::class, 'index'])->name('contract-types.index');

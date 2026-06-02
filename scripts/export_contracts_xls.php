@@ -11,7 +11,12 @@ $kernel->bootstrap();
 
 use App\Models\Client;
 
-$clients = Client::with(['contracts' => function ($q) { $q->where('status', 'Ativo'); }])->get();
+// Eager-load também os fiadores (NxN — tabela contract_guarantor) para
+// listá-los nominalmente na coluna "Fiadores" da planilha.
+$clients = Client::with([
+    'contracts' => function ($q) { $q->where('status', 'Ativo'); },
+    'contracts.guarantors:id,name,personType,tradeName',
+])->get();
 
 $spreadsheet = new Spreadsheet();
 $sheet = $spreadsheet->getActiveSheet();
@@ -56,7 +61,18 @@ foreach ($clients as $client) {
         $sheet->setCellValueByColumnAndRow($col++, $row, $contract->correctionIndex);
         $sheet->setCellValueByColumnAndRow($col++, $row, $contract->honoraryRate);
         $sheet->setCellValueByColumnAndRow($col++, $row, $contract->guarantees);
-        $sheet->setCellValueByColumnAndRow($col++, $row, $contract->guarantors);
+
+        // Lista os fiadores reais (NxN). Se o contrato é antigo e não tem
+        // vínculo na pivot, ainda assim cai no fallback do texto legado.
+        $guarantorNames = $contract->guarantors
+            ->map(fn ($g) => $g->personType === 'PJ' ? ($g->tradeName ?: $g->name) : $g->name)
+            ->filter()
+            ->implode(', ');
+        if ($guarantorNames === '') {
+            $guarantorNames = (string) ($contract->getRawOriginal('guarantors') ?? '');
+        }
+        $sheet->setCellValueByColumnAndRow($col++, $row, $guarantorNames);
+
         $sheet->setCellValueByColumnAndRow($col++, $row, $contract->observations);
         $sheet->setCellValueByColumnAndRow($col++, $row, $contract->status);
         $sheet->setCellValueByColumnAndRow($col++, $row, $contract->validated ? 'Sim' : 'Não');

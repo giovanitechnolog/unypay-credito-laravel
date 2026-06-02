@@ -5,6 +5,7 @@ import {
   User, Shield, FileText, X, Eye, Upload, Loader2, CreditCard, QrCode
 } from "lucide-react";
 import UnyPayLayout from "../Components/UnyPayLayout";
+import ConfirmDialog from "../Components/ConfirmDialog";
 import TableGroupBadges from "../Components/TableGroupBadges";
 import TableColumnPicker from "../Components/TableColumnPicker";
 import { useColumnVisibility } from "../hooks/useColumnVisibility";
@@ -235,8 +236,22 @@ export default function Clients({ clients, filters }: any) {
     }
   };
 
-  const handleDelete = (id: number, name: string) => {
-    if (confirm(`Excluir "${name}"?`)) { router.delete(`/clients/${id}`); }
+  const [confirmDelete, setConfirmDelete] = useState<{ id: number; name: string; document?: string | null; personType?: string } | null>(null);
+
+  const handleDelete = (client: any) => {
+    setConfirmDelete({
+      id: client.id,
+      name: client.name,
+      document: client.document,
+      personType: client.personType,
+    });
+  };
+
+  const executeClientDelete = () => {
+    if (!confirmDelete) return;
+    router.delete(`/clients/${confirmDelete.id}`, {
+      onSuccess: () => setConfirmDelete(null),
+    });
   };
 
   const handleOcrUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -387,7 +402,7 @@ export default function Clients({ clients, filters }: any) {
                             <button className="btn-icon" title="Ver detalhes" onClick={() => router.get(`/clients/${client.id}`)}><Eye size={11} /></button>
                             <button className="btn-icon" title="Ver contratos" onClick={() => router.get(`/contracts?clientId=${client.id}`)}><FileText size={11} /></button>
                             <button className="btn-icon" title="Editar" onClick={() => handleOpen(client)}><Edit2 size={11} /></button>
-                            <button className="btn-icon" title="Excluir" style={{ color: "#dc2626" }} onClick={() => handleDelete(client.id, client.name)}><Trash2 size={11} /></button>
+                            <button className="btn-icon" title="Excluir" style={{ color: "#dc2626" }} onClick={() => handleDelete(client)}><Trash2 size={11} /></button>
                           </div>
                         </td>
                       </tr>
@@ -616,6 +631,23 @@ export default function Clients({ clients, filters }: any) {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        tone="danger"
+        title="Excluir Cliente"
+        description="Esta ação remove permanentemente o cadastro do cliente. Contratos e históricos vinculados podem ser afetados."
+        entityLabel={confirmDelete?.personType === "PJ" ? "Pessoa Jurídica" : "Pessoa Física"}
+        entityName={confirmDelete?.name}
+        entityDetail={confirmDelete?.document ?? undefined}
+        consequences={[
+          "Todos os documentos digitais do cliente serão apagados.",
+          "Vínculos com fiadores serão automaticamente desfeitos.",
+        ]}
+        confirmLabel="Excluir Cliente"
+        onConfirm={executeClientDelete}
+        onClose={() => setConfirmDelete(null)}
+      />
     </UnyPayLayout>
   );
 }
