@@ -1,5 +1,9 @@
 import { useState, useMemo } from "react";
-import { Plus, Search, FileText, CheckCircle, X, Edit2, Trash2, Upload, Eye, CreditCard, QrCode, UserCheck, Scale } from "lucide-react";
+import {
+  Plus, Search, FileText, CheckCircle, X, Edit2, Trash2, Upload, Eye,
+  CreditCard, QrCode, UserCheck, Scale, Ban, RotateCcw, Paperclip,
+  CircleDollarSign, Percent, Landmark, Shield, BookOpen,
+} from "lucide-react";
 import { Head, router } from "@inertiajs/react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
@@ -27,7 +31,7 @@ const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
 };
 
 const PAGE_SIZES = [20, 50, 100];
-const ACTIONS_WIDTH = 132;
+const ACTIONS_WIDTH = 168;
 const MAX_PDF_MB = 20;
 const MAX_PDF_BYTES = MAX_PDF_MB * 1024 * 1024;
 
@@ -57,12 +61,12 @@ const emptyForm = {
 };
 
 const TABS = [
-  { key: "basico", label: "Dados Básicos" },
-  { key: "financeiro", label: "Valores e Bancos" }, 
-  { key: "taxas", label: "Taxas e Encargos" },
-  { key: "garantias", label: "Garantias e Fiadores" },
-  { key: "regras", label: "Regras Contratuais" },
-  { key: "bancarios", label: "Dados Bancários" },
+  { key: "basico",     label: "Dados Básicos",         icon: FileText },
+  { key: "financeiro", label: "Valores e Bancos",      icon: CircleDollarSign },
+  { key: "taxas",      label: "Taxas e Encargos",      icon: Percent },
+  { key: "garantias",  label: "Garantias e Fiadores",  icon: Shield },
+  { key: "regras",     label: "Regras Contratuais",    icon: BookOpen },
+  { key: "bancarios",  label: "Dados Bancários",       icon: Landmark },
 ];
 
 // Tradução amigável dos tipos de conta para exibição na guia "Dados Bancários"
@@ -103,7 +107,9 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   
   const [contractPdfFiles, setContractPdfFiles] = useState<File[]>([]);
   const [existingPdfNames, setExistingPdfNames] = useState<string[]>([]);
+  const [existingPdfPaths, setExistingPdfPaths] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   
   const [pdfPreview, setPdfPreview] = useState<{ id: number; code: string; names: string[] } | null>(null);
   const [activePdfIndex, setActivePdfIndex] = useState<number>(0);
@@ -183,6 +189,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     setEditingId(null);
     setContractPdfFiles([]);
     setExistingPdfNames([]);
+    setExistingPdfPaths([]);
     setActiveTab("basico");
   };
 
@@ -232,7 +239,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       confessionOfDebt: !!c.confessionOfDebt,
     });
     setContractPdfFiles([]);
-    
+
     try {
       const decodedNames = JSON.parse(c.sourcePdfName || "[]");
       setExistingPdfNames(Array.isArray(decodedNames) ? decodedNames : []);
@@ -240,17 +247,22 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       setExistingPdfNames(c.sourcePdfName ? [c.sourcePdfName] : []);
     }
 
+    try {
+      const decodedPaths = JSON.parse(c.contractPdfPath || "[]");
+      setExistingPdfPaths(Array.isArray(decodedPaths) ? decodedPaths : []);
+    } catch {
+      setExistingPdfPaths(c.contractPdfPath ? [c.contractPdfPath] : []);
+    }
+
     setActiveTab("basico");
     setOpen(true);
   };
 
-  const handlePdfFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
+  const ingestPdfFiles = (files: FileList | File[] | null) => {
+    if (!files || (files as FileList).length === 0) return;
+    const list = Array.from(files as FileList);
     const validFiles: File[] = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+    for (const file of list) {
       if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
         toast.error(`O arquivo "${file.name}" não é um PDF válido.`);
         continue;
@@ -261,8 +273,29 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       }
       validFiles.push(file);
     }
-    setContractPdfFiles(prev => [...prev, ...validFiles]);
+    if (validFiles.length > 0) {
+      setContractPdfFiles(prev => [...prev, ...validFiles]);
+    }
+  };
+
+  const handlePdfFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    ingestPdfFiles(e.target.files);
     e.target.value = "";
+  };
+
+  const handlePdfDrop = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer?.files) ingestPdfFiles(e.dataTransfer.files);
+  };
+
+  const removeNewPdf = (idx: number) => {
+    setContractPdfFiles(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const removeExistingPdf = (idx: number) => {
+    setExistingPdfNames(prev => prev.filter((_, i) => i !== idx));
+    setExistingPdfPaths(prev => prev.filter((_, i) => i !== idx));
   };
 
   const buildFormData = (): FormData => {
@@ -275,6 +308,15 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     contractPdfFiles.forEach((file) => {
       fd.append("contractPdfs[]", file);
     });
+    // Em modo de edição, manda explicitamente quais PDFs existentes manter,
+    // permitindo que o backend exclua somente os que o usuário removeu.
+    if (editingId) {
+      existingPdfPaths.forEach((path) => fd.append("existingPdfPaths[]", path));
+      existingPdfNames.forEach((name) => fd.append("existingPdfNames[]", name));
+      // Garante que o array vazio chegue ao backend (todos removidos)
+      if (existingPdfPaths.length === 0) fd.append("existingPdfPaths", "");
+      if (existingPdfNames.length === 0) fd.append("existingPdfNames", "");
+    }
     return fd;
   };
 
@@ -322,6 +364,25 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       preserveScroll: true,
       onSuccess: () => toast.success("Contrato removido."),
       onError: () => toast.error("Falha ao deletar o registro."),
+    });
+  };
+
+  const handleCancel = (item: any) => {
+    const c = item.contract ?? item;
+    if (c.status === "Cancelado") {
+      if (!confirm(`Reativar o contrato ${c.code}? O status voltará para "Ativo".`)) return;
+      router.post(`/contracts/${c.id}/reactivate`, {}, {
+        preserveScroll: true,
+        onSuccess: () => toast.success("Contrato reativado."),
+        onError: () => toast.error("Falha ao reativar o contrato."),
+      });
+      return;
+    }
+    if (!confirm(`Cancelar o contrato ${c.code}? O status passará para "Cancelado".`)) return;
+    router.post(`/contracts/${c.id}/cancel`, {}, {
+      preserveScroll: true,
+      onSuccess: () => toast.success("Contrato cancelado."),
+      onError: () => toast.error("Falha ao cancelar o contrato."),
     });
   };
 
@@ -388,7 +449,48 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     <UnyPayLayout>
       <Head title="Carteira de Contratos" />
 
-      <div style={{ padding: "12px 20px 16px 20px", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", gap: 12 }}>
+      <style>{`
+        /* —— Caixa alta visual da tela inteira (incluindo modal) —— */
+        .contracts-page,
+        .contracts-page input,
+        .contracts-page select,
+        .contracts-page textarea,
+        .contracts-page button,
+        .contracts-page option,
+        .contracts-page label { text-transform: uppercase; }
+
+        /* Mantém placeholders e dados monoespaçados sensíveis (PIX, conta, urls)
+           legíveis sem quebra cosmética */
+        .contracts-page input.mono,
+        .contracts-page input[type="email"],
+        .contracts-page input[type="url"],
+        .contracts-page input[type="date"],
+        .contracts-page input[type="number"] { text-transform: none; }
+        .contracts-page input::placeholder,
+        .contracts-page textarea::placeholder { text-transform: none; }
+
+        /* —— Refinamentos do modal de contratos —— */
+        .contracts-modal { border-radius: 10px; }
+        .contracts-modal-body { scroll-behavior: smooth; }
+        .contracts-modal-body::-webkit-scrollbar { width: 8px; }
+        .contracts-modal-body::-webkit-scrollbar-track { background: #f1f5f9; }
+        .contracts-modal-body::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .contracts-modal-body::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        .contracts-page .sigx-input {
+          transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .contracts-page .sigx-input:focus {
+          border-color: #2563eb;
+          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+        }
+        .contracts-page .sigx-input[readonly] { cursor: default; }
+
+        .contracts-page .btn-icon { transition: all 0.12s; }
+        .contracts-page .btn-icon:hover { transform: translateY(-1px); }
+      `}</style>
+
+      <div className="contracts-page" style={{ padding: "12px 20px 16px 20px", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", gap: 12 }}>
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#111827" }}>Contratos e Ativos</h1>
@@ -471,8 +573,17 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                                 <Eye size={11} style={{ color: "#2563eb" }} />
                               </button>
                             )}
-                            <button type="button" className="btn-icon" onClick={() => handleOpenEdit(item)}><Edit2 size={11} /></button>
-                            <button type="button" className="btn-icon text-danger" onClick={() => handleDelete(item)}><Trash2 size={11} /></button>
+                            <button type="button" className="btn-icon" onClick={() => handleOpenEdit(item)} title="Editar Contrato"><Edit2 size={11} /></button>
+                            {c.status === "Cancelado" ? (
+                              <button type="button" className="btn-icon" onClick={() => handleCancel(item)} title="Reativar Contrato">
+                                <RotateCcw size={11} style={{ color: "#059669" }} />
+                              </button>
+                            ) : (
+                              <button type="button" className="btn-icon" onClick={() => handleCancel(item)} title="Cancelar Contrato">
+                                <Ban size={11} style={{ color: "#d97706" }} />
+                              </button>
+                            )}
+                            <button type="button" className="btn-icon text-danger" onClick={() => handleDelete(item)} title="Excluir Contrato"><Trash2 size={11} /></button>
                           </div>
                         </td>
                       </tr>
@@ -509,18 +620,111 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
         {/* Modal Principal Cadastro / Edição */}
         {open && (
           <div className="sigx-modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setOpen(false); }}>
-            <div className="sigx-modal" style={{ maxWidth: 860 }} onMouseDown={e => e.stopPropagation()}>
-              <div className="sigx-modal-header">
-                <span className="sigx-modal-title">{editingId ? "Editar Contrato" : "Novo Contrato"}</span>
-                <button type="button" onClick={() => { setOpen(false); resetModal(); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)" }}><X size={18} /></button>
+            <div
+              className="sigx-modal contracts-modal"
+              style={{
+                width: "min(940px, 96vw)",
+                maxWidth: "96vw",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                boxShadow: "0 24px 60px rgba(15, 23, 42, 0.25)",
+              }}
+              onMouseDown={e => e.stopPropagation()}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "14px 22px",
+                  background: "linear-gradient(135deg, #1e2139 0%, #2d3154 100%)",
+                  color: "white",
+                  borderBottom: "1px solid #2d3154",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 8, background: "rgba(255,255,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <FileText size={16} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
+                      {editingId ? "Editar Contrato" : "Novo Contrato"}
+                    </span>
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>
+                      {editingId ? `Atualizando registro #${editingId}` : "Preencha as guias abaixo para registrar o ativo"}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setOpen(false); resetModal(); }}
+                  style={{
+                    background: "rgba(255,255,255,0.08)",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "white",
+                    width: 30, height: 30,
+                    borderRadius: 6,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}
+                >
+                  <X size={16} />
+                </button>
               </div>
-              <div className="sigx-tabs" style={{ display: "flex", gap: 2, background: "#f3f4f6", padding: 4 }}>
-                {TABS.map(tab => (
-                  <div key={tab.key} className={`sigx-tab${activeTab === tab.key ? " active" : ""}`} onClick={() => setActiveTab(tab.key)} style={{ padding: "6px 12px", fontSize: 11, cursor: "pointer", borderRadius: 4, background: activeTab === tab.key ? "white" : "transparent", fontWeight: activeTab === tab.key ? 700 : 400 }}>{tab.label}</div>
-                ))}
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: 4,
+                  background: "#f8fafc",
+                  padding: "8px 12px",
+                  borderBottom: "1px solid #e5e7eb",
+                  overflowX: "auto",
+                  flexWrap: "nowrap",
+                }}
+              >
+                {TABS.map(tab => {
+                  const Icon = tab.icon;
+                  const active = activeTab === tab.key;
+                  return (
+                    <button
+                      type="button"
+                      key={tab.key}
+                      onClick={() => setActiveTab(tab.key)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "7px 12px",
+                        fontSize: 11,
+                        fontWeight: active ? 700 : 500,
+                        cursor: "pointer",
+                        borderRadius: 6,
+                        background: active ? "white" : "transparent",
+                        color: active ? "#1e2139" : "#475569",
+                        border: active ? "1px solid #e2e8f0" : "1px solid transparent",
+                        boxShadow: active ? "0 1px 2px rgba(15,23,42,0.06)" : "none",
+                        whiteSpace: "nowrap",
+                        transition: "all 0.1s",
+                      }}
+                    >
+                      <Icon size={12} style={{ color: active ? "#2563eb" : "#94a3b8" }} />
+                      {tab.label}
+                    </button>
+                  );
+                })}
               </div>
-              <form onSubmit={handleSubmit}>
-                <div className="sigx-modal-body" style={{ padding: 20, maxHeight: "55vh", overflowY: "auto" }}>
+              <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+                <div
+                  className="sigx-modal-body contracts-modal-body"
+                  style={{
+                    padding: 22,
+                    height: "clamp(440px, 60vh, 68vh)",
+                    overflowY: "auto",
+                    background: "white",
+                  }}
+                >
                   
                   {/* TAB 1: BÁSICO */}
                   {activeTab === "basico" && (
@@ -593,28 +797,135 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                           <option value="Cancelado">Cancelado</option>
                         </select>
                       </div>
-                      
-                      <div style={{ gridColumn: "span 2" }}>
-                        <label className="sigx-label" style={{ display: "flex", alignItems: "center", gap: 4 }}><Scale size={12} style={{ color: "#0d9488" }} /> FORO ELEITO DE ELEIÇÃO (COMARCA COBRANÇA)</label>
-                        <input className="sigx-input" value={form.forumLocation} onChange={n("forumLocation")} placeholder="Ex: Belo Horizonte / MG" />
-                        <span style={{ fontSize: 10, color: "#94a3b8" }}>Define o município jurídico responsável pela resolução de litígios e execução judicial deste ativo.</span>
-                      </div>
 
                       <div style={{ gridColumn: "span 2" }}>
-                        <label className="sigx-label">ANEXAR DOCUMENTOS E ATIVOS (PDF)</label>
-                        <input type="file" accept=".pdf" onChange={handlePdfFilesChange} multiple style={{ fontSize: 12 }} />
-                        
+                        <label className="sigx-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <Paperclip size={12} style={{ color: "#2563eb" }} /> ANEXAR DOCUMENTOS E ATIVOS (PDF)
+                        </label>
+
+                        <label
+                          htmlFor="contract-pdf-input"
+                          onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                          onDragEnter={e => { e.preventDefault(); setIsDragging(true); }}
+                          onDragLeave={() => setIsDragging(false)}
+                          onDrop={handlePdfDrop}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 12,
+                            padding: "18px 16px",
+                            border: `2px dashed ${isDragging ? "#2563eb" : "#cbd5e1"}`,
+                            borderRadius: 8,
+                            background: isDragging ? "#eff6ff" : "#f8fafc",
+                            color: "#475569",
+                            cursor: "pointer",
+                            transition: "all 0.15s",
+                            textAlign: "center",
+                          }}
+                        >
+                          <div style={{ width: 38, height: 38, borderRadius: 8, background: "white", border: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            <Upload size={16} style={{ color: "#2563eb" }} />
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "#1e293b" }}>
+                              Clique para selecionar ou arraste seus PDFs aqui
+                            </span>
+                            <span style={{ fontSize: 10, color: "#64748b", fontWeight: 500 }}>
+                              Aceita múltiplos arquivos · Máx. {MAX_PDF_MB} MB cada
+                            </span>
+                          </div>
+                          <input
+                            id="contract-pdf-input"
+                            type="file"
+                            accept=".pdf"
+                            onChange={handlePdfFilesChange}
+                            multiple
+                            style={{ display: "none" }}
+                          />
+                        </label>
+
                         {(contractPdfFiles.length > 0 || existingPdfNames.length > 0) && (
-                          <div style={{ marginTop: 10, padding: 10, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, display: "flex", flexDirection: "column", gap: 4 }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: "#64748b" }}>DOCUMENTOS SELECIONADOS PARA ESTE INSTRUMENTO:</span>
+                          <div style={{ marginTop: 12, padding: 10, background: "white", border: "1px solid #e2e8f0", borderRadius: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.04em" }}>
+                              DOCUMENTOS DESTE INSTRUMENTO ({existingPdfNames.length + contractPdfFiles.length})
+                            </span>
+
                             {existingPdfNames.map((name, idx) => (
-                              <div key={`exist-${idx}`} style={{ fontSize: 11, color: "#0f172a", display: "flex", alignItems: "center", gap: 4 }}>
-                                <FileText size={12} style={{ color: "#2563eb" }} /> {name} <span style={{ fontSize: 9, color: "#059669", background: "#d1fae5", padding: "1px 4px", borderRadius: 3 }}>Salvo no Banco</span>
+                              <div
+                                key={`exist-${idx}`}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  padding: "6px 10px",
+                                  background: "#f0fdf4",
+                                  border: "1px solid #bbf7d0",
+                                  borderRadius: 6,
+                                  fontSize: 11,
+                                }}
+                              >
+                                <span style={{ display: "flex", alignItems: "center", gap: 6, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  <FileText size={12} style={{ color: "#059669", flexShrink: 0 }} />
+                                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+                                  <span style={{ fontSize: 9, color: "#065f46", background: "#d1fae5", padding: "1px 6px", borderRadius: 3, fontWeight: 700, flexShrink: 0 }}>Salvo</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => removeExistingPdf(idx)}
+                                  title="Remover este documento"
+                                  style={{
+                                    background: "white",
+                                    border: "1px solid #fecaca",
+                                    color: "#dc2626",
+                                    cursor: "pointer",
+                                    width: 22, height: 22,
+                                    borderRadius: 4,
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  <Trash2 size={11} />
+                                </button>
                               </div>
                             ))}
+
                             {contractPdfFiles.map((file, idx) => (
-                              <div key={`new-${idx}`} style={{ fontSize: 11, color: "#0f172a", display: "flex", alignItems: "center", gap: 4 }}>
-                                <FileText size={12} style={{ color: "#ea580c" }} /> {file.name} <span style={{ fontSize: 9, color: "#ea580c", background: "#ffedd5", padding: "1px 4px", borderRadius: 3 }}>Aguardando Gravação</span>
+                              <div
+                                key={`new-${idx}`}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  padding: "6px 10px",
+                                  background: "#fff7ed",
+                                  border: "1px solid #fed7aa",
+                                  borderRadius: 6,
+                                  fontSize: 11,
+                                }}
+                              >
+                                <span style={{ display: "flex", alignItems: "center", gap: 6, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  <FileText size={12} style={{ color: "#ea580c", flexShrink: 0 }} />
+                                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</span>
+                                  <span style={{ fontSize: 9, color: "#9a3412", background: "#ffedd5", padding: "1px 6px", borderRadius: 3, fontWeight: 700, flexShrink: 0 }}>Pendente</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => removeNewPdf(idx)}
+                                  title="Descartar este arquivo"
+                                  style={{
+                                    background: "white",
+                                    border: "1px solid #fecaca",
+                                    color: "#dc2626",
+                                    cursor: "pointer",
+                                    width: 22, height: 22,
+                                    borderRadius: 4,
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  <X size={12} />
+                                </button>
                               </div>
                             ))}
                           </div>
@@ -720,6 +1031,274 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                           <input type="number" step="0.001" className="sigx-input" value={form.penaltyRate ? (form.penaltyRate * 100).toFixed(3) : ""} onChange={e => setForm(p => ({ ...p, penaltyRate: parseFloat(e.target.value) / 100 || 0 }))} />
                         </div>
                       </div>
+
+                      {/* 🚀 Juros Total = ((p × n) / q) − 1 — card externo com 5 mini-cards */}
+                      {(() => {
+                        const ready = jurosTotal !== null;
+                        const positive = ready && (jurosTotal as number) >= 0;
+                        const accent = !ready ? "#94a3b8" : (positive ? "#0369a1" : "#dc2626");
+                        const accentSoft = !ready ? "#f1f5f9" : (positive ? "#e0f2fe" : "#fee2e2");
+                        const totalPagar = (Number(form.installmentAmount) || 0) * (Number(form.installmentCount) || 0);
+                        const hasTotal = totalPagar > 0;
+
+                        const cards = [
+                          {
+                            letter: "p",
+                            label: "Parcela",
+                            value: fmt(form.installmentAmount || 0),
+                            mono: true,
+                            color: "#0369a1",
+                            soft: "#e0f2fe",
+                            valueColor: "#0c4a6e",
+                            ready: (Number(form.installmentAmount) || 0) > 0,
+                          },
+                          {
+                            letter: "n",
+                            label: "Nº de Meses",
+                            value: `${form.installmentCount || 0}×`,
+                            mono: false,
+                            color: "#7c3aed",
+                            soft: "#ede9fe",
+                            valueColor: "#5b21b6",
+                            ready: (Number(form.installmentCount) || 0) > 0,
+                          },
+                          {
+                            letter: "q",
+                            label: "Financiado",
+                            value: fmt(form.principalAmount || 0),
+                            mono: true,
+                            color: "#059669",
+                            soft: "#d1fae5",
+                            valueColor: "#065f46",
+                            ready: (Number(form.principalAmount) || 0) > 0,
+                          },
+                          {
+                            letter: "Σ",
+                            label: "Total a Pagar",
+                            value: hasTotal ? fmt(totalPagar) : "—",
+                            mono: true,
+                            color: "#ea580c",
+                            soft: "#ffedd5",
+                            valueColor: "#9a3412",
+                            ready: hasTotal,
+                          },
+                          {
+                            letter: "%",
+                            label: "Juros Total",
+                            value: ready ? `${((jurosTotal as number) * 100).toFixed(2)}%` : "—",
+                            mono: true,
+                            color: ready ? (positive ? "#0369a1" : "#dc2626") : "#94a3b8",
+                            soft: ready ? (positive ? "#dbeafe" : "#fee2e2") : "#f1f5f9",
+                            valueColor: ready ? (positive ? "#0c4a6e" : "#991b1b") : "#94a3b8",
+                            ready,
+                            highlight: true,
+                          },
+                        ];
+
+                        return (
+                          <div
+                            style={{
+                              marginTop: 4,
+                              borderRadius: 12,
+                              background: "white",
+                              border: "1px solid #e2e8f0",
+                              boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+                              overflow: "hidden",
+                              position: "relative",
+                            }}
+                          >
+                            {/* Faixa lateral colorida indicando estado do cálculo */}
+                            <div
+                              style={{
+                                position: "absolute",
+                                left: 0, top: 0, bottom: 0,
+                                width: 4,
+                                background: accent,
+                              }}
+                            />
+
+                            {/* Cabeçalho do card externo */}
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                gap: 12,
+                                padding: "12px 16px 12px 20px",
+                                borderBottom: "1px solid #f1f5f9",
+                                background: "linear-gradient(180deg, #fafbfc 0%, white 100%)",
+                              }}
+                            >
+                              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                <div
+                                  style={{
+                                    width: 32, height: 32,
+                                    borderRadius: 8,
+                                    background: accentSoft,
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  <Percent size={15} style={{ color: accent }} />
+                                </div>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: "#0f172a", letterSpacing: "0.04em" }}>
+                                    Juros Total do Contrato
+                                  </span>
+                                  <span style={{ fontSize: 10, color: "#64748b", fontWeight: 500, textTransform: "none" }}>
+                                    Calculado automaticamente a partir dos valores informados
+                                  </span>
+                                </div>
+                              </div>
+                              <span
+                                style={{
+                                  fontSize: 9,
+                                  color: accent,
+                                  fontWeight: 700,
+                                  letterSpacing: "0.06em",
+                                  padding: "3px 8px",
+                                  background: accentSoft,
+                                  borderRadius: 4,
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {ready ? (positive ? "TAXA EFETIVA TOTAL" : "RETORNO NEGATIVO") : "AGUARDANDO DADOS"}
+                              </span>
+                            </div>
+
+                            {/* Conteúdo: 5 mini-cards + fórmula */}
+                            <div style={{ padding: "14px 16px 14px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+                            <div
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
+                                gap: 8,
+                              }}
+                            >
+                              {cards.map(c => (
+                                <div
+                                  key={c.letter}
+                                  style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    alignItems: "flex-start",
+                                    gap: 8,
+                                    padding: "12px 12px",
+                                    background: c.highlight ? c.soft : "white",
+                                    border: `1px solid ${c.highlight ? c.color + "55" : "#e2e8f0"}`,
+                                    borderRadius: 10,
+                                    boxShadow: c.highlight ? `0 1px 4px ${c.color}22` : "0 1px 2px rgba(15,23,42,0.03)",
+                                    minWidth: 0,
+                                  }}
+                                >
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6, width: "100%" }}>
+                                    <span
+                                      style={{
+                                        width: 22, height: 22,
+                                        borderRadius: 6,
+                                        background: c.highlight ? "white" : c.soft,
+                                        color: c.color,
+                                        border: `1px solid ${c.color}33`,
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                        fontFamily: "'IBM Plex Mono', monospace",
+                                        fontSize: 12, fontWeight: 700,
+                                        flexShrink: 0,
+                                        textTransform: "none",
+                                      }}
+                                    >
+                                      {c.letter}
+                                    </span>
+                                    <span
+                                      style={{
+                                        fontSize: 9,
+                                        color: c.highlight ? c.color : "#64748b",
+                                        fontWeight: 700,
+                                        letterSpacing: "0.06em",
+                                        overflow: "hidden",
+                                        textOverflow: "ellipsis",
+                                        whiteSpace: "nowrap",
+                                      }}
+                                    >
+                                      {c.label.toUpperCase()}
+                                    </span>
+                                  </div>
+                                  <span
+                                    style={{
+                                      fontFamily: c.mono ? "'IBM Plex Mono', monospace" : "inherit",
+                                      fontSize: c.highlight ? 18 : 14,
+                                      fontWeight: 700,
+                                      color: c.ready ? c.valueColor : "#94a3b8",
+                                      letterSpacing: "-0.01em",
+                                      lineHeight: 1.1,
+                                      width: "100%",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    title={c.value}
+                                  >
+                                    {c.value}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Fórmula em chip claro */}
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 10,
+                                padding: "8px 12px",
+                                background: "#f8fafc",
+                                border: "1px solid #e2e8f0",
+                                borderRadius: 6,
+                                fontFamily: "'IBM Plex Mono', monospace",
+                                fontSize: 12,
+                                color: "#0f172a",
+                                letterSpacing: "0.02em",
+                                textTransform: "none",
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              <span style={{ color: "#64748b", fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                                Fórmula
+                              </span>
+                              <span style={{ color: "#cbd5e1" }}>│</span>
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                <span style={{ color: "#64748b" }}>(</span>
+                                <span style={{ color: "#0369a1", fontWeight: 700 }}>p</span>
+                                <span style={{ color: "#475569" }}>×</span>
+                                <span style={{ color: "#7c3aed", fontWeight: 700 }}>n</span>
+                                <span style={{ color: "#64748b" }}>)</span>
+                                <span style={{ color: "#475569" }}>÷</span>
+                                <span style={{ color: "#059669", fontWeight: 700 }}>q</span>
+                                <span style={{ color: "#475569" }}>−</span>
+                                <span style={{ color: "#b45309", fontWeight: 700 }}>1</span>
+                                <span style={{ color: "#475569", margin: "0 6px" }}>=</span>
+                                <span style={{ color: "#0f172a", fontWeight: 700 }}>Juros Total</span>
+                              </span>
+                            </div>
+
+                            {!ready && (
+                              <div
+                                style={{
+                                  fontSize: 10,
+                                  color: "#92400e",
+                                  background: "#fffbeb",
+                                  border: "1px solid #fde68a",
+                                  borderRadius: 6,
+                                  padding: "6px 10px",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                Informe Valor Principal, Valor da Parcela e Nº de Meses para calcular.
+                              </div>
+                            )}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
 
@@ -754,6 +1333,37 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                       )}
                       <div><label className="sigx-label">GARANTIAS REAIS ACOPLADAS</label><textarea className="sigx-input" value={form.guarantees} onChange={n("guarantees")} rows={3} /></div>
                       <div><label className="sigx-label">MINUTA DETALHADA DOS FIADORES / COOBRIGADOS</label><textarea className="sigx-input" value={form.guarantors} onChange={n("guarantors")} rows={4} placeholder="Clique nos botões acima para puxar os fiadores cadastrados na ficha do cliente..." /></div>
+
+                      {/* 🚀 Confissão de Dívida */}
+                      <label
+                        style={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: 10,
+                          padding: 12,
+                          borderRadius: 8,
+                          border: `1px solid ${form.confessionOfDebt ? "#bae6fd" : "#e2e8f0"}`,
+                          background: form.confessionOfDebt ? "#f0f9ff" : "#f8fafc",
+                          cursor: "pointer",
+                          transition: "all 0.1s",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!!form.confessionOfDebt}
+                          onChange={e => setForm(p => ({ ...p, confessionOfDebt: e.target.checked }))}
+                          style={{ marginTop: 2, width: 16, height: 16, accentColor: "#2563eb", cursor: "pointer" }}
+                        />
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", display: "flex", alignItems: "center", gap: 6 }}>
+                            <Scale size={12} style={{ color: "#0369a1" }} /> CONFISSÃO DE DÍVIDA
+                          </span>
+                          <span style={{ fontSize: 10, color: "#64748b", lineHeight: 1.4 }}>
+                            Marque para registrar que este instrumento é uma confissão de dívida formal,
+                            firmada pelo devedor reconhecendo expressamente a obrigação de pagamento.
+                          </span>
+                        </div>
+                      </label>
                     </div>
                   )}
 
@@ -872,9 +1482,26 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                   )}
 
                 </div>
-                <div className="sigx-modal-footer">
-                  <button type="button" className="btn-secondary" onClick={() => { setOpen(false); resetModal(); }}>Cancelar</button>
-                  <button type="submit" className="btn-primary" disabled={submitting}>{submitting ? "Gravando..." : "Salvar Contrato"}</button>
+                <div
+                  style={{
+                    padding: "12px 22px",
+                    borderTop: "1px solid #e5e7eb",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10,
+                    background: "#f8fafc",
+                  }}
+                >
+                  <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>
+                    {editingId ? "Edição registrada com auditoria automática" : "Novo registro será atribuído ao seu usuário"}
+                  </span>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button type="button" className="btn-secondary" onClick={() => { setOpen(false); resetModal(); }}>Cancelar</button>
+                    <button type="submit" className="btn-primary" disabled={submitting} style={{ minWidth: 150, justifyContent: "center" }}>
+                      {submitting ? "Gravando..." : (editingId ? "Atualizar Contrato" : "Salvar Contrato")}
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>

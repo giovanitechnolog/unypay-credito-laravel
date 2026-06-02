@@ -118,26 +118,54 @@ class ContractController extends Controller
             'user_id' => \Illuminate\Support\Facades\Auth::id()
         ];
 
-        if ($request->hasFile('contractPdfs')) {
-            $pdfPaths = [];
-            $pdfNames = [];
+        // 🚀 Mescla anexos: o frontend envia explicitamente os PDFs antigos que
+        // o usuário decidiu manter (existingPdfPaths[] / existingPdfNames[]) e
+        // os arquivos novos a serem adicionados (contractPdfs[]). Os PDFs
+        // antigos que NÃO vierem na lista de manter são considerados removidos
+        // e seus arquivos físicos são deletados do storage.
+        $oldPaths = json_decode($existing->contractPdfPath ?? '[]', true);
+        $oldNames = json_decode($existing->sourcePdfName ?? '[]', true);
+        if (!is_array($oldPaths)) { $oldPaths = []; }
+        if (!is_array($oldNames)) { $oldNames = []; }
 
-            foreach ($request->file('contractPdfs') as $file) {
-                $pdfPaths[] = $file->store(self::PDF_DIR, self::PDF_DISK);
-                $pdfNames[] = $file->getClientOriginalName();
+        $hasFiles            = $request->hasFile('contractPdfs');
+        $hasKeepListInPaths  = $request->has('existingPdfPaths');
+        $hasKeepListInNames  = $request->has('existingPdfNames');
+
+        if ($hasFiles || $hasKeepListInPaths || $hasKeepListInNames) {
+            $keptPaths = $request->input('existingPdfPaths', []);
+            $keptNames = $request->input('existingPdfNames', []);
+            if (!is_array($keptPaths)) { $keptPaths = []; }
+            if (!is_array($keptNames)) { $keptNames = []; }
+
+            // Caso o frontend NÃO mande a lista de "manter" mas mande arquivos
+            // novos, mantemos os antigos por padrão (compatibilidade com versão
+            // anterior que limpava tudo). Aqui só removemos o que foi marcado.
+            $keepAllOld = !$hasKeepListInPaths && !$hasKeepListInNames;
+            if ($keepAllOld) {
+                $keptPaths = $oldPaths;
+                $keptNames = $oldNames;
             }
 
-            $oldPaths = json_decode($existing->contractPdfPath ?? '[]', true);
-            if (is_array($oldPaths)) {
-                foreach ($oldPaths as $oldPath) {
-                    if (!empty($oldPath) && Storage::disk(self::PDF_DISK)->exists($oldPath)) {
+            // Delete arquivos físicos que foram removidos (não estão em $keptPaths)
+            foreach ($oldPaths as $oldPath) {
+                if (!empty($oldPath) && !in_array($oldPath, $keptPaths, true)) {
+                    if (Storage::disk(self::PDF_DISK)->exists($oldPath)) {
                         Storage::disk(self::PDF_DISK)->delete($oldPath);
                     }
                 }
             }
 
-            $extras['contractPdfPath'] = json_encode($pdfPaths);
-            $extras['sourcePdfName']   = json_encode($pdfNames);
+            // Adiciona os novos uploads ao final
+            if ($hasFiles) {
+                foreach ($request->file('contractPdfs') as $file) {
+                    $keptPaths[] = $file->store(self::PDF_DIR, self::PDF_DISK);
+                    $keptNames[] = $file->getClientOriginalName();
+                }
+            }
+
+            $extras['contractPdfPath'] = json_encode(array_values($keptPaths));
+            $extras['sourcePdfName']   = json_encode(array_values($keptNames));
         }
 
         DB::table('contracts')
@@ -145,6 +173,43 @@ class ContractController extends Controller
             ->update($this->buildContractPayload($request, $extras, isUpdate: true));
 
         return redirect()->route('contracts.index');
+    }
+
+    /**
+     * Cancela um contrato — apenas altera o status para "Cancelado".
+     * Não remove o registro nem altera nenhum outro dado.
+     */
+    public function cancel(int $id)
+    {
+        $contract = DB::table('contracts')->where('id', $id)->first();
+        if (!$contract) {
+            return redirect()->route('contracts.index')->with('error', 'Contrato não encontrado.');
+        }
+
+        DB::table('contracts')->where('id', $id)->update([
+            'status'    => 'Cancelado',
+            'updatedAt' => now(),
+        ]);
+
+        return redirect()->back()->with('success', 'Contrato cancelado.');
+    }
+
+    /**
+     * Reativa um contrato cancelado — devolve o status para "Ativo".
+     */
+    public function reactivate(int $id)
+    {
+        $contract = DB::table('contracts')->where('id', $id)->first();
+        if (!$contract) {
+            return redirect()->route('contracts.index')->with('error', 'Contrato não encontrado.');
+        }
+
+        DB::table('contracts')->where('id', $id)->update([
+            'status'    => 'Ativo',
+            'updatedAt' => now(),
+        ]);
+
+        return redirect()->back()->with('success', 'Contrato reativado.');
     }
 
     public function viewPdf(int $id, Request $request)
