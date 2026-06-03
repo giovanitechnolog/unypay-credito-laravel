@@ -25,9 +25,9 @@ export type ClientsColumnId =
   // classificacao
   | "rating"
   | "pixKey"
-  // fiadores
-  | "fiador1"
-  | "fiador2";
+  // fiadores — coluna única "Vínculos" que abre um modal com a lista
+  // detalhada (Fiadores E Codevedores) provenientes dos contratos do cliente.
+  | "fiadores";
 
 export type ClientsColumnDef = TableColumnDef<ClientsColumnId, ClientsColGroup>;
 
@@ -35,7 +35,7 @@ export const CLIENTS_GROUP_META: Record<ClientsColGroup, ColGroupMeta> = {
   identificacao: { label: "Identificação", short: "ID",     bg: "#1e293b", color: "#ffffff" }, // slate-900
   contato:       { label: "Contato",       short: "Cont.",  bg: "#1e3a8a", color: "#ffffff" }, // blue-900 (marinho)
   classificacao: { label: "Classificação", short: "Class.", bg: "#15803d", color: "#ffffff" }, // green-700
-  fiadores:      { label: "Fiadores",      short: "Fiad.",  bg: "#7e22ce", color: "#ffffff" }, // purple-700
+  fiadores:      { label: "Fiadores / Codevedores", short: "Vínc.", bg: "#7e22ce", color: "#ffffff" }, // purple-700
 };
 
 export const CLIENTS_GROUP_ORDER: readonly ClientsColGroup[] = [
@@ -58,9 +58,8 @@ export const CLIENTS_COLUMNS: readonly ClientsColumnDef[] = [
   { id: "rating", label: "Rating", group: "classificacao", width: 80,  align: "center", defaultVisible: true },
   { id: "pixKey", label: "PIX",    group: "classificacao", width: 130, align: "left",   defaultVisible: true },
 
-  // —— Fiadores ——
-  { id: "fiador1", label: "Fiador 1", group: "fiadores", width: 140, align: "left", defaultVisible: true },
-  { id: "fiador2", label: "Fiador 2", group: "fiadores", width: 140, align: "left", defaultVisible: true },
+  // —— Fiadores / Codevedores (uma coluna única, abre modal com a tabela) ——
+  { id: "fiadores", label: "Fiadores", group: "fiadores", width: 140, align: "center", defaultVisible: true },
 ];
 
 export const ALL_CLIENTS_COLUMN_IDS: ClientsColumnId[] = CLIENTS_COLUMNS.map((c) => c.id);

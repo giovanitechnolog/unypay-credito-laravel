@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Head, router } from "@inertiajs/react";
 import { 
-  ArrowLeft, Building2, User, Shield, Upload,
-  Mail, Phone, Landmark, FileText, X
+  ArrowLeft, Shield, Upload,
 } from "lucide-react";
 import UnyPayLayout from "../Components/UnyPayLayout";
+import ClientGuarantorsTable, { ClientGuarantorRow } from "../Components/ClientGuarantorsTable";
 
 const RISK_COLORS: Record<string, { bg: string; color: string }> = {
   A: { bg: "oklch(92% .08 145)", color: "oklch(35% .15 145)" },
@@ -18,7 +18,7 @@ const TABS = [
   { key: "dados", label: "Dados Cadastrais" },
   { key: "contratos", label: "Contratos" },
   { key: "documentos", label: "Documentos / PDFs" },
-  { key: "fiadores", label: "Fiadores" },
+  { key: "fiadores", label: "Fiadores / Codevedores" },
   { key: "obs", label: "Observações Jurídicas" },
 ];
 
@@ -245,25 +245,13 @@ export default function ClientDetails({ client }: any) {
               </div>
             )}
 
-            {/* Aba 4: Fiadores */}
+            {/* Aba 4: Fiadores / Codevedores
+                Lista derivada dos contratos do cliente — mesma fonte e
+                componente usados no modal popup da grade de Clientes. */}
             {activeTab === "fiadores" && (
-              <div>
-                {!extra.fiador1Nome ? (
-                  <div style={{ textAlign: "center", padding: 20, color: "var(--muted-foreground)" }}>Nenhum avalista associado a este cadastro.</div>
-                ) : (
-                  <div className="form-grid-2">
-                    <div>
-                      <div className="section-header" style={{ background: "oklch(30% .12 290)", marginBottom: 12 }}>FIADOR / AVALISTA 1</div>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "0 4px" }}>
-                        <div><span className="sigx-label">NOME COMPLETO</span><div style={{ fontSize: 13, fontWeight: 600 }}>{extra.fiador1Nome}</div></div>
-                        <div><span className="sigx-label">CPF</span><div className="mono" style={{ fontSize: 13 }}>{extra.fiador1Cpf || "—"}</div></div>
-                        <div style={{ marginTop: 6 }}><span className="sigx-label">TELEFONE</span><div style={{ fontSize: 13 }}>{extra.fiador1Telefone || "—"}</div></div>
-                        <div style={{ marginTop: 6 }}><span className="sigx-label">ENDEREÇO</span><div style={{ fontSize: 13 }}>{extra.fiador1Endereco || "—"} ({extra.fiador1Cidade || ""})</div></div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <ClientGuarantorsTable
+                data={(client.guarantors ?? []) as ClientGuarantorRow[]}
+              />
             )}
 
             {/* Aba 5: Observações Jurídicas */}

@@ -45,18 +45,21 @@ class ContractController extends Controller
 
         $rawContracts = $query->orderBy('contracts.id', 'desc')->get();
 
-        // 🚀 Hidratação dos fiadores em uma única query auxiliar.
-        // Buscamos todos os pares (contractId, guarantor) de uma só vez e
-        // distribuímos por contrato — evita o clássico problema N+1.
+        // 🚀 Hidratação dos vínculos pessoa↔contrato (Fiadores E Codevedores) em
+        // uma única query auxiliar contra a pivot contract_guarantor. A coluna
+        // `role` na pivot decide em qual array do payload cada item entra.
+        // Evita o N+1 e elimina a necessidade de duas queries paralelas.
         $contractIds = $rawContracts->pluck('id')->all();
 
         $guarantorsByContract = [];
+        $codebtorsByContract  = [];
         if (!empty($contractIds)) {
             $guarantorRows = DB::table('contract_guarantor')
                 ->join('guarantors', 'guarantors.id', '=', 'contract_guarantor.guarantorId')
                 ->whereIn('contract_guarantor.contractId', $contractIds)
                 ->select(
                     'contract_guarantor.contractId as contractId',
+                    'contract_guarantor.role as role',
                     'guarantors.id',
                     'guarantors.name',
                     'guarantors.personType',
@@ -67,19 +70,26 @@ class ContractController extends Controller
                 ->get();
 
             foreach ($guarantorRows as $g) {
-                $guarantorsByContract[$g->contractId][] = [
+                $payload = [
                     'id'         => $g->id,
                     'name'       => $g->name,
                     'personType' => $g->personType,
                     'document'   => $g->personType === 'PJ' ? $g->cnpj : $g->cpf,
                 ];
+
+                if ($g->role === Contract::ROLE_CODEVEDOR) {
+                    $codebtorsByContract[$g->contractId][] = $payload;
+                } else {
+                    $guarantorsByContract[$g->contractId][] = $payload;
+                }
             }
         }
 
-        $rawContracts->transform(function ($row) use ($guarantorsByContract) {
+        $rawContracts->transform(function ($row) use ($guarantorsByContract, $codebtorsByContract) {
             $paths = json_decode($row->contractPdfPath ?? '[]', true);
             $row->hasContractPdf = !empty($paths) && count($paths) > 0;
             $row->guarantors     = $guarantorsByContract[$row->id] ?? [];
+            $row->codebtors      = $codebtorsByContract[$row->id]  ?? [];
             return $row;
         });
 
@@ -151,9 +161,13 @@ class ContractController extends Controller
             'contract_type_id' => 'required',
             'contractPdfs'     => 'nullable|array',
             'contractPdfs.*'   => 'file|mimes:pdf|max:20480',
-            // 🚀 Lista de fiadores selecionados na aba "Garantias e Fiadores"
+            // 🚀 Vínculos pessoa↔contrato. Cada array é independente; ambos
+            // gravam na mesma pivot (contract_guarantor) diferenciados pela
+            // coluna `role`. Ver Contract::ROLE_FIADOR / ROLE_CODEVEDOR.
             'guarantor_ids'    => 'nullable|array',
             'guarantor_ids.*'  => 'integer|exists:guarantors,id',
+            'codebtor_ids'     => 'nullable|array',
+            'codebtor_ids.*'   => 'integer|exists:guarantors,id',
             // 🚀 Bens em garantia (veículos / imóveis)
             'assets'           => 'nullable|array',
         ];
@@ -190,7 +204,16 @@ class ContractController extends Controller
             $this->buildContractPayload($request, $extras)
         );
 
-        $this->syncContractGuarantors($contractId, (array) $request->input('guarantor_ids', []));
+        $this->syncContractGuarantors(
+            $contractId,
+            (array) $request->input('guarantor_ids', []),
+            Contract::ROLE_FIADOR
+        );
+        $this->syncContractGuarantors(
+            $contractId,
+            (array) $request->input('codebtor_ids', []),
+            Contract::ROLE_CODEVEDOR
+        );
         $this->syncContractAssets($contractId, $assets);
 
         return redirect()->route('contracts.index');
@@ -211,6 +234,8 @@ class ContractController extends Controller
             'contractPdfs'     => 'nullable|array',
             'guarantor_ids'    => 'nullable|array',
             'guarantor_ids.*'  => 'integer|exists:guarantors,id',
+            'codebtor_ids'     => 'nullable|array',
+            'codebtor_ids.*'   => 'integer|exists:guarantors,id',
             'assets'           => 'nullable|array',
         ];
         $messages = [];
@@ -285,10 +310,22 @@ class ContractController extends Controller
             ->where('id', $id)
             ->update($this->buildContractPayload($request, $extras, isUpdate: true));
 
-        // 🚀 Só sincroniza fiadores se o front enviou explicitamente o campo.
-        // Isso evita zerar a relação numa edição parcial que não tocou na aba.
+        // 🚀 Só sincroniza vínculos pessoa↔contrato se o front enviou
+        // explicitamente o campo. Isso evita zerar a relação numa edição
+        // parcial que não tocou na aba "Fiador / Codevedor".
         if ($request->has('guarantor_ids')) {
-            $this->syncContractGuarantors($id, (array) $request->input('guarantor_ids', []));
+            $this->syncContractGuarantors(
+                $id,
+                (array) $request->input('guarantor_ids', []),
+                Contract::ROLE_FIADOR
+            );
+        }
+        if ($request->has('codebtor_ids')) {
+            $this->syncContractGuarantors(
+                $id,
+                (array) $request->input('codebtor_ids', []),
+                Contract::ROLE_CODEVEDOR
+            );
         }
 
         // 🚀 Mesma lógica para os bens em garantia: só toca se o front mandou
@@ -301,13 +338,19 @@ class ContractController extends Controller
     }
 
     /**
-     * Sincroniza a tabela pivot contract_guarantor usando o método
-     * sync() do Eloquent — assim ganhamos automaticamente:
-     *   • detach do que saiu;
-     *   • attach do que entrou;
-     *   • timestamps createdAt/updatedAt da pivot (configurados no model).
+     * Sincroniza um papel específico (FIADOR ou CODEVEDOR) na pivot
+     * `contract_guarantor`. Como a relação no Model já filtra por
+     * `wherePivot('role', ...)`, o `syncWithPivotValues()` com o role
+     * desejado garante que:
+     *
+     *   • o detach automático mexe SÓ nos registros desse papel;
+     *   • o attach insere o role correto na pivot;
+     *   • timestamps createdAt/updatedAt são gerenciados pelo Eloquent.
+     *
+     * Esse desenho permite chamar o helper duas vezes para o mesmo contrato
+     * (uma para cada papel) sem que um sync apague o outro.
      */
-    private function syncContractGuarantors(int $contractId, array $guarantorIds): void
+    private function syncContractGuarantors(int $contractId, array $personIds, string $role): void
     {
         $contract = Contract::find($contractId);
         if (! $contract) {
@@ -315,11 +358,15 @@ class ContractController extends Controller
         }
 
         $clean = array_values(array_unique(array_filter(
-            array_map('intval', $guarantorIds),
+            array_map('intval', $personIds),
             fn ($id) => $id > 0
         )));
 
-        $contract->guarantors()->sync($clean);
+        $relation = $role === Contract::ROLE_CODEVEDOR
+            ? $contract->codebtors()
+            : $contract->guarantors();
+
+        $relation->syncWithPivotValues($clean, ['role' => $role]);
     }
 
     /**
