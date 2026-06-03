@@ -593,7 +593,18 @@ function ExpandedContractDetail({ contract, schedule, schedTotals, schedLoading,
             GARANTIAS / FIADORES
           </div>
           <div style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.5, background: "#fff", padding: 8, borderRadius: 4, border: "1px solid #e5e7eb" }}>
-            {contract.guarantors || contract.guarantees || "Fiadores solidários identificados no instrumento regulamentar da dívida."}
+            {(() => {
+              // Após a refatoração da pivot contract_guarantor, contract.guarantors
+              // chega como array de fiadores. Mantemos compatibilidade com o texto
+              // legado (string) caso o backend ainda devolva no formato antigo.
+              if (Array.isArray(contract.guarantors) && contract.guarantors.length > 0) {
+                return contract.guarantors.map((g: any) => g.name).join(", ");
+              }
+              if (typeof contract.guarantors === "string" && contract.guarantors.trim() !== "") {
+                return contract.guarantors;
+              }
+              return contract.guarantees || "Fiadores solidários identificados no instrumento regulamentar da dívida.";
+            })()}
           </div>
         </div>
       </div>

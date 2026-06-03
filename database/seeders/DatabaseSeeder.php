@@ -28,6 +28,9 @@ class DatabaseSeeder extends Seeder
             LoadAdicionaisAuditoriaSeeder::class,
 
             LoadContratosPendentesSeeder::class,
+
+            // 5. Fiadores institucionais (CRUD de fiadores)
+            GuarantorSeeder::class,
         ]);
     }
 }

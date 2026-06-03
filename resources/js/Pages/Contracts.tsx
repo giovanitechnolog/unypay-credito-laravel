@@ -1,14 +1,27 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   Plus, Search, FileText, CheckCircle, X, Edit2, Trash2, Upload, Eye,
   CreditCard, QrCode, UserCheck, Scale, Ban, RotateCcw, Paperclip,
   CircleDollarSign, Percent, Landmark, Shield, BookOpen,
+  UserPlus, Users, Sparkles, Building2, User as UserIcon,
 } from "lucide-react";
 import { Head, router } from "@inertiajs/react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
+import ConfirmDialog from "../Components/ConfirmDialog";
 import TableGroupBadges from "../Components/TableGroupBadges";
 import TableColumnPicker from "../Components/TableColumnPicker";
+import GuarantorQuickCreateModal, { QuickCreateMode } from "../Components/GuarantorQuickCreateModal";
+import GuarantorSearchModal, { GuarantorLite } from "../Components/GuarantorSearchModal";
+import {
+  GuarantorFormValues,
+  EMPTY_GUARANTOR_FORM,
+  maskCPF,
+  maskCNPJ,
+  maskCEP,
+  onlyDigits,
+} from "../Components/GuarantorFormFields";
+import { api, extractFirstError } from "../lib/api";
 import { useColumnVisibility } from "../hooks/useColumnVisibility";
 import {
   CONTRACTS_COLUMNS,
@@ -64,10 +77,54 @@ const TABS = [
   { key: "basico",     label: "Dados Básicos",         icon: FileText },
   { key: "financeiro", label: "Valores e Bancos",      icon: CircleDollarSign },
   { key: "taxas",      label: "Taxas e Encargos",      icon: Percent },
-  { key: "garantias",  label: "Garantias e Fiadores",  icon: Shield },
+  { key: "fiadores",   label: "Fiadores",              icon: UserCheck },
+  { key: "garantias",  label: "Garantias",             icon: Shield },
   { key: "regras",     label: "Regras Contratuais",    icon: BookOpen },
   { key: "bancarios",  label: "Dados Bancários",       icon: Landmark },
 ];
+
+/**
+ * Item de fiador associado ao contrato em edição.
+ *
+ * Existe em dois "estados":
+ *   - isFromDb=true  → veio do banco (já tem ID). Imutável: o usuário só pode remover.
+ *   - isFromDb=false → adicionado on-the-fly. Editável; será persistido apenas
+ *                       quando o contrato for salvo.
+ */
+type ContractGuarantor = {
+  /** Chave estável usada como key do React (também distingue novos antes do POST). */
+  localId: string;
+  /** Presente apenas quando isFromDb=true. */
+  id?: number;
+  isFromDb: boolean;
+  // ── Dados resumidos para a tabela ─────────────────────────
+  name: string;
+  personType: "PF" | "PJ";
+  document: string | null; // já formatado para exibição
+  // ── Dados completos (apenas para isFromDb=false, para reedição) ──
+  formValues?: GuarantorFormValues;
+};
+
+const newLocalId = () =>
+  // crypto.randomUUID falha em alguns browsers antigos; fallback timestamp+rand
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `g-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+/**
+ * Formata CPF/CNPJ para exibição na tabela (a partir dos dígitos persistidos).
+ */
+const formatGuarantorDocument = (doc: string | null | undefined, type: "PF" | "PJ"): string => {
+  const digits = (doc ?? "").replace(/\D/g, "");
+  if (!digits) return "—";
+  if (type === "PJ" && digits.length === 14) {
+    return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+  }
+  if (type === "PF" && digits.length === 11) {
+    return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
+  }
+  return digits;
+};
 
 // Tradução amigável dos tipos de conta para exibição na guia "Dados Bancários"
 const ACCOUNT_TYPE_LABELS: Record<string, string> = {
@@ -119,6 +176,22 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   const [sortCol, setSortCol] = useState<string>("code");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
+  // Diálogos de confirmação (excluir / cancelar / reativar)
+  const [confirmDelete, setConfirmDelete] = useState<any | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState<any | null>(null);
+  const [confirmReactivate, setConfirmReactivate] = useState<any | null>(null);
+
+  // 🚀 Estados da aba "Fiadores" — gerenciados em memória até o submit do contrato
+  const [selectedGuarantors, setSelectedGuarantors] = useState<ContractGuarantor[]>([]);
+  const [suggestedGuarantors, setSuggestedGuarantors] = useState<GuarantorLite[]>([]);
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [quickModalState, setQuickModalState] = useState<{
+    open: boolean;
+    mode: QuickCreateMode;
+    editIndex?: number;
+    initialValue?: Partial<GuarantorFormValues>;
+  }>({ open: false, mode: "create" });
+
   const selectedClientMeta = useMemo(() => {
     if (!form.clientId) return null;
     const clientFound = clients?.find((c: any) => c.id === form.clientId);
@@ -132,6 +205,95 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     if (!form.clientId) return null;
     return (clients ?? []).find((c: any) => Number(c.id) === Number(form.clientId)) ?? null;
   }, [clients, form.clientId]);
+
+  // 🚀 Carrega os fiadores já vinculados ao cliente (tabela client_guarantor) para
+  // exibi-los como "Sugeridos" na aba Fiadores. Roda apenas quando o cliente muda.
+  useEffect(() => {
+    if (!open) return;
+    if (!form.clientId) {
+      setSuggestedGuarantors([]);
+      return;
+    }
+    let cancelled = false;
+    api
+      .get<GuarantorLite[]>(`/api/clients/${form.clientId}/guarantors`)
+      .then(({ data }) => {
+        if (!cancelled) setSuggestedGuarantors(data ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setSuggestedGuarantors([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, form.clientId]);
+
+  /** IDs dos fiadores do banco já adicionados — usado para excluí-los do search. */
+  const selectedDbIds = useMemo(
+    () =>
+      selectedGuarantors
+        .filter((g) => g.isFromDb && typeof g.id === "number")
+        .map((g) => g.id as number),
+    [selectedGuarantors]
+  );
+
+  /**
+   * Adiciona um fiador do banco à tabela do contrato (sem duplicar).
+   * Usado tanto pelos chips "Sugeridos" quanto pelo modal de busca.
+   */
+  const addGuarantorFromDb = useCallback((g: GuarantorLite) => {
+    setSelectedGuarantors((prev) => {
+      if (prev.some((it) => it.isFromDb && it.id === g.id)) return prev;
+      return [
+        ...prev,
+        {
+          localId: newLocalId(),
+          id: g.id,
+          isFromDb: true,
+          name: g.name,
+          personType: g.personType,
+          document: g.document,
+        },
+      ];
+    });
+  }, []);
+
+  /**
+   * Abre o sub-modal em modo "view" (somente leitura) com TODOS os dados
+   * do fiador. Como a tabela na aba mantém apenas um resumo (nome, tipo,
+   * documento), precisamos buscar o detalhe completo no backend antes
+   * de exibir endereço, RG, nacionalidade, etc.
+   */
+  const openGuarantorViewModal = useCallback(async (guarantorId: number) => {
+    try {
+      const { data } = await api.get(`/api/guarantors/${guarantorId}`);
+      const g = data?.guarantor;
+      if (!g) {
+        toast.error("Fiador não encontrado.");
+        return;
+      }
+      const initialValue: Partial<GuarantorFormValues> = {
+        personType: g.personType,
+        name: g.name ?? "",
+        nationality: g.nationality ?? "",
+        maritalStatus: g.maritalStatus ?? "",
+        cpf: g.cpf ? maskCPF(g.cpf) : "",
+        rg: g.rg ?? "",
+        cnpj: g.cnpj ? maskCNPJ(g.cnpj) : "",
+        tradeName: g.tradeName ?? "",
+        stateRegistration: g.stateRegistration ?? "",
+        street: g.street ?? "",
+        number: g.number ?? "",
+        neighborhood: g.neighborhood ?? "",
+        city: g.city ?? "",
+        state: g.state ?? "",
+        zipCode: g.zipCode ? maskCEP(g.zipCode) : "",
+      };
+      setQuickModalState({ open: true, mode: "view", initialValue });
+    } catch (err) {
+      toast.error(extractFirstError(err, "Falha ao carregar dados do fiador."));
+    }
+  }, []);
 
   // 🚀 Juros Total = ((p × n) / q) − 1
   //   p = Valor da Prestação (installmentAmount)
@@ -191,6 +353,10 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     setExistingPdfNames([]);
     setExistingPdfPaths([]);
     setActiveTab("basico");
+    setSelectedGuarantors([]);
+    setSuggestedGuarantors([]);
+    setSearchModalOpen(false);
+    setQuickModalState({ open: false, mode: "create" });
   };
 
   const handleOpenCreate = () => {
@@ -254,6 +420,21 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       setExistingPdfPaths(c.contractPdfPath ? [c.contractPdfPath] : []);
     }
 
+    // 🚀 Popula a tabela de fiadores associados a partir do payload do backend.
+    // O ContractController@index agora devolve c.guarantors como array (NxN);
+    // o "?? []" cobre contratos antigos cuja coluna texto vinha como string.
+    const incomingGuarantors = Array.isArray(c.guarantors) ? c.guarantors : [];
+    setSelectedGuarantors(
+      incomingGuarantors.map((g: any) => ({
+        localId: newLocalId(),
+        id: g.id,
+        isFromDb: true,
+        name: g.name,
+        personType: g.personType,
+        document: g.document ?? null,
+      }))
+    );
+
     setActiveTab("basico");
     setOpen(true);
   };
@@ -298,7 +479,12 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     setExistingPdfPaths(prev => prev.filter((_, i) => i !== idx));
   };
 
-  const buildFormData = (): FormData => {
+  /**
+   * Monta o FormData do contrato. Recebe a lista FINAL de IDs de fiadores
+   * (banco + recém-criados via API), porque a função handleSubmit já
+   * resolveu as criações on-the-fly antes de chegar aqui.
+   */
+  const buildFormData = (finalGuarantorIds: number[]): FormData => {
     const fd = new FormData();
     Object.entries(form).forEach(([k, v]) => {
       if (v === undefined || v === null) return;
@@ -317,16 +503,99 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       if (existingPdfPaths.length === 0) fd.append("existingPdfPaths", "");
       if (existingPdfNames.length === 0) fd.append("existingPdfNames", "");
     }
+    // 🚀 Fiadores vinculados (NxN — tabela contract_guarantor)
+    finalGuarantorIds.forEach((id) => fd.append("guarantor_ids[]", String(id)));
+    if (finalGuarantorIds.length === 0) {
+      // Sentinel — sinaliza ao backend que a chave foi enviada (mesmo vazia)
+      // para que ele faça o detach completo na pivot.
+      fd.append("guarantor_ids", "");
+    }
     return fd;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  /**
+   * Persiste no banco os fiadores marcados como "Novo" (isFromDb=false) e
+   * devolve a lista final de IDs de fiadores prontos para o sync da pivot.
+   *
+   * Estratégia: faz POST sequencial em /api/guarantors com clientIds=[clientId]
+   * para já criar a vinculação cliente↔fiador na tabela client_guarantor.
+   */
+  const persistNewGuarantors = async (): Promise<number[]> => {
+    const finalIds: number[] = [];
+
+    for (const g of selectedGuarantors) {
+      if (g.isFromDb && typeof g.id === "number") {
+        finalIds.push(g.id);
+        continue;
+      }
+      // Fiador novo — persistir agora
+      if (!g.formValues) {
+        // Defesa: não deveria acontecer, mas evita 500 no backend
+        toast.error(`Fiador "${g.name}" sem dados completos.`);
+        throw new Error("guarantor-missing-data");
+      }
+      const fv = g.formValues;
+      const basePayload = {
+        personType: fv.personType,
+        name: fv.name,
+        street: fv.street,
+        number: fv.number,
+        neighborhood: fv.neighborhood,
+        city: fv.city,
+        state: fv.state.toUpperCase(),
+        zipCode: onlyDigits(fv.zipCode),
+        // 🔗 Já vincula ao cliente devedor — atende ao requisito do PRD
+        clientIds: form.clientId ? [form.clientId] : [],
+      };
+      const payload =
+        fv.personType === "PF"
+          ? {
+              ...basePayload,
+              nationality: fv.nationality,
+              maritalStatus: fv.maritalStatus,
+              cpf: onlyDigits(fv.cpf),
+              rg: fv.rg,
+              cnpj: null,
+              tradeName: null,
+              stateRegistration: null,
+            }
+          : {
+              ...basePayload,
+              cnpj: onlyDigits(fv.cnpj),
+              tradeName: fv.tradeName,
+              stateRegistration: fv.stateRegistration,
+              nationality: null,
+              maritalStatus: null,
+              cpf: null,
+              rg: null,
+            };
+      const { data } = await api.post("/api/guarantors", payload);
+      const createdId = Number(data?.guarantor?.id);
+      if (!createdId) throw new Error("guarantor-create-failed");
+      finalIds.push(createdId);
+    }
+
+    return finalIds;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.clientId) { toast.error("Selecione o cliente vinculado."); return; }
     setSubmitting(true);
 
+    let finalGuarantorIds: number[] = [];
+    try {
+      // 1️⃣ Persiste fiadores "Novo" antes de enviar o contrato
+      finalGuarantorIds = await persistNewGuarantors();
+    } catch (err) {
+      setSubmitting(false);
+      toast.error(extractFirstError(err, "Falha ao gravar fiador(es) novo(s) — verifique os dados."));
+      return;
+    }
+
+    // 2️⃣ Salva o contrato com os IDs prontos
     const url = editingId ? `/contracts/${editingId}` : "/contracts";
-    const fd = buildFormData();
+    const fd = buildFormData(finalGuarantorIds);
     if (editingId) fd.append("_method", "PUT");
 
     router.post(url, fd, {
@@ -359,30 +628,44 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
 
   const handleDelete = (item: any) => {
     const c = item.contract ?? item;
-    if (!confirm(`Excluir o contrato ${c.code}? Isso removerá permanentemente TODOS os arquivos anexos.`)) return;
-    router.delete(`/contracts/${c.id}`, {
-      preserveScroll: true,
-      onSuccess: () => toast.success("Contrato removido."),
-      onError: () => toast.error("Falha ao deletar o registro."),
-    });
+    setConfirmDelete({ ...c, _client: item.client_name ?? item.clientName ?? null });
   };
 
   const handleCancel = (item: any) => {
     const c = item.contract ?? item;
+    const enriched = { ...c, _client: item.client_name ?? item.clientName ?? null };
     if (c.status === "Cancelado") {
-      if (!confirm(`Reativar o contrato ${c.code}? O status voltará para "Ativo".`)) return;
-      router.post(`/contracts/${c.id}/reactivate`, {}, {
-        preserveScroll: true,
-        onSuccess: () => toast.success("Contrato reativado."),
-        onError: () => toast.error("Falha ao reativar o contrato."),
-      });
-      return;
+      setConfirmReactivate(enriched);
+    } else {
+      setConfirmCancel(enriched);
     }
-    if (!confirm(`Cancelar o contrato ${c.code}? O status passará para "Cancelado".`)) return;
-    router.post(`/contracts/${c.id}/cancel`, {}, {
+  };
+
+  // Handlers chamados pelos ConfirmDialog
+  const executeDelete = () => {
+    if (!confirmDelete) return;
+    router.delete(`/contracts/${confirmDelete.id}`, {
       preserveScroll: true,
-      onSuccess: () => toast.success("Contrato cancelado."),
-      onError: () => toast.error("Falha ao cancelar o contrato."),
+      onSuccess: () => { toast.success("Contrato removido."); setConfirmDelete(null); },
+      onError:   () => { toast.error("Falha ao deletar o registro."); setConfirmDelete(null); },
+    });
+  };
+
+  const executeCancel = () => {
+    if (!confirmCancel) return;
+    router.post(`/contracts/${confirmCancel.id}/cancel`, {}, {
+      preserveScroll: true,
+      onSuccess: () => { toast.success("Contrato cancelado."); setConfirmCancel(null); },
+      onError:   () => { toast.error("Falha ao cancelar o contrato."); setConfirmCancel(null); },
+    });
+  };
+
+  const executeReactivate = () => {
+    if (!confirmReactivate) return;
+    router.post(`/contracts/${confirmReactivate.id}/reactivate`, {}, {
+      preserveScroll: true,
+      onSuccess: () => { toast.success("Contrato reativado."); setConfirmReactivate(null); },
+      onError:   () => { toast.error("Falha ao reativar o contrato."); setConfirmReactivate(null); },
     });
   };
 
@@ -623,7 +906,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
             <div
               className="sigx-modal contracts-modal"
               style={{
-                width: "min(940px, 96vw)",
+                width: "min(1020px, 96vw)",
                 maxWidth: "96vw",
                 display: "flex",
                 flexDirection: "column",
@@ -1302,37 +1585,247 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                     </div>
                   )}
 
-                  {/* TAB 4: GARANTIAS */}
-                  {activeTab === "garantias" && (
+                  {/* TAB 4: FIADORES */}
+                  {activeTab === "fiadores" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                      {/* 🛠️ FIX 2: Removido o teste 'allFiadores' que quebrava o escopo e mantida a verificação limpa de metadados do cliente devedor */}
-                      {selectedClientMeta && (selectedClientMeta.fiador1Nome || selectedClientMeta.fiador2Nome) && (
-                        <div style={{ padding: 10, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, marginBottom: 4 }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "#1e293b", display: "block", marginBottom: 6 }}>Fiadores localizados no cadastro deste devedor:</span>
-                          <div style={{ display: "flex", gap: 8 }}>
-                            {selectedClientMeta.fiador1Nome && (
-                              <button
-                                type="button"
-                                onClick={() => setForm(p => ({ ...p, guarantors: `[FIADOR 1] Nome: ${selectedClientMeta.fiador1Nome}, CPF: ${selectedClientMeta.fiador1Cpf}, Tel: ${selectedClientMeta.fiador1Telefone}, Endereço: ${selectedClientMeta.fiador1Endereco}, ${selectedClientMeta.fiador1Cidade}/${selectedClientMeta.fiador1Estado}\n${p.guarantors}` }))}
-                                className="btn-secondary" style={{ fontSize: 11, display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 8px" }}
-                              >
-                                <UserCheck size={12} color="#2563eb" /> Injetar {selectedClientMeta.fiador1Nome}
-                              </button>
-                            )}
-                            {selectedClientMeta.fiador2Nome && (
-                              <button
-                                type="button"
-                                onClick={() => setForm(p => ({ ...p, guarantors: `[FIADOR 2] Nome: ${selectedClientMeta.fiador2Nome}, CPF: ${selectedClientMeta.fiador2Cpf}, Tel: ${selectedClientMeta.fiador2Telefone}, Endereço: ${selectedClientMeta.fiador2Endereco}, ${selectedClientMeta.fiador2Cidade}/${selectedClientMeta.fiador2Estado}\n${p.guarantors}` }))}
-                                className="btn-secondary" style={{ fontSize: 11, display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 8px" }}
-                              >
-                                <UserCheck size={12} color="#6b21a8" /> Injetar {selectedClientMeta.fiador2Nome}
-                              </button>
-                            )}
-                          </div>
+                      {!form.clientId && (
+                        <div style={{ padding: 12, background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 6, fontSize: 11, color: "#92400e" }}>
+                          Selecione um cliente na guia <strong>Dados Básicos</strong> antes de adicionar fiadores.
                         </div>
                       )}
-                      <div><label className="sigx-label">GARANTIAS REAIS ACOPLADAS</label><textarea className="sigx-input" value={form.guarantees} onChange={n("guarantees")} rows={3} /></div>
-                      <div><label className="sigx-label">MINUTA DETALHADA DOS FIADORES / COOBRIGADOS</label><textarea className="sigx-input" value={form.guarantors} onChange={n("guarantors")} rows={4} placeholder="Clique nos botões acima para puxar os fiadores cadastrados na ficha do cliente..." /></div>
+
+                      {/* 🚀 Sugeridos: fiadores já vinculados a este cliente (tabela client_guarantor) */}
+                      {form.clientId && suggestedGuarantors.length > 0 && (() => {
+                        const stillToAdd = suggestedGuarantors.filter(
+                          (g) => !selectedGuarantors.some((s) => s.isFromDb && s.id === g.id)
+                        );
+                        if (stillToAdd.length === 0) return null;
+                        return (
+                          <div
+                            style={{
+                              padding: 12,
+                              background: "#f0f9ff",
+                              border: "1px solid #bae6fd",
+                              borderRadius: 8,
+                            }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                              <Sparkles size={13} color="#0369a1" />
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "#0c4a6e" }}>
+                                Fiadores Sugeridos para este cliente
+                              </span>
+                              <span style={{ fontSize: 10, color: "#475569" }}>
+                                — clique para adicionar ao contrato
+                              </span>
+                            </div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                              {stillToAdd.map((g) => (
+                                <button
+                                  key={g.id}
+                                  type="button"
+                                  onClick={() => addGuarantorFromDb(g)}
+                                  className="keep-case"
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                    padding: "4px 10px",
+                                    background: "white",
+                                    border: "1px dashed #38bdf8",
+                                    borderRadius: 16,
+                                    fontSize: 11,
+                                    color: "#0c4a6e",
+                                    fontWeight: 600,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  <Plus size={11} /> {g.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Botões de ação principais */}
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          onClick={() => setQuickModalState({ open: true, mode: "create" })}
+                          className="btn-primary"
+                          disabled={!form.clientId}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            padding: "7px 14px",
+                            fontSize: 11,
+                            opacity: form.clientId ? 1 : 0.5,
+                            cursor: form.clientId ? "pointer" : "not-allowed",
+                          }}
+                        >
+                          <UserPlus size={12} /> Novo Fiador
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSearchModalOpen(true)}
+                          className="btn-secondary"
+                          disabled={!form.clientId}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            padding: "7px 14px",
+                            fontSize: 11,
+                            opacity: form.clientId ? 1 : 0.5,
+                            cursor: form.clientId ? "pointer" : "not-allowed",
+                          }}
+                        >
+                          <Search size={12} /> Buscar Fiadores
+                        </button>
+                      </div>
+
+                      {/* Tabela de fiadores associados */}
+                      <div
+                        style={{
+                          border: "1px solid #e5e7eb",
+                          borderRadius: 8,
+                          overflow: "hidden",
+                          background: "white",
+                        }}
+                      >
+                        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11 }}>
+                          <thead>
+                            <tr style={{ background: "#f1f5f9" }}>
+                              <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 70 }}>Tipo</th>
+                              <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>Nome / Razão Social</th>
+                              <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 160 }}>Documento</th>
+                              <th style={{ padding: "7px 10px", textAlign: "center", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 110 }}>Origem</th>
+                              <th style={{ padding: "7px 10px", textAlign: "center", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 110 }}>Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedGuarantors.length === 0 ? (
+                              <tr>
+                                <td colSpan={5} style={{ padding: 28, textAlign: "center", color: "#94a3b8" }}>
+                                  <Users size={24} style={{ opacity: 0.3, margin: "0 auto 6px", display: "block" }} />
+                                  <span style={{ fontSize: 11.5 }}>
+                                    Nenhum fiador vinculado. Use os botões acima para adicionar.
+                                  </span>
+                                </td>
+                              </tr>
+                            ) : (
+                              selectedGuarantors.map((g, idx) => {
+                                const isPJ = g.personType === "PJ";
+                                return (
+                                  <tr key={g.localId} style={{ background: idx % 2 === 1 ? "#fafafa" : "white" }}>
+                                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9" }}>
+                                      <span
+                                        style={{
+                                          display: "inline-flex",
+                                          alignItems: "center",
+                                          gap: 4,
+                                          padding: "2px 8px",
+                                          borderRadius: 4,
+                                          fontSize: 9,
+                                          fontWeight: 700,
+                                          background: isPJ ? "#eff6ff" : "#ecfdf5",
+                                          color: isPJ ? "#1e40af" : "#065f46",
+                                        }}
+                                      >
+                                        {isPJ ? <Building2 size={10} /> : <UserIcon size={10} />}
+                                        {g.personType}
+                                      </span>
+                                    </td>
+                                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", fontWeight: 600, color: "#0f172a" }}>
+                                      {g.name}
+                                    </td>
+                                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: "#475569" }}>
+                                      {formatGuarantorDocument(g.document, g.personType)}
+                                    </td>
+                                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", textAlign: "center" }}>
+                                      <span
+                                        style={{
+                                          display: "inline-flex",
+                                          alignItems: "center",
+                                          gap: 4,
+                                          padding: "2px 8px",
+                                          borderRadius: 4,
+                                          fontSize: 9,
+                                          fontWeight: 700,
+                                          background: g.isFromDb ? "#dcfce7" : "#fef3c7",
+                                          color: g.isFromDb ? "#166534" : "#92400e",
+                                        }}
+                                      >
+                                        {g.isFromDb ? <CheckCircle size={10} /> : <Sparkles size={10} />}
+                                        {g.isFromDb ? "Cadastrado" : "Novo"}
+                                      </span>
+                                    </td>
+                                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", textAlign: "center" }}>
+                                      <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
+                                        {g.isFromDb ? (
+                                          <button
+                                            type="button"
+                                            className="btn-icon"
+                                            title="Visualizar dados"
+                                            onClick={() => g.id && openGuarantorViewModal(g.id)}
+                                          >
+                                            <Eye size={11} style={{ color: "#2563eb" }} />
+                                          </button>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            className="btn-icon"
+                                            title="Editar fiador"
+                                            onClick={() => setQuickModalState({
+                                              open: true,
+                                              mode: "edit-new",
+                                              editIndex: idx,
+                                              initialValue: g.formValues ?? EMPTY_GUARANTOR_FORM,
+                                            })}
+                                          >
+                                            <Edit2 size={11} />
+                                          </button>
+                                        )}
+                                        <button
+                                          type="button"
+                                          className="btn-icon text-danger"
+                                          title="Remover do contrato"
+                                          onClick={() => setSelectedGuarantors((prev) => prev.filter((_, i) => i !== idx))}
+                                        >
+                                          <Trash2 size={11} />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="keep-case" style={{ fontSize: 10.5, color: "#64748b", lineHeight: 1.5 }}>
+                        Fiadores marcados como <strong style={{ color: "#92400e" }}>Novo</strong> serão cadastrados e
+                        vinculados ao cliente automaticamente quando você salvar o contrato. Os marcados como{" "}
+                        <strong style={{ color: "#166534" }}>Cadastrado</strong> não podem ser editados aqui (edite-os na tela de Fiadores).
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 5: GARANTIAS (apenas garantias reais + confissão de dívida) */}
+                  {activeTab === "garantias" && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                      <div>
+                        <label className="sigx-label">GARANTIAS REAIS ACOPLADAS</label>
+                        <textarea
+                          className="sigx-input"
+                          value={form.guarantees}
+                          onChange={n("guarantees")}
+                          rows={4}
+                          placeholder="Descreva as garantias reais (imóveis, veículos, recebíveis, equipamentos, etc.)..."
+                        />
+                      </div>
 
                       {/* 🚀 Confissão de Dívida */}
                       <label
@@ -1538,6 +2031,107 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
         )}
 
       </div>
+
+      {/* ── DIÁLOGOS DE CONFIRMAÇÃO ─────────────────────────────────────── */}
+      <ConfirmDialog
+        open={!!confirmDelete}
+        tone="danger"
+        title="Excluir Contrato"
+        description="Esta ação remove o contrato em definitivo, junto com todos os arquivos digitais anexados. Não é possível desfazer."
+        entityLabel="Contrato"
+        entityName={confirmDelete?._client ? `${confirmDelete?.code} · ${confirmDelete?._client}` : confirmDelete?.code}
+        entityDetail={confirmDelete?.contractName}
+        consequences={[
+          "Todos os PDFs e documentos vinculados serão apagados do storage.",
+          "Lançamentos e parcelas associados também serão removidos em cascata.",
+        ]}
+        confirmLabel="Excluir Contrato"
+        onConfirm={executeDelete}
+        onClose={() => setConfirmDelete(null)}
+      />
+
+      <ConfirmDialog
+        open={!!confirmCancel}
+        tone="warning"
+        icon={Ban}
+        title="Cancelar Contrato"
+        description="O contrato passará para o status &quot;Cancelado&quot;. Os dados ficam preservados e a operação pode ser revertida posteriormente."
+        entityLabel="Contrato"
+        entityName={confirmCancel?._client ? `${confirmCancel?.code} · ${confirmCancel?._client}` : confirmCancel?.code}
+        entityDetail={confirmCancel?.contractName}
+        consequences={[
+          "O contrato deixará de aparecer como ativo nos relatórios operacionais.",
+          "Você poderá reativá-lo a qualquer momento pelo botão de reativação.",
+        ]}
+        confirmLabel="Cancelar Contrato"
+        onConfirm={executeCancel}
+        onClose={() => setConfirmCancel(null)}
+      />
+
+      <ConfirmDialog
+        open={!!confirmReactivate}
+        tone="info"
+        icon={RotateCcw}
+        title="Reativar Contrato"
+        description={'O contrato voltará ao status "Ativo" e passará a ser considerado novamente nos relatórios e cobranças.'}
+        entityLabel="Contrato"
+        entityName={confirmReactivate?._client ? `${confirmReactivate?.code} · ${confirmReactivate?._client}` : confirmReactivate?.code}
+        entityDetail={confirmReactivate?.contractName}
+        confirmLabel="Reativar Contrato"
+        onConfirm={executeReactivate}
+        onClose={() => setConfirmReactivate(null)}
+      />
+
+      {/* ── SUB-MODAIS DA ABA "FIADORES" ─────────────────────────────────── */}
+      <GuarantorQuickCreateModal
+        open={quickModalState.open}
+        mode={quickModalState.mode}
+        initialValue={quickModalState.initialValue}
+        onClose={() => setQuickModalState({ open: false, mode: "create" })}
+        onConfirm={(values) => {
+          // Se for edição de um "Novo" já adicionado, substitui pelo índice
+          if (quickModalState.mode === "edit-new" && typeof quickModalState.editIndex === "number") {
+            const idx = quickModalState.editIndex;
+            setSelectedGuarantors((prev) =>
+              prev.map((it, i) =>
+                i === idx
+                  ? {
+                      ...it,
+                      name: values.name,
+                      personType: values.personType,
+                      document: values.personType === "PJ" ? onlyDigits(values.cnpj) : onlyDigits(values.cpf),
+                      formValues: values,
+                    }
+                  : it
+              )
+            );
+          } else {
+            // Novo on-the-fly
+            setSelectedGuarantors((prev) => [
+              ...prev,
+              {
+                localId: newLocalId(),
+                isFromDb: false,
+                name: values.name,
+                personType: values.personType,
+                document: values.personType === "PJ" ? onlyDigits(values.cnpj) : onlyDigits(values.cpf),
+                formValues: values,
+              },
+            ]);
+          }
+          setQuickModalState({ open: false, mode: "create" });
+        }}
+      />
+
+      <GuarantorSearchModal
+        open={searchModalOpen}
+        excludeIds={selectedDbIds}
+        onClose={() => setSearchModalOpen(false)}
+        onPick={(picked) => {
+          picked.forEach((g) => addGuarantorFromDb(g));
+          setSearchModalOpen(false);
+        }}
+      />
     </UnyPayLayout>
   );
 }

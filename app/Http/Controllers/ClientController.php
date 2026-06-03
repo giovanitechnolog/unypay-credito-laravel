@@ -147,10 +147,39 @@ class ClientController extends Controller
 
     public function show(int $id)
     {
-        $client = Client::with('contracts')->findOrFail($id);
-        
+        // 🚀 Inclui os fiadores junto com os contratos para que a página
+        // ClientDetails (e qualquer outro consumidor Inertia) tenha acesso
+        // direto à relação NxN client_guarantor.
+        $client = Client::with(['contracts', 'guarantors'])->findOrFail($id);
+
         return inertia('ClientDetails', [
             'client' => $client
         ]);
+    }
+
+    /**
+     * GET /api/clients/{id}/guarantors — retorna em JSON apenas os fiadores
+     * vinculados ao cliente. Usado pelo modal de Contratos para preencher
+     * a seção "Fiadores Sugeridos" da aba Garantias e Fiadores quando o
+     * operador escolhe o cliente devedor.
+     *
+     * Endpoint dedicado e leve (sem trazer contratos, notes, etc.).
+     */
+    public function guarantors(int $id): \Illuminate\Http\JsonResponse
+    {
+        $client = Client::findOrFail($id);
+
+        $rows = $client->guarantors()
+            ->select(['guarantors.id', 'guarantors.name', 'guarantors.personType', 'guarantors.cpf', 'guarantors.cnpj'])
+            ->orderBy('guarantors.name')
+            ->get()
+            ->map(fn ($g) => [
+                'id'         => $g->id,
+                'name'       => $g->name,
+                'personType' => $g->personType,
+                'document'   => $g->personType === 'PJ' ? $g->cnpj : $g->cpf,
+            ]);
+
+        return response()->json($rows);
     }
 }
