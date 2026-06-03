@@ -138,8 +138,9 @@ export default function GuarantorSearchModal({
             alignItems: "center",
             justifyContent: "space-between",
             padding: "14px 22px",
-            background: "linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%)",
+            background: "linear-gradient(135deg, #1e2139 0%, #2d3154 100%)",
             color: "white",
+            borderBottom: "1px solid #2d3154",
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -148,7 +149,7 @@ export default function GuarantorSearchModal({
                 width: 34,
                 height: 34,
                 borderRadius: 8,
-                background: "rgba(255,255,255,0.15)",
+                background: "rgba(255,255,255,0.12)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -156,18 +157,18 @@ export default function GuarantorSearchModal({
             >
               <ShieldCheck size={16} />
             </div>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Buscar Fiadores Cadastrados</div>
-              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.75)" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>Buscar Fiadores Cadastrados</span>
+              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>
                 Selecione um ou mais fiadores do banco para vincular ao contrato
-              </div>
+              </span>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
             style={{
-              background: "rgba(255,255,255,0.12)",
+              background: "rgba(255,255,255,0.08)",
               border: "none",
               cursor: "pointer",
               color: "white",

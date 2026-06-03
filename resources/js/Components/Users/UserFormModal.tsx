@@ -154,32 +154,58 @@ export default function UserFormModal({
       <div
         style={{
           background: "white",
-          borderRadius: 12,
-          width: "100%",
-          maxWidth: 480,
-          boxShadow: "0 10px 40px rgba(0,0,0,0.18)",
+          borderRadius: 10,
+          width: "min(520px, 96vw)",
+          maxWidth: "96vw",
+          boxShadow: "0 24px 60px rgba(15, 23, 42, 0.25)",
           overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
         }}
         onClick={(e) => e.stopPropagation()}
       >
         <header
           style={{
-            padding: "16px 20px",
-            borderBottom: "1px solid #e5e7eb",
             display: "flex",
-            justifyContent: "space-between",
             alignItems: "center",
+            justifyContent: "space-between",
+            padding: "14px 22px",
+            background: "linear-gradient(135deg, #1e2139 0%, #2d3154 100%)",
+            color: "white",
+            borderBottom: "1px solid #2d3154",
           }}
         >
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#111827" }}>
-            {isEdit ? "Editar usuário" : "Novo usuário"}
-          </h2>
-          <button onClick={onClose} style={closeBtn} aria-label="Fechar">
-            <X size={18} />
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 8, background: "rgba(255,255,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <UserIcon size={16} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
+                {isEdit ? "Editar usuário" : "Novo usuário"}
+              </span>
+              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>
+                {isEdit ? `Atualizando registro #${user?.id}` : "Preencha os dados de acesso e perfil"}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Fechar"
+            style={{
+              background: "rgba(255,255,255,0.08)",
+              border: "none",
+              cursor: "pointer",
+              color: "white",
+              width: 30, height: 30,
+              borderRadius: 6,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <X size={16} />
           </button>
         </header>
 
-        <form onSubmit={submit} style={{ padding: 20 }}>
+        <form onSubmit={submit} style={{ padding: 22, background: "white" }}>
           {/* Upload da foto */}
           <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
             <div style={{ position: "relative" }}>
@@ -326,16 +352,6 @@ const inputStyle: React.CSSProperties = {
   fontSize: 14,
   background: "white",
   outline: "none",
-};
-
-const closeBtn: React.CSSProperties = {
-  background: "none",
-  border: "none",
-  cursor: "pointer",
-  color: "#6b7280",
-  padding: 4,
-  borderRadius: 6,
-  display: "flex",
 };
 
 const secondaryBtn: React.CSSProperties = {

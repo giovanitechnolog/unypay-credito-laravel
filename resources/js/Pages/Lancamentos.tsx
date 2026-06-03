@@ -824,10 +824,56 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
       {/* ══ MODAL PRICE ═════════════════════════════════════════════════ */}
       {priceId && (
         <div className="sigx-modal-overlay" onClick={e => { if (e.target===e.currentTarget) setPriceId(null); }}>
-          <div className="sigx-modal" style={{ maxWidth:900 }}>
-            <div className="sigx-modal-header">
-              <span className="sigx-modal-title"><Calculator size={15} style={{ marginRight:6, verticalAlign:"middle" }}/>Tabela Price — {priceData?.contractName ?? "..."}</span>
-              <button onClick={() => setPriceId(null)} style={{ background:"none", border:"none", cursor:"pointer", color:"var(--muted-foreground)", display:"flex" }}><X size={18}/></button>
+          <div
+            className="sigx-modal"
+            style={{
+              width: "min(960px, 96vw)",
+              maxWidth: "96vw",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              boxShadow: "0 24px 60px rgba(15, 23, 42, 0.25)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "14px 22px",
+                background: "linear-gradient(135deg, #1e2139 0%, #2d3154 100%)",
+                color: "white",
+                borderBottom: "1px solid #2d3154",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 8, background: "rgba(255,255,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Calculator size={16} />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
+                    Tabela Price — {priceData?.contractName ?? "..."}
+                  </span>
+                  <span style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>
+                    Memória de cálculo das parcelas conforme amortização Price
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPriceId(null)}
+                style={{
+                  background: "rgba(255,255,255,0.08)",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "white",
+                  width: 30, height: 30,
+                  borderRadius: 6,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                <X size={16} />
+              </button>
             </div>
             {priceLoading ? (
               <div style={{ padding:40, textAlign:"center" }}>
@@ -875,7 +921,7 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
                 </div>
               </>
             ) : null}
-            <div className="sigx-modal-footer">
+            <div className="sigx-modal-footer" style={{ padding: "12px 22px", borderTop: "1px solid #e5e7eb", background: "#f8fafc", display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button className="btn-primary" onClick={() => setPriceId(null)}>Fechar</button>
             </div>
           </div>

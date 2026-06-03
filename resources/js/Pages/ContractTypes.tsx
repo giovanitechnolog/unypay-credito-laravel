@@ -173,7 +173,7 @@ export default function ContractTypes() {
                       <td style={{ padding: "12px 14px", textAlign: "right" }}>
                         <div style={{ display: "inline-flex", gap: 4 }}>
                           <button onClick={() => openEdit(t)} className="btn-icon" title="Editar Estrutura"><Edit2 size={13} /></button>
-                          <button onClick={() => setDeleteType(t)} className="btn-icon text-danger" title="Excluir"><Trash2 size={13} /></button>
+                          <button onClick={() => setDeleteType(t)} className="btn-icon" title="Excluir" style={{ color: "#dc2626" }}><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>
@@ -188,19 +188,66 @@ export default function ContractTypes() {
       {/* ── MODAL: CADASTRO / EDIÇÃO ────────────────────────────────────────── */}
       {formOpen && (
         <div className="sigx-modal-overlay" onMouseDown={() => setFormOpen(false)}>
-          <div className="sigx-modal" style={{ maxWidth: 440, width: "100%" }} onMouseDown={e => e.stopPropagation()}>
-            <div className="sigx-modal-header">
-              <span className="sigx-modal-title">{selectedType ? "Editar Modelo de Contrato" : "Criar Novo Modelo estrutural"}</span>
-              <button onClick={() => setFormOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8" }}><X size={18} /></button>
+          <div
+            className="sigx-modal"
+            style={{
+              width: "min(480px, 96vw)",
+              maxWidth: "96vw",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              boxShadow: "0 24px 60px rgba(15, 23, 42, 0.25)",
+            }}
+            onMouseDown={e => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "14px 22px",
+                background: "linear-gradient(135deg, #1e2139 0%, #2d3154 100%)",
+                color: "white",
+                borderBottom: "1px solid #2d3154",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 8, background: "rgba(255,255,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Layers size={16} />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
+                    {selectedType ? "Editar Modelo de Contrato" : "Novo Modelo de Contrato"}
+                  </span>
+                  <span style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>
+                    {selectedType ? `Atualizando registro #${selectedType.id}` : "Defina o nome do modelo estrutural"}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFormOpen(false)}
+                style={{
+                  background: "rgba(255,255,255,0.08)",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "white",
+                  width: 30, height: 30,
+                  borderRadius: 6,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                <X size={16} />
+              </button>
             </div>
             <form onSubmit={handleFormSubmit}>
-              <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+              <div className="sigx-modal-body" style={{ padding: 22, display: "flex", flexDirection: "column", gap: 14, background: "white" }}>
                 <div>
                   <label className="sigx-label">NOME DO MODELO / TIPO *</label>
                   <input type="text" className="sigx-input" placeholder="Ex: Mútuo Financeiro, Confissão de Dívida" value={formData.name} onChange={e => setFormData({ name: e.target.value })} required maxLength={255} />
                 </div>
               </div>
-              <div className="sigx-modal-footer">
+              <div className="sigx-modal-footer" style={{ padding: "12px 22px", borderTop: "1px solid #e5e7eb", background: "#f8fafc", display: "flex", justifyContent: "flex-end", gap: 8 }}>
                 <button type="button" className="btn-secondary" onClick={() => setFormOpen(false)} disabled={submitting}>Cancelar</button>
                 <button type="submit" className="btn-primary" disabled={submitting}>{submitting ? "Gravando..." : "Salvar Modelo"}</button>
               </div>

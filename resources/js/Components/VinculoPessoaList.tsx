@@ -313,8 +313,9 @@ export default function VinculoPessoaList({
                         )}
                         <button
                           type="button"
-                          className="btn-icon text-danger"
+                          className="btn-icon"
                           title={labels.removeTitle}
+                          style={{ color: "#dc2626" }}
                           onClick={() => onRemove(idx)}
                         >
                           <Trash2 size={11} />

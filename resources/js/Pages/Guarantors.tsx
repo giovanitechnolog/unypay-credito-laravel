@@ -321,8 +321,8 @@ export default function GuarantorsPage() {
     } else {
       personalIssue =
         cnpjDigits.length !== 14         ? "CNPJ (14 dígitos)" :
-        !formData.tradeName.trim()       ? "NOME FANTASIA" :
-        !formData.stateRegistration.trim() ? "INSCRIÇÃO ESTADUAL" : null;
+        !formData.tradeName.trim()       ? "NOME FANTASIA" : null;
+      // Inscrição Estadual é opcional (PJs podem ser isentas).
     }
 
     if (personalIssue) {
@@ -610,7 +610,7 @@ export default function GuarantorsPage() {
                       <td style={{ padding: "10px 14px", textAlign: "right" }}>
                         <div style={{ display: "inline-flex", gap: 4 }}>
                           <button onClick={() => openEdit(g)} className="btn-icon" title="Editar Fiador"><Edit2 size={13} /></button>
-                          <button onClick={() => setDeleteModal(g)} className="btn-icon text-danger" title="Remover Fiador"><Trash2 size={13} /></button>
+                          <button onClick={() => setDeleteModal(g)} className="btn-icon" title="Remover Fiador" style={{ color: "#dc2626" }}><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>
@@ -895,14 +895,13 @@ export default function GuarantorsPage() {
                               />
                             </div>
                             <div>
-                              <label className="sigx-label">INSCRIÇÃO ESTADUAL *</label>
+                              <label className="sigx-label">INSCRIÇÃO ESTADUAL</label>
                               <input
                                 type="text"
                                 className="sigx-input"
                                 placeholder='Número ou "ISENTO"'
                                 value={formData.stateRegistration}
                                 onChange={e => setFormData(p => ({ ...p, stateRegistration: e.target.value }))}
-                                required
                               />
                             </div>
                           </div>

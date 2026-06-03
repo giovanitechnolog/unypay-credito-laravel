@@ -47,7 +47,8 @@ class StoreGuarantorRequest extends FormRequest
             // ── Campos exclusivos de Pessoa Jurídica ───────────────────────
             'cnpj'              => ['required_if:personType,PJ', 'nullable', 'string', 'size:14', 'unique:guarantors,cnpj'],
             'tradeName'         => ['required_if:personType,PJ', 'nullable', 'string', 'max:255'],
-            'stateRegistration' => ['required_if:personType,PJ', 'nullable', 'string', 'max:30'],
+            // Inscrição Estadual é opcional (PJs podem ser isentas / sem cadastro).
+            'stateRegistration' => ['nullable', 'string', 'max:30'],
 
             // ── Endereço — opcional (mas validado por formato quando preenchido) ──
             'street'            => ['nullable', 'string', 'max:255'],
@@ -79,7 +80,6 @@ class StoreGuarantorRequest extends FormRequest
             'cnpj.size'                  => 'O CNPJ deve conter 14 dígitos numéricos.',
             'cnpj.unique'                => 'Já existe um fiador cadastrado com este CNPJ.',
             'tradeName.required_if'      => 'Informe o Nome Fantasia.',
-            'stateRegistration.required_if' => 'Informe a Inscrição Estadual (ou "ISENTO").',
 
             'state.size'                 => 'A UF deve ter 2 caracteres (ex: MG).',
             'zipCode.size'               => 'O CEP deve conter 8 dígitos numéricos.',
