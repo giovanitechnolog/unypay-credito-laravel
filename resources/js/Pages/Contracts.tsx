@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   Plus, Search, FileText, CheckCircle, X, Edit2, Trash2, Upload, Eye,
-  CreditCard, QrCode, UserCheck, Scale, Ban, RotateCcw, Paperclip,
-  CircleDollarSign, Percent, Landmark, Shield, BookOpen,
+  CreditCard, QrCode, UserCheck, Scale, Paperclip,
+  CircleDollarSign, Percent, Shield, BookOpen,
   UserPlus, Users, Sparkles, Building2, User as UserIcon,
   Car, Home,
 } from "lucide-react";
@@ -43,7 +43,11 @@ import {
 
 const fmt = (v: number | string) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(v));
 const fmtDate = (d?: string | null) => d ? new Date(d + "T00:00:00").toLocaleDateString("pt-BR") : "—";
-const fmtPct = (v: number | string) => `${(Number(v) * 100).toFixed(2)}%`;
+// Formata percentual no padrão pt-BR (mesma "linguagem" numérica usada nos
+// valores monetários — separador de milhar com ponto e decimal com vírgula).
+// Ex.: 0.123456 → "12,35%" · 12.34567 → "1.234,57%"
+const fmtPct = (v: number | string) =>
+  `${new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v) * 100)}%`;
 
 const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
   "Ativo":        { bg: "#d1fae5", color: "#065f46" },
@@ -90,7 +94,6 @@ const TABS = [
   { key: "fiadores",   label: "Fiador / Codevedor",   icon: UserCheck },
   { key: "garantias",  label: "Garantias",             icon: Shield },
   { key: "regras",     label: "Regras Contratuais",    icon: BookOpen },
-  { key: "bancarios",  label: "Dados Bancários",       icon: Landmark },
 ];
 
 /**
@@ -222,23 +225,6 @@ const formatAssetDetail = (a: ContractAssetItem): string => {
   ].filter(Boolean).join(" · ") || "—";
 };
 
-// Tradução amigável dos tipos de conta para exibição na guia "Dados Bancários"
-const ACCOUNT_TYPE_LABELS: Record<string, string> = {
-  corrente: "Corrente",
-  poupanca: "Poupança",
-  pagamentos: "Pagamentos",
-  salario: "Conta Salário",
-  conjunta: "Conta Conjunta",
-};
-
-// Separa o código do banco do nome, dado que o cliente grava no formato "001 - Banco do Brasil S.A."
-function splitBank(label?: string): { code: string; name: string } {
-  if (!label) return { code: "", name: "" };
-  const match = label.match(/^\s*(\d{3,4})\s*[-–]\s*(.+)$/);
-  if (match) return { code: match[1], name: match[2].trim() };
-  return { code: "", name: label.trim() };
-}
-
 const headerCellStyle: React.CSSProperties = {
   background: "#f1f5f9", color: "#334155",
   padding: "5px 7px", fontSize: 9, fontWeight: 700,
@@ -314,10 +300,8 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   const [sortCol, setSortCol] = useState<string>("code");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
-  // Diálogos de confirmação (excluir / cancelar / reativar)
+  // Diálogos de confirmação (apenas exclusão — cancelar/reativar removidos)
   const [confirmDelete, setConfirmDelete] = useState<any | null>(null);
-  const [confirmCancel, setConfirmCancel] = useState<any | null>(null);
-  const [confirmReactivate, setConfirmReactivate] = useState<any | null>(null);
 
   // 🚀 Estados da aba "Fiador / Codevedor" — gerenciados em memória até o submit.
   // Mantemos LISTAS SEPARADAS por papel (FIADOR / CODEVEDOR), pois o backend
@@ -357,7 +341,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   }, [form.clientId, clients]);
 
   // 🚀 Cliente vinculado completo — usado nas guias "Dados Básicos" (CNPJ/CPF, CEP, Endereço)
-  // e "Dados Bancários" (lista read-only de contas + PIX).
+  // e "Valores e Bancos" (lista de contas para escolha da conta de cobrança).
   const selectedClient = useMemo(() => {
     if (!form.clientId) return null;
     return (clients ?? []).find((c: any) => Number(c.id) === Number(form.clientId)) ?? null;
@@ -877,16 +861,6 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     setConfirmDelete({ ...c, _client: item.client_name ?? item.clientName ?? null });
   };
 
-  const handleCancel = (item: any) => {
-    const c = item.contract ?? item;
-    const enriched = { ...c, _client: item.client_name ?? item.clientName ?? null };
-    if (c.status === "Cancelado") {
-      setConfirmReactivate(enriched);
-    } else {
-      setConfirmCancel(enriched);
-    }
-  };
-
   // Handlers chamados pelos ConfirmDialog
   const executeDelete = () => {
     if (!confirmDelete) return;
@@ -894,24 +868,6 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       preserveScroll: true,
       onSuccess: () => { toast.success("Contrato removido."); setConfirmDelete(null); },
       onError:   () => { toast.error("Falha ao deletar o registro."); setConfirmDelete(null); },
-    });
-  };
-
-  const executeCancel = () => {
-    if (!confirmCancel) return;
-    router.post(`/contracts/${confirmCancel.id}/cancel`, {}, {
-      preserveScroll: true,
-      onSuccess: () => { toast.success("Contrato cancelado."); setConfirmCancel(null); },
-      onError:   () => { toast.error("Falha ao cancelar o contrato."); setConfirmCancel(null); },
-    });
-  };
-
-  const executeReactivate = () => {
-    if (!confirmReactivate) return;
-    router.post(`/contracts/${confirmReactivate.id}/reactivate`, {}, {
-      preserveScroll: true,
-      onSuccess: () => { toast.success("Contrato reativado."); setConfirmReactivate(null); },
-      onError:   () => { toast.error("Falha ao reativar o contrato."); setConfirmReactivate(null); },
     });
   };
 
@@ -1097,22 +1053,22 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                         })}
                         <td style={tdCenter}>
                           <div style={{ display: "flex", gap: 3, justifyContent: "center" }}>
-                            {c.hasContractPdf && (
-                              <button type="button" className="btn-icon" onClick={() => handleViewPdf(item)} title="Visualizar Minutas Anexas">
-                                <Eye size={11} style={{ color: "#2563eb" }} />
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              className="btn-icon"
+                              onClick={() => handleViewPdf(item)}
+                              title={c.hasContractPdf ? "Visualizar Minutas Anexas" : "Sem minutas digitais anexadas"}
+                            >
+                              <FileText
+                                size={11}
+                                style={{
+                                  color: c.hasContractPdf ? "#2563eb" : "#cbd5e1",
+                                  opacity: c.hasContractPdf ? 1 : 0.55,
+                                }}
+                              />
+                            </button>
                             <button type="button" className="btn-icon" onClick={() => handleOpenEdit(item)} title="Editar Contrato"><Edit2 size={11} /></button>
-                            {c.status === "Cancelado" ? (
-                              <button type="button" className="btn-icon" onClick={() => handleCancel(item)} title="Reativar Contrato">
-                                <RotateCcw size={11} style={{ color: "#059669" }} />
-                              </button>
-                            ) : (
-                              <button type="button" className="btn-icon" onClick={() => handleCancel(item)} title="Cancelar Contrato">
-                                <Ban size={11} style={{ color: "#d97706" }} />
-                              </button>
-                            )}
-                            <button type="button" className="btn-icon text-danger" onClick={() => handleDelete(item)} title="Excluir Contrato"><Trash2 size={11} /></button>
+                            <button type="button" className="btn-icon" onClick={() => handleDelete(item)} title="Excluir Contrato" style={{ color: "#dc2626" }}><Trash2 size={11} /></button>
                           </div>
                         </td>
                       </tr>
@@ -1152,7 +1108,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
             <div
               className="sigx-modal contracts-modal"
               style={{
-                width: "min(1020px, 96vw)",
+                width: "min(1096px, 96vw)",
                 maxWidth: "96vw",
                 display: "flex",
                 flexDirection: "column",
@@ -1629,9 +1585,16 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                       {/* 🚀 Juros Total = ((p × n) / q) − 1 — card externo com 5 mini-cards */}
                       {(() => {
                         const ready = jurosTotal !== null;
-                        const positive = ready && (jurosTotal as number) >= 0;
-                        const accent = !ready ? "#94a3b8" : (positive ? "#0369a1" : "#dc2626");
-                        const accentSoft = !ready ? "#f1f5f9" : (positive ? "#e0f2fe" : "#fee2e2");
+                        // Classificamos em três estados para que o badge superior
+                        // e o destaque do mini-card "%" reflitam exatamente o sinal:
+                        //   • positive  → houve retorno efetivo (juros > 0)
+                        //   • zero      → contrato sem juros aplicados (juros = 0)
+                        //   • caso contrário → retorno negativo (juros < 0, raro mas possível)
+                        const zero = ready && (jurosTotal as number) === 0;
+                        const positive = ready && (jurosTotal as number) > 0;
+                        // Paleta: positivo = azul, zero = âmbar (atenção neutra), negativo = vermelho
+                        const accent = !ready ? "#94a3b8" : positive ? "#0369a1" : zero ? "#d97706" : "#dc2626";
+                        const accentSoft = !ready ? "#f1f5f9" : positive ? "#e0f2fe" : zero ? "#fef3c7" : "#fee2e2";
                         const totalPagar = Number(form.financedTotal) || 0;
                         const hasTotal = totalPagar > 0;
 
@@ -1679,11 +1642,11 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                           {
                             letter: "%",
                             label: "Juros Total",
-                            value: ready ? `${((jurosTotal as number) * 100).toFixed(2)}%` : "—",
+                            value: ready ? fmtPct(jurosTotal as number) : "—",
                             mono: true,
-                            color: ready ? (positive ? "#0369a1" : "#dc2626") : "#94a3b8",
-                            soft: ready ? (positive ? "#dbeafe" : "#fee2e2") : "#f1f5f9",
-                            valueColor: ready ? (positive ? "#0c4a6e" : "#991b1b") : "#94a3b8",
+                            color: !ready ? "#94a3b8" : positive ? "#0369a1" : zero ? "#d97706" : "#dc2626",
+                            soft: !ready ? "#f1f5f9" : positive ? "#dbeafe" : zero ? "#fef3c7" : "#fee2e2",
+                            valueColor: !ready ? "#94a3b8" : positive ? "#0c4a6e" : zero ? "#92400e" : "#991b1b",
                             ready,
                             highlight: true,
                           },
@@ -1756,7 +1719,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                                   whiteSpace: "nowrap",
                                 }}
                               >
-                                {ready ? (positive ? "TAXA EFETIVA TOTAL" : "RETORNO NEGATIVO") : "AGUARDANDO DADOS"}
+                                {!ready ? "AGUARDANDO DADOS" : positive ? "TAXA EFETIVA TOTAL" : zero ? "SEM RETORNO" : "RETORNO NEGATIVO"}
                               </span>
                             </div>
 
@@ -2127,8 +2090,9 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                                         </button>
                                         <button
                                           type="button"
-                                          className="btn-icon text-danger"
+                                          className="btn-icon"
                                           title="Remover do contrato"
+                                          style={{ color: "#dc2626" }}
                                           onClick={() => setSelectedAssets((prev) => prev.filter((_, i) => i !== idx))}
                                         >
                                           <Trash2 size={11} />
@@ -2207,93 +2171,11 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                     </div>
                   )}
 
-                  {/* 🚀 TAB 6: DADOS BANCÁRIOS (somente leitura — vem do cliente vinculado) */}
-                  {activeTab === "bancarios" && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                      {!selectedClient && (
-                        <div style={{ padding: 12, background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 6, fontSize: 11, color: "#92400e" }}>
-                          Selecione um cliente na guia <strong>Dados Básicos</strong> para visualizar os dados bancários.
-                        </div>
-                      )}
-
-                      {selectedClient && (
-                        <>
-                          <div style={{ fontSize: 11, color: "#475569", fontStyle: "italic" }}>
-                            Estes dados são <strong>somente leitura</strong> e refletem o que está cadastrado na guia
-                            <em> Dados Financeiros</em> do cliente <strong>{selectedClient.name}</strong>.
-                            Para editar, abra o CRUD de Clientes.
-                          </div>
-
-                          {(!selectedClientMeta?.bankAccounts || selectedClientMeta.bankAccounts.length === 0) && (
-                            <div style={{ padding: 12, background: "#f3f4f6", border: "1px solid #e5e7eb", borderRadius: 6, fontSize: 11, color: "#6b7280" }}>
-                              Este cliente ainda não possui contas bancárias cadastradas.
-                            </div>
-                          )}
-
-                          {selectedClientMeta?.bankAccounts?.map((acc: any, idx: number) => {
-                            const { code, name } = splitBank(acc.banco);
-                            const tipoLabel = ACCOUNT_TYPE_LABELS[(acc.tipo || "").toLowerCase()] ?? acc.tipo ?? "—";
-                            return (
-                              <div key={idx} style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 6, background: "#fafafa" }}>
-                                <div style={{ fontSize: 10, fontWeight: 700, color: "#1e293b", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
-                                  Conta Bancária {idx + 1}
-                                </div>
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                                  <div>
-                                    <label className="sigx-label">CÓDIGO BANCO</label>
-                                    <input className="sigx-input mono" value={code} readOnly style={{ background: "white", color: "#4b5563" }} />
-                                  </div>
-                                  <div style={{ gridColumn: "span 2" }}>
-                                    <label className="sigx-label">NOME BANCO</label>
-                                    <input className="sigx-input" value={name} readOnly style={{ background: "white", color: "#4b5563" }} />
-                                  </div>
-                                  <div>
-                                    <label className="sigx-label">AGÊNCIA</label>
-                                    <input className="sigx-input mono" value={acc.agencia ?? ""} readOnly style={{ background: "white", color: "#4b5563" }} />
-                                  </div>
-                                  <div>
-                                    <label className="sigx-label">Nº CONTA</label>
-                                    <input className="sigx-input mono" value={acc.conta ?? ""} readOnly style={{ background: "white", color: "#4b5563" }} />
-                                  </div>
-                                  <div>
-                                    <label className="sigx-label">TIPO CONTA</label>
-                                    <input className="sigx-input" value={tipoLabel} readOnly style={{ background: "white", color: "#4b5563" }} />
-                                  </div>
-                                </div>
-
-                                {/* PIX por conta — a develop guarda hasPix/pixType/pixKey dentro de cada bankAccount */}
-                                <div style={{ marginTop: 10, padding: 10, background: "white", border: "1px dashed #cbd5e1", borderRadius: 6, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                                  <div>
-                                    <label className="sigx-label">CHAVE PIX</label>
-                                    <input
-                                      className="sigx-input mono"
-                                      value={acc.hasPix ? (acc.pixKey ?? "") : ""}
-                                      readOnly
-                                      placeholder={acc.hasPix ? "—" : "Sem PIX vinculado"}
-                                      style={{ background: "#f9fafb", color: "#4b5563" }}
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="sigx-label">PIX</label>
-                                    <input
-                                      className="sigx-input"
-                                      value={acc.hasPix && acc.pixKey ? "Cadastrado" : "Não cadastrado"}
-                                      readOnly
-                                      style={{
-                                        background: "#f9fafb",
-                                        color: acc.hasPix && acc.pixKey ? "#065f46" : "#9ca3af",
-                                        fontWeight: 600,
-                                      }}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </>
-                      )}
-                    </div>
-                  )}
+                  {/* 🚀 TAB 6: DADOS BANCÁRIOS — REMOVIDA.
+                      Os dados bancários do cliente passaram a ser exibidos
+                      diretamente na guia "Valores e Bancos" no momento em
+                      que o operador escolhe a conta de cobrança. Manter esta
+                      guia adicional gerava redundância de informação. */}
 
                 </div>
                 <div
@@ -2371,37 +2253,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
         onClose={() => setConfirmDelete(null)}
       />
 
-      <ConfirmDialog
-        open={!!confirmCancel}
-        tone="warning"
-        icon={Ban}
-        title="Cancelar Contrato"
-        description="O contrato passará para o status &quot;Cancelado&quot;. Os dados ficam preservados e a operação pode ser revertida posteriormente."
-        entityLabel="Contrato"
-        entityName={confirmCancel?._client ? `${confirmCancel?.code} · ${confirmCancel?._client}` : confirmCancel?.code}
-        entityDetail={confirmCancel?.contractName}
-        consequences={[
-          "O contrato deixará de aparecer como ativo nos relatórios operacionais.",
-          "Você poderá reativá-lo a qualquer momento pelo botão de reativação.",
-        ]}
-        confirmLabel="Cancelar Contrato"
-        onConfirm={executeCancel}
-        onClose={() => setConfirmCancel(null)}
-      />
-
-      <ConfirmDialog
-        open={!!confirmReactivate}
-        tone="info"
-        icon={RotateCcw}
-        title="Reativar Contrato"
-        description={'O contrato voltará ao status "Ativo" e passará a ser considerado novamente nos relatórios e cobranças.'}
-        entityLabel="Contrato"
-        entityName={confirmReactivate?._client ? `${confirmReactivate?.code} · ${confirmReactivate?._client}` : confirmReactivate?.code}
-        entityDetail={confirmReactivate?.contractName}
-        confirmLabel="Reativar Contrato"
-        onConfirm={executeReactivate}
-        onClose={() => setConfirmReactivate(null)}
-      />
+      {/* ── PDF PREVIEW SIDE PANEL ──────────────────────────────────────── */}
 
       {/* ── SUB-MODAIS DA ABA "FIADOR / CODEVEDOR" ──────────────────────────
           O mesmo modal de criação/edição é compartilhado entre os dois papéis;

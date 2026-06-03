@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, Fragment } from "react";
 import { Head, router } from "@inertiajs/react";
-import { Search, ChevronDown, ChevronRight, X } from "lucide-react";
+import { Search, ChevronDown, ChevronRight, X, CreditCard } from "lucide-react";
 import UnyPayLayout from "../Components/UnyPayLayout";
 import TableGroupBadges from "../Components/TableGroupBadges";
 import TableColumnPicker from "../Components/TableColumnPicker";
@@ -486,13 +486,56 @@ export default function Payments({ contracts, interestData, filters }: any) {
 
         {payOpen && (
           <div className="sigx-modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setPayOpen(false); }}>
-            <div className="sigx-modal" style={{ maxWidth: 380 }} onMouseDown={e => e.stopPropagation()}>
-              <div className="sigx-modal-header">
-                <span className="sigx-modal-title">Registrar Pagamento</span>
-                <button type="button" onClick={() => setPayOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", display: "flex" }}><X size={18} /></button>
+            <div
+              className="sigx-modal"
+              style={{
+                width: "min(440px, 96vw)",
+                maxWidth: "96vw",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                boxShadow: "0 24px 60px rgba(15, 23, 42, 0.25)",
+              }}
+              onMouseDown={e => e.stopPropagation()}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "14px 22px",
+                  background: "linear-gradient(135deg, #1e2139 0%, #2d3154 100%)",
+                  color: "white",
+                  borderBottom: "1px solid #2d3154",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 8, background: "rgba(255,255,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <CreditCard size={16} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>Registrar Pagamento</span>
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>Confirme o valor, a data e o método utilizados</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPayOpen(false)}
+                  style={{
+                    background: "rgba(255,255,255,0.08)",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "white",
+                    width: 30, height: 30,
+                    borderRadius: 6,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}
+                >
+                  <X size={16} />
+                </button>
               </div>
-              <form onSubmit={handlePaySubmit}>
-                <div className="sigx-modal-body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <form onSubmit={handlePaySubmit} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+                <div className="sigx-modal-body" style={{ padding: 22, display: "flex", flexDirection: "column", gap: 12, background: "white" }}>
                   <div>
                     <label className="sigx-label">Valor pago (R$) *</label>
                     <input type="number" step="0.01" min="0.01" className="sigx-input mono" value={payAmount} onChange={e => setPayAmount(e.target.value)} required />
@@ -508,7 +551,7 @@ export default function Payments({ contracts, interestData, filters }: any) {
                     </select>
                   </div>
                 </div>
-                <div className="sigx-modal-footer">
+                <div className="sigx-modal-footer" style={{ padding: "12px 22px", borderTop: "1px solid #e5e7eb", background: "#f8fafc", display: "flex", justifyContent: "flex-end", gap: 8 }}>
                   <button type="button" className="btn-secondary" onClick={() => setPayOpen(false)}>Cancelar</button>
                   <button type="submit" className="btn-primary">Confirmar Pagamento</button>
                 </div>

@@ -56,7 +56,8 @@ class UpdateGuarantorRequest extends FormRequest
                 Rule::unique('guarantors', 'cnpj')->ignore($guarantorId),
             ],
             'tradeName'         => ['required_if:personType,PJ', 'nullable', 'string', 'max:255'],
-            'stateRegistration' => ['required_if:personType,PJ', 'nullable', 'string', 'max:30'],
+            // Inscrição Estadual é opcional (PJs podem ser isentas / sem cadastro).
+            'stateRegistration' => ['nullable', 'string', 'max:30'],
 
             'street'            => ['nullable', 'string', 'max:255'],
             'number'            => ['nullable', 'string', 'max:20'],
@@ -86,7 +87,6 @@ class UpdateGuarantorRequest extends FormRequest
             'cnpj.size'                     => 'O CNPJ deve conter 14 dígitos numéricos.',
             'cnpj.unique'                   => 'Já existe outro fiador cadastrado com este CNPJ.',
             'tradeName.required_if'         => 'Informe o Nome Fantasia.',
-            'stateRegistration.required_if' => 'Informe a Inscrição Estadual (ou "ISENTO").',
 
             'state.size'                    => 'A UF deve ter 2 caracteres (ex: MG).',
             'zipCode.size'                  => 'O CEP deve conter 8 dígitos numéricos.',

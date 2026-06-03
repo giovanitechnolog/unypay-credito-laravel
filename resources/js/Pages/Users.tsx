@@ -323,7 +323,7 @@ export default function UsersPage() {
                       <td style={{ padding: "10px 14px", textAlign: "right" }}>
                         <div style={{ display: "inline-flex", gap: 4 }}>
                           <button onClick={() => openEdit(u)} className="btn-icon" title="Editar Ficha"><Edit2 size={13} /></button>
-                          <button onClick={() => setDeleteModalUser(u)} disabled={currentUserId === u.id} className="btn-icon text-danger" style={{ opacity: currentUserId === u.id ? 0.3 : 1 }} title="Excluir Colaborador"><Trash2 size={13} /></button>
+                          <button onClick={() => setDeleteModalUser(u)} disabled={currentUserId === u.id} className="btn-icon" style={{ color: "#dc2626", opacity: currentUserId === u.id ? 0.3 : 1 }} title="Excluir Colaborador"><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>

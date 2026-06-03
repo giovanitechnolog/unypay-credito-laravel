@@ -389,17 +389,57 @@ export default function SimulationHistory() {
 
         {/* Modal de Conversão */}
         {convertOpen && selectedSim && (
-          <div className="sigx-modal-backdrop" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div className="sigx-modal-container" style={{ width: 460, background: "white", borderRadius: 10, overflow: "hidden" }}>
-              <div className="sigx-modal-header" style={{ padding: "12px 16px", background: "#1a2035", color: "white", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <FileText size={15} />
-                  <h3 style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>Converter Simulação em Contrato</h3>
+          <div className="sigx-modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setConvertOpen(false); }}>
+            <div
+              className="sigx-modal"
+              style={{
+                width: "min(520px, 96vw)",
+                maxWidth: "96vw",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                boxShadow: "0 24px 60px rgba(15, 23, 42, 0.25)",
+              }}
+              onMouseDown={e => e.stopPropagation()}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "14px 22px",
+                  background: "linear-gradient(135deg, #1e2139 0%, #2d3154 100%)",
+                  color: "white",
+                  borderBottom: "1px solid #2d3154",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 8, background: "rgba(255,255,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <FileText size={16} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>Converter Simulação em Contrato</span>
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>Vincule a simulação a um cliente para gerar o contrato físico</span>
+                  </div>
                 </div>
-                <button type="button" onClick={() => setConvertOpen(false)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.6)", cursor: "pointer" }}><X size={16} /></button>
+                <button
+                  type="button"
+                  onClick={() => setConvertOpen(false)}
+                  style={{
+                    background: "rgba(255,255,255,0.08)",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "white",
+                    width: 30, height: 30,
+                    borderRadius: 6,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}
+                >
+                  <X size={16} />
+                </button>
               </div>
               <form onSubmit={handleConvertSubmit}>
-                <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+                <div className="sigx-modal-body" style={{ padding: 22, display: "flex", flexDirection: "column", gap: 12, background: "white" }}>
 
                   <div style={{ padding: "10px 12px", background: "#f8f9fa", border: "1px solid #d1d5db", borderRadius: 6, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     <div>
@@ -444,9 +484,9 @@ export default function SimulationHistory() {
                   </div>
 
                 </div>
-                <div style={{ padding: "10px 16px", background: "#f9fafb", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                  <button type="button" className="btn-secondary" onClick={() => setConvertOpen(false)} style={{ fontSize: 11 }}>Cancelar</button>
-                  <button type="submit" className="btn-primary" style={{ fontSize: 11 }}>Criar Contrato Físico</button>
+                <div className="sigx-modal-footer" style={{ padding: "12px 22px", borderTop: "1px solid #e5e7eb", background: "#f8fafc", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <button type="button" className="btn-secondary" onClick={() => setConvertOpen(false)}>Cancelar</button>
+                  <button type="submit" className="btn-primary">Criar Contrato Físico</button>
                 </div>
               </form>
             </div>
