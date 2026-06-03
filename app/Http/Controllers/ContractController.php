@@ -474,43 +474,6 @@ class ContractController extends Controller
         });
     }
 
-    /**
-     * Cancela um contrato — apenas altera o status para "Cancelado".
-     * Não remove o registro nem altera nenhum outro dado.
-     */
-    public function cancel(int $id)
-    {
-        $contract = DB::table('contracts')->where('id', $id)->first();
-        if (!$contract) {
-            return redirect()->route('contracts.index')->with('error', 'Contrato não encontrado.');
-        }
-
-        DB::table('contracts')->where('id', $id)->update([
-            'status'    => 'Cancelado',
-            'updatedAt' => now(),
-        ]);
-
-        return redirect()->back()->with('success', 'Contrato cancelado.');
-    }
-
-    /**
-     * Reativa um contrato cancelado — devolve o status para "Ativo".
-     */
-    public function reactivate(int $id)
-    {
-        $contract = DB::table('contracts')->where('id', $id)->first();
-        if (!$contract) {
-            return redirect()->route('contracts.index')->with('error', 'Contrato não encontrado.');
-        }
-
-        DB::table('contracts')->where('id', $id)->update([
-            'status'    => 'Ativo',
-            'updatedAt' => now(),
-        ]);
-
-        return redirect()->back()->with('success', 'Contrato reativado.');
-    }
-
     public function viewPdf(int $id, Request $request)
     {
         $contract = DB::table('contracts')->where('id', $id)->first();

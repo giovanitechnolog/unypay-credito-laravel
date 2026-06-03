@@ -350,14 +350,13 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
               />
             </div>
             <div>
-              <label className="sigx-label">INSCRIÇÃO ESTADUAL *</label>
+              <label className="sigx-label">INSCRIÇÃO ESTADUAL</label>
               <input
                 type="text"
                 className="sigx-input"
                 placeholder='Número ou "ISENTO"'
                 value={value.stateRegistration}
                 onChange={(e) => set("stateRegistration", e.target.value)}
-                required
                 readOnly={readOnly}
                 style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
               />

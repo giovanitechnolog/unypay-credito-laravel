@@ -77,8 +77,6 @@ Route::middleware('auth')->group(function () {
     Route::post  ('/contracts/{id}/update',    [ContractController::class, 'update'])->name('contracts.update'); // 👈 Endpoint de edição do modal
     Route::post  ('/contracts/{id}',           [ContractController::class, 'update']);
     Route::put   ('/contracts/{id}',           [ContractController::class, 'update']);
-    Route::post  ('/contracts/{id}/cancel',     [ContractController::class, 'cancel'])->name('contracts.cancel');
-    Route::post  ('/contracts/{id}/reactivate', [ContractController::class, 'reactivate'])->name('contracts.reactivate');
     Route::get   ('/contracts/{id}/pdf',        [ContractController::class, 'viewPdf'])->name('contracts.pdf');
     Route::delete('/contracts/{id}',           [ContractController::class, 'destroy'])->name('contracts.destroy');
 
