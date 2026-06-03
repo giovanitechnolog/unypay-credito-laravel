@@ -18,17 +18,7 @@ class DatabaseSeeder extends Seeder
 
             // 2. Cria as categorias base (Mútuo, Consignado...)
             ContractTypeSeeder::class, 
-
-            // 3. Injeta as cargas de Auditoria Purificada dos PDFs (14 Contratos Legítimos)
-            LoadExternalContractsSeeder::class, 
-
-            // 4. Injeta as baixas financeiras históricas, datas e valores reais da Planilha
-            PopuleEcosistemaPlanilhaSeeder::class, 
-
-            LoadAdicionaisAuditoriaSeeder::class,
-
-            LoadContratosPendentesSeeder::class,
-
+            
             // 5. Fiadores institucionais (CRUD de fiadores)
             GuarantorSeeder::class,
         ]);

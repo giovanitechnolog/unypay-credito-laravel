@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\ContractAssets\StoreContractAssetRequest;
 use App\Models\Contract;
+use App\Models\ContractAsset;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -81,6 +83,40 @@ class ContractController extends Controller
             return $row;
         });
 
+        // 🚀 Hidratação dos bens em garantia (1:N — contract_assets) em uma
+        // única query auxiliar, mesma estratégia usada com fiadores.
+        $assetsByContract = [];
+        if (!empty($contractIds)) {
+            $assetRows = DB::table('contract_assets')
+                ->whereIn('contractId', $contractIds)
+                ->orderBy('id')
+                ->get();
+
+            foreach ($assetRows as $a) {
+                $assetsByContract[$a->contractId][] = [
+                    'id'              => $a->id,
+                    'assetType'       => $a->assetType,
+                    'brand'           => $a->brand,
+                    'model'           => $a->model,
+                    'manufactureYear' => $a->manufactureYear !== null ? (int) $a->manufactureYear : null,
+                    'modelYear'       => $a->modelYear       !== null ? (int) $a->modelYear       : null,
+                    'plate'           => $a->plate,
+                    'renavam'         => $a->renavam,
+                    'chassis'         => $a->chassis,
+                    'description'     => $a->description,
+                    'location'        => $a->location,
+                    'registryNumber'  => $a->registryNumber,
+                    'totalArea'       => $a->totalArea !== null ? (float) $a->totalArea : null,
+                    'boundaries'      => $a->boundaries,
+                ];
+            }
+        }
+
+        $rawContracts->transform(function ($row) use ($assetsByContract) {
+            $row->assets = $assetsByContract[$row->id] ?? [];
+            return $row;
+        });
+
         $contractTypes = DB::table('contract_types')->orderBy('name', 'asc')->get();
 
         // 🚀 CRÍTICO: Carrega a tabela de clientes trazendo:
@@ -102,7 +138,13 @@ class ContractController extends Controller
 
     public function store(Request $request)
     {
-        $request->validate([
+        // 🚀 Bens vêm como JSON dentro do FormData (porque o request também
+        // carrega PDFs). Decodifica + normaliza ANTES da validação para que
+        // 'assets.*' funcione com os tipos certos.
+        $assets = $this->extractAssets($request);
+        $request->merge(['assets' => $assets]);
+
+        $rules = [
             'contractName'     => 'required|string',
             'code'             => 'required|string',
             'clientId'         => 'required',
@@ -112,7 +154,19 @@ class ContractController extends Controller
             // 🚀 Lista de fiadores selecionados na aba "Garantias e Fiadores"
             'guarantor_ids'    => 'nullable|array',
             'guarantor_ids.*'  => 'integer|exists:guarantors,id',
-        ]);
+            // 🚀 Bens em garantia (veículos / imóveis)
+            'assets'           => 'nullable|array',
+        ];
+        $messages = [];
+
+        // Anexa regras condicionais para CADA bem do array, com prefixo
+        // "assets.{i}" — Rule::requiredIf reage ao assetType de cada um.
+        foreach ($assets as $i => $asset) {
+            $rules    = array_merge($rules,    StoreContractAssetRequest::rulesFor($asset['assetType'] ?? null, "assets.{$i}"));
+            $messages = array_merge($messages, StoreContractAssetRequest::messagesFor("assets.{$i}"));
+        }
+
+        $request->validate($rules, $messages);
 
         $pdfPaths = [];
         $pdfNames = [];
@@ -137,13 +191,19 @@ class ContractController extends Controller
         );
 
         $this->syncContractGuarantors($contractId, (array) $request->input('guarantor_ids', []));
+        $this->syncContractAssets($contractId, $assets);
 
         return redirect()->route('contracts.index');
     }
 
     public function update(Request $request, int $id)
     {
-        $request->validate([
+        // 🚀 Mesmo tratamento de assets do store — decodifica/normaliza primeiro.
+        $assets       = $this->extractAssets($request);
+        $assetsInPayload = $request->has('assets'); // precisa ser checado ANTES do merge
+        $request->merge(['assets' => $assets]);
+
+        $rules = [
             'contractName'     => 'required|string',
             'code'             => 'required|string',
             'clientId'         => 'required',
@@ -151,7 +211,16 @@ class ContractController extends Controller
             'contractPdfs'     => 'nullable|array',
             'guarantor_ids'    => 'nullable|array',
             'guarantor_ids.*'  => 'integer|exists:guarantors,id',
-        ]);
+            'assets'           => 'nullable|array',
+        ];
+        $messages = [];
+
+        foreach ($assets as $i => $asset) {
+            $rules    = array_merge($rules,    StoreContractAssetRequest::rulesFor($asset['assetType'] ?? null, "assets.{$i}"));
+            $messages = array_merge($messages, StoreContractAssetRequest::messagesFor("assets.{$i}"));
+        }
+
+        $request->validate($rules, $messages);
 
         $existing = DB::table('contracts')->where('id', $id)->first();
         if (!$existing) {
@@ -222,6 +291,12 @@ class ContractController extends Controller
             $this->syncContractGuarantors($id, (array) $request->input('guarantor_ids', []));
         }
 
+        // 🚀 Mesma lógica para os bens em garantia: só toca se o front mandou
+        // a chave 'assets' (mesmo que vazia, indicando "remover todos").
+        if ($assetsInPayload) {
+            $this->syncContractAssets($id, $assets);
+        }
+
         return redirect()->route('contracts.index');
     }
 
@@ -245,6 +320,111 @@ class ContractController extends Controller
         )));
 
         $contract->guarantors()->sync($clean);
+    }
+
+    /**
+     * 🚀 Lê o array de bens enviado pelo frontend.
+     *
+     * O modal de Contratos envia FormData (por causa dos PDFs), então o
+     * campo `assets` chega como string JSON serializada — diferente de
+     * `guarantor_ids[]`, que são valores escalares. Aqui decodificamos e
+     * normalizamos cada item antes de devolver para validação/persistência.
+     */
+    private function extractAssets(Request $request): array
+    {
+        $raw = $request->input('assets');
+
+        if (is_string($raw)) {
+            $decoded = json_decode($raw, true);
+            $raw = is_array($decoded) ? $decoded : [];
+        }
+
+        if (!is_array($raw)) {
+            return [];
+        }
+
+        return array_values(array_map(
+            fn ($asset) => StoreContractAssetRequest::normalize((array) $asset),
+            $raw
+        ));
+    }
+
+    /**
+     * 🚀 Constrói o payload limpo de UM bem para gravação. Garante que
+     * apenas as colunas conhecidas da tabela cheguem ao banco — qualquer
+     * campo extra que vier do front (ex.: flags de UI) é descartado.
+     */
+    private function buildAssetPayload(array $a): array
+    {
+        return [
+            'assetType'       => $a['assetType']       ?? null,
+            'brand'           => $a['brand']           ?? null,
+            'model'           => $a['model']           ?? null,
+            'manufactureYear' => $a['manufactureYear'] ?? null,
+            'modelYear'       => $a['modelYear']       ?? null,
+            'plate'           => $a['plate']           ?? null,
+            'renavam'         => $a['renavam']         ?? null,
+            'chassis'         => $a['chassis']         ?? null,
+            'description'     => $a['description']     ?? null,
+            'location'        => $a['location']        ?? null,
+            'registryNumber'  => $a['registryNumber']  ?? null,
+            'totalArea'       => $a['totalArea']       ?? null,
+            'boundaries'      => $a['boundaries']      ?? null,
+        ];
+    }
+
+    /**
+     * 🚀 Sincroniza os bens em garantia de UM contrato com a estratégia
+     * "diff manual" — diferente do delete-and-recreate dos fiadores.
+     *
+     * Por que diff manual aqui?
+     *   • Cada bem tem seu próprio createdAt e id; preservar esses dados
+     *     é importante para auditoria e para qualquer relação futura.
+     *   • Evita "ressuscitar" registros — IDs antigos continuam válidos.
+     *
+     * Algoritmo:
+     *   1. Carrega os IDs atuais do banco para esse contrato.
+     *   2. Para cada bem do payload:
+     *        - Tem id e existe? → UPDATE (preserva createdAt).
+     *        - Não tem id?       → CREATE (gera novo ID).
+     *   3. IDs antigos que não vieram no payload → DELETE.
+     *
+     * Tudo dentro de uma transação para atomicidade
+     * (atende ao "salvar tudo junto em uma Transaction" do briefing).
+     */
+    private function syncContractAssets(int $contractId, array $assets): void
+    {
+        $contract = Contract::find($contractId);
+        if (! $contract) {
+            return;
+        }
+
+        DB::transaction(function () use ($contract, $assets) {
+            $existingIds = $contract->assets()->pluck('id')->all();
+            $keptIds     = [];
+
+            foreach ($assets as $asset) {
+                $payload  = $this->buildAssetPayload($asset);
+                $assetId  = isset($asset['id']) ? (int) $asset['id'] : 0;
+
+                if ($assetId > 0 && in_array($assetId, $existingIds, true)) {
+                    // UPDATE — preserva createdAt automaticamente
+                    ContractAsset::where('id', $assetId)
+                        ->where('contractId', $contract->id)
+                        ->update($payload);
+                    $keptIds[] = $assetId;
+                } else {
+                    // CREATE — id ignorado mesmo que tenha vindo (defesa contra spoofing)
+                    $created   = $contract->assets()->create($payload);
+                    $keptIds[] = $created->id;
+                }
+            }
+
+            $toDelete = array_diff($existingIds, $keptIds);
+            if (!empty($toDelete)) {
+                $contract->assets()->whereIn('id', $toDelete)->delete();
+            }
+        });
     }
 
     /**

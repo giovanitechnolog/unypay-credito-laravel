@@ -47,7 +47,7 @@ class UpdateGuarantorRequest extends FormRequest
                 'required_if:personType,PF', 'nullable', 'string', 'size:11',
                 Rule::unique('guarantors', 'cpf')->ignore($guarantorId),
             ],
-            'rg'                => ['required_if:personType,PF', 'nullable', 'string', 'max:20'],
+            'rg'                => ['nullable', 'string', 'max:20'],
             'nationality'       => ['required_if:personType,PF', 'nullable', 'string', 'max:80'],
             'maritalStatus'     => ['required_if:personType,PF', 'nullable', 'string', 'max:40'],
 
@@ -58,12 +58,12 @@ class UpdateGuarantorRequest extends FormRequest
             'tradeName'         => ['required_if:personType,PJ', 'nullable', 'string', 'max:255'],
             'stateRegistration' => ['required_if:personType,PJ', 'nullable', 'string', 'max:30'],
 
-            'street'            => ['required', 'string', 'max:255'],
-            'number'            => ['required', 'string', 'max:20'],
-            'neighborhood'      => ['required', 'string', 'max:120'],
-            'city'              => ['required', 'string', 'max:120'],
-            'state'             => ['required', 'string', 'size:2'],
-            'zipCode'           => ['required', 'string', 'size:8'],
+            'street'            => ['nullable', 'string', 'max:255'],
+            'number'            => ['nullable', 'string', 'max:20'],
+            'neighborhood'      => ['nullable', 'string', 'max:120'],
+            'city'              => ['nullable', 'string', 'max:120'],
+            'state'             => ['nullable', 'string', 'size:2'],
+            'zipCode'           => ['nullable', 'string', 'size:8'],
 
             'clientIds'         => ['nullable', 'array'],
             'clientIds.*'       => ['integer', 'exists:clients,id'],
@@ -79,7 +79,6 @@ class UpdateGuarantorRequest extends FormRequest
             'cpf.required_if'               => 'Informe o CPF do fiador.',
             'cpf.size'                      => 'O CPF deve conter 11 dígitos numéricos.',
             'cpf.unique'                    => 'Já existe outro fiador cadastrado com este CPF.',
-            'rg.required_if'                => 'Informe o RG do fiador.',
             'nationality.required_if'       => 'Informe a nacionalidade.',
             'maritalStatus.required_if'     => 'Informe o estado civil.',
 
@@ -89,13 +88,7 @@ class UpdateGuarantorRequest extends FormRequest
             'tradeName.required_if'         => 'Informe o Nome Fantasia.',
             'stateRegistration.required_if' => 'Informe a Inscrição Estadual (ou "ISENTO").',
 
-            'street.required'               => 'Informe a rua/logradouro.',
-            'number.required'               => 'Informe o número do endereço.',
-            'neighborhood.required'         => 'Informe o bairro.',
-            'city.required'                 => 'Informe a cidade.',
-            'state.required'                => 'Informe a UF.',
             'state.size'                    => 'A UF deve ter 2 caracteres (ex: MG).',
-            'zipCode.required'              => 'Informe o CEP.',
             'zipCode.size'                  => 'O CEP deve conter 8 dígitos numéricos.',
         ];
     }
