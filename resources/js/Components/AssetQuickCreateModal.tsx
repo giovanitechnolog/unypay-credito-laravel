@@ -1,71 +1,72 @@
 import { useEffect, useState } from "react";
-import { X, UserPlus, Save, Eye } from "lucide-react";
+import { X, Plus, Save, Eye, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
-import GuarantorFormFields, {
-  EMPTY_GUARANTOR_FORM,
-  GuarantorFormValues,
-  onlyDigits,
-} from "./GuarantorFormFields";
+import AssetFormFields, {
+  EMPTY_ASSET_FORM,
+  AssetFormValues,
+} from "./AssetFormFields";
 
 /**
- * Sub-modal de fiador usado pelo modal de Contratos.
+ * Sub-modal de Bem em Garantia usado pelo modal de Contratos.
  *
- * Ele NÃO persiste no banco — apenas devolve os dados via onConfirm para
- * que o Contracts.tsx armazene em memória. A persistência real acontece
- * no submit do contrato, garantindo atomicidade da operação.
+ * Espelha o padrão do `GuarantorQuickCreateModal`:
+ *   - NÃO persiste no banco — apenas devolve os dados via `onConfirm` para
+ *     que o `Contracts.tsx` armazene em memória.
+ *   - A persistência real acontece no submit do contrato, dentro de uma
+ *     única transação no backend (atende o requisito do briefing).
  *
  * Modos:
- *   - "create"   → Cadastrar novo fiador on-the-fly (form vazio, editável)
- *   - "edit-new" → Editar um fiador já adicionado mas ainda não persistido
- *   - "view"     → Visualizar (read-only) um fiador vindo do banco
+ *   - "create" → Cadastrar novo bem (form vazio com tipo Veículo por padrão)
+ *   - "edit"   → Editar um bem já adicionado (tipo travado para evitar perder dados)
+ *   - "view"   → Visualizar (read-only) — útil para conferência
  */
-export type QuickCreateMode = "create" | "edit-new" | "view";
+export type AssetModalMode = "create" | "edit" | "view";
 
 interface Props {
   open: boolean;
-  mode: QuickCreateMode;
-  initialValue?: Partial<GuarantorFormValues>;
+  mode: AssetModalMode;
+  initialValue?: Partial<AssetFormValues>;
   onClose: () => void;
-  /** Chamado quando o usuário clica em "Adicionar ao Contrato" / "Salvar". */
-  onConfirm: (values: GuarantorFormValues) => void;
+  onConfirm: (values: AssetFormValues) => void;
 }
 
-const TITLES: Record<QuickCreateMode, string> = {
-  "create": "Novo Fiador",
-  "edit-new": "Editar Fiador",
-  "view": "Detalhes do Fiador",
+const TITLES: Record<AssetModalMode, string> = {
+  "create": "Nova Garantia",
+  "edit":   "Editar Garantia",
+  "view":   "Detalhes da Garantia",
 };
 
-const SUBTITLES: Record<QuickCreateMode, string> = {
+const SUBTITLES: Record<AssetModalMode, string> = {
   "create": "Os dados serão gravados quando você salvar o contrato",
-  "edit-new": "Ajuste os dados deste fiador ainda não persistido",
-  "view": "Fiador já cadastrado — somente leitura",
+  "edit":   "Ajuste os dados desta garantia",
+  "view":   "Garantia registrada — somente leitura",
 };
 
-const CONFIRM_LABELS: Record<QuickCreateMode, string> = {
+const CONFIRM_LABELS: Record<AssetModalMode, string> = {
   "create": "Adicionar ao Contrato",
-  "edit-new": "Atualizar",
-  "view": "Fechar",
+  "edit":   "Atualizar",
+  "view":   "Fechar",
 };
 
-export default function GuarantorQuickCreateModal({
+export default function AssetQuickCreateModal({
   open,
   mode,
   initialValue,
   onClose,
   onConfirm,
 }: Props) {
-  const [form, setForm] = useState<GuarantorFormValues>(EMPTY_GUARANTOR_FORM);
+  const [form, setForm] = useState<AssetFormValues>(EMPTY_ASSET_FORM);
 
   useEffect(() => {
     if (open) {
-      setForm({ ...EMPTY_GUARANTOR_FORM, ...initialValue });
+      setForm({ ...EMPTY_ASSET_FORM, ...initialValue });
     }
   }, [open, initialValue]);
 
   if (!open) return null;
 
   const isReadOnly = mode === "view";
+  const lockTypeSwitch = mode === "edit"; // não permite trocar Veículo↔Imóvel em edição
 
   const handleConfirm = () => {
     if (isReadOnly) {
@@ -73,37 +74,36 @@ export default function GuarantorQuickCreateModal({
       return;
     }
 
-    // ── Validação local antes de devolver ao pai ───────────────
-    if (!form.name.trim()) {
-      toast.error(form.personType === "PJ" ? "Informe a razão social." : "Informe o nome completo.");
-      return;
-    }
-
-    if (form.personType === "PF") {
-      if (onlyDigits(form.cpf).length !== 11) { toast.error("CPF inválido."); return; }
-      if (!form.nationality.trim()) { toast.error("Informe a nacionalidade."); return; }
-      if (!form.maritalStatus) { toast.error("Selecione o estado civil."); return; }
+    // ── Validação local (espelha as regras Rule::requiredIf do backend) ──
+    if (form.assetType === "vehicle") {
+      if (!form.brand.trim())   { toast.error("Informe a marca do veículo."); return; }
+      if (!form.model.trim())   { toast.error("Informe o modelo do veículo."); return; }
+      if (!form.plate.trim())   { toast.error("Informe a placa do veículo."); return; }
+      if (form.chassis.length !== 17) {
+        toast.error("O chassi (VIN) deve conter exatamente 17 caracteres.");
+        return;
+      }
     } else {
-      if (onlyDigits(form.cnpj).length !== 14) { toast.error("CNPJ inválido."); return; }
-      if (!form.tradeName.trim()) { toast.error("Informe o nome fantasia."); return; }
-      if (!form.stateRegistration.trim()) { toast.error("Informe a inscrição estadual."); return; }
-    }
+      if (!form.location.trim())       { toast.error("Informe a localização do imóvel."); return; }
+      if (!form.registryNumber.trim()) { toast.error("Informe o número da matrícula."); return; }
+      if (!form.totalArea.trim())      { toast.error("Informe a área total do imóvel."); return; }
 
-    // 🚀 Endereço deixou de ser obrigatório — o backend aceita campos nulos.
-    // Quando preenchido parcialmente, validamos só o CEP por consistência:
-    // ou está vazio, ou tem 8 dígitos.
-    const cepDigits = onlyDigits(form.zipCode);
-    if (cepDigits.length > 0 && cepDigits.length !== 8) {
-      toast.error("CEP inválido — informe 8 dígitos ou deixe em branco.");
-      return;
+      // Verifica se a área é numérica válida (aceita formato BR "1.000.000,00")
+      const numeric = Number(
+        form.totalArea.replace(/\./g, "").replace(",", ".")
+      );
+      if (!isFinite(numeric) || numeric <= 0) {
+        toast.error("Área total inválida — informe um número maior que zero.");
+        return;
+      }
     }
 
     onConfirm(form);
   };
 
-  // 🚀 z-index acima do modal-pai de Contratos. A sigx-modal-overlay padrão
-  // do projeto está em 100; usamos 200 aqui para sobrepor sem desmontar o
-  // pai (estado preservado em memória).
+  // 🚀 z-index acima do modal-pai de Contratos. Mesmo padrão usado no
+  // GuarantorQuickCreateModal — sigx-modal-overlay padrão é 100, aqui usamos
+  // 200 para sobrepor sem desmontar o pai (estado preservado em memória).
   return (
     <div
       onMouseDown={(e) => {
@@ -156,7 +156,7 @@ export default function GuarantorQuickCreateModal({
                 justifyContent: "center",
               }}
             >
-              {isReadOnly ? <Eye size={16} /> : <UserPlus size={16} />}
+              {isReadOnly ? <Eye size={16} /> : mode === "edit" ? <ShieldCheck size={16} /> : <Plus size={16} />}
             </div>
             <div>
               <div style={{ fontSize: 14, fontWeight: 700 }}>{TITLES[mode]}</div>
@@ -185,19 +185,23 @@ export default function GuarantorQuickCreateModal({
           </button>
         </div>
 
-        {/* Body */}
+        {/* Body — altura FIXA para manter o modal exatamente do mesmo tamanho ao
+            alternar Veículo↔Imóvel. O conteúdo extra do imóvel (descrição,
+            confrontações) entra em scroll interno sem fazer o modal "saltar".
+            Em viewports pequenas, recua para o limite da viewport. */}
         <div
           style={{
             padding: 22,
             overflowY: "auto",
-            maxHeight: "calc(92vh - 132px)",
+            height: "min(540px, calc(92vh - 132px))",
             background: "white",
           }}
         >
-          <GuarantorFormFields
+          <AssetFormFields
             value={form}
             onChange={setForm}
             readOnly={isReadOnly}
+            lockTypeSwitch={lockTypeSwitch}
           />
         </div>
 

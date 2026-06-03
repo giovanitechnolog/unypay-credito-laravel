@@ -44,6 +44,7 @@ interface PaginatedGuarantors {
 }
 
 const MARITAL_STATUS_OPTIONS = [
+  "Não Informado",
   "Solteiro(a)",
   "Casado(a)",
   "União Estável",
@@ -142,6 +143,41 @@ export default function GuarantorsPage() {
   const [clientsCatalog, setClientsCatalog] = useState<ClientLite[]>([]);
   const [clientSearch, setClientSearch] = useState("");
 
+  // Feedback do CEP (auto-preenchimento via ViaCEP).
+  const [cepFeedback, setCepFeedback] = useState<string>("");
+
+  const handleCepChange = async (raw: string) => {
+    const masked = maskCEP(raw);
+    setFormData(p => ({ ...p, zipCode: masked }));
+
+    const digits = masked.replace(/\D/g, "");
+    if (digits.length !== 8) {
+      setCepFeedback("");
+      return;
+    }
+
+    setCepFeedback("Buscando endereço...");
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${digits}/json/`);
+      const data = await res.json();
+      if (data?.erro) {
+        setCepFeedback("CEP não encontrado.");
+        return;
+      }
+      setFormData(p => ({
+        ...p,
+        zipCode: masked,
+        street: data.logradouro ?? p.street,
+        neighborhood: data.bairro ?? p.neighborhood,
+        city: data.localidade ?? p.city,
+        state: (data.uf ?? p.state).toUpperCase(),
+      }));
+      setCepFeedback("Endereço preenchido automaticamente.");
+    } catch {
+      setCepFeedback("Não foi possível consultar o CEP.");
+    }
+  };
+
   const fetchGuarantors = useCallback(async (q = "") => {
     setLoading(true);
     try {
@@ -188,6 +224,7 @@ export default function GuarantorsPage() {
     setFormData(EMPTY_FORM);
     setActiveFormTab("pessoal");
     setClientSearch("");
+    setCepFeedback("");
     setFormOpen(true);
   };
 
@@ -213,6 +250,7 @@ export default function GuarantorsPage() {
     });
     setActiveFormTab("pessoal");
     setClientSearch("");
+    setCepFeedback("");
     setFormOpen(true);
   };
 
@@ -271,8 +309,7 @@ export default function GuarantorsPage() {
       personalIssue =
         !formData.nationality.trim() ? "NACIONALIDADE" :
         !formData.maritalStatus      ? "ESTADO CIVIL" :
-        cpfDigits.length !== 11      ? "CPF (11 dígitos)" :
-        !formData.rg.trim()          ? "RG" : null;
+        cpfDigits.length !== 11      ? "CPF (11 dígitos)" : null;
     } else {
       personalIssue =
         cnpjDigits.length !== 14         ? "CNPJ (14 dígitos)" :
@@ -286,17 +323,12 @@ export default function GuarantorsPage() {
       return;
     }
 
-    const addressIssue =
-      !formData.street.trim()       ? "RUA / LOGRADOURO" :
-      !formData.number.trim()       ? "NÚMERO" :
-      !formData.neighborhood.trim() ? "BAIRRO" :
-      !formData.city.trim()         ? "CIDADE" :
-      !formData.state               ? "UF" :
-      zipDigits.length !== 8        ? "CEP (8 dígitos)" : null;
-
-    if (addressIssue) {
+    // 🚀 Endereço passou a ser opcional. Validamos apenas o CEP quando o
+    // usuário começa a digitar — ou ele preenche os 8 dígitos completos
+    // ou deixa todo o campo em branco.
+    if (zipDigits.length > 0 && zipDigits.length !== 8) {
       setActiveFormTab("endereco");
-      toast.error(`Preencha o campo: ${addressIssue}`);
+      toast.error("CEP inválido — informe 8 dígitos ou deixe em branco.");
       return;
     }
 
@@ -805,14 +837,13 @@ export default function GuarantorsPage() {
                               />
                             </div>
                             <div>
-                              <label className="sigx-label">RG *</label>
+                              <label className="sigx-label">RG</label>
                               <input
                                 type="text"
                                 className="sigx-input"
                                 placeholder="MG-00.000.000"
                                 value={formData.rg}
                                 onChange={e => setFormData(p => ({ ...p, rg: e.target.value }))}
-                                required
                               />
                             </div>
                           </div>
@@ -880,74 +911,80 @@ export default function GuarantorsPage() {
 
                   {activeFormTab === "endereco" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                      <div>
+                        <label className="sigx-label">CEP</label>
+                        <input
+                          type="text"
+                          className="sigx-input mono"
+                          style={{ width: "38%" }}
+                          placeholder="00000-000"
+                          value={formData.zipCode}
+                          onChange={e => handleCepChange(e.target.value)}
+                        />
+                        {cepFeedback && (
+                          <div style={{
+                            color: cepFeedback.includes("não") || cepFeedback.includes("Não")
+                              ? "var(--color-red, #b91c1c)"
+                              : "var(--color-green, #15803d)",
+                            fontSize: 11,
+                            fontWeight: 600,
+                            marginTop: 4,
+                          }}>
+                            {cepFeedback}
+                          </div>
+                        )}
+                      </div>
                       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14 }}>
                         <div>
-                          <label className="sigx-label">RUA / LOGRADOURO *</label>
+                          <label className="sigx-label">RUA / LOGRADOURO</label>
                           <input
                             type="text"
                             className="sigx-input"
                             value={formData.street}
                             onChange={e => setFormData(p => ({ ...p, street: e.target.value }))}
-                            required
                           />
                         </div>
                         <div>
-                          <label className="sigx-label">NÚMERO *</label>
+                          <label className="sigx-label">NÚMERO</label>
                           <input
                             type="text"
                             className="sigx-input"
                             value={formData.number}
                             onChange={e => setFormData(p => ({ ...p, number: e.target.value }))}
-                            required
                           />
                         </div>
                       </div>
                       <div>
-                        <label className="sigx-label">BAIRRO *</label>
+                        <label className="sigx-label">BAIRRO</label>
                         <input
                           type="text"
                           className="sigx-input"
                           value={formData.neighborhood}
                           onChange={e => setFormData(p => ({ ...p, neighborhood: e.target.value }))}
-                          required
                         />
                       </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "2fr 0.6fr 1fr", gap: 14 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "2fr 0.6fr", gap: 14 }}>
                         <div>
-                          <label className="sigx-label">CIDADE *</label>
+                          <label className="sigx-label">CIDADE</label>
                           <input
                             type="text"
                             className="sigx-input"
                             value={formData.city}
                             onChange={e => setFormData(p => ({ ...p, city: e.target.value }))}
-                            required
                           />
                         </div>
                         <div>
-                          <label className="sigx-label">UF *</label>
+                          <label className="sigx-label">UF</label>
                           <select
                             className="sigx-input"
                             value={formData.state}
                             onChange={e => setFormData(p => ({ ...p, state: e.target.value }))}
-                            required
                           >
                             <option value="">—</option>
                             {UF_OPTIONS.map(uf => (
                               <option key={uf} value={uf}>{uf}</option>
                             ))}
                           </select>
-                        </div>
-                        <div>
-                          <label className="sigx-label">CEP *</label>
-                          <input
-                            type="text"
-                            className="sigx-input mono"
-                            placeholder="00000-000"
-                            value={formData.zipCode}
-                            onChange={e => setFormData(p => ({ ...p, zipCode: maskCEP(e.target.value) }))}
-                            required
-                            minLength={9}
-                          />
                         </div>
                       </div>
                     </div>

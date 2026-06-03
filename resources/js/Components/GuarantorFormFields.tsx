@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { User, Building2, CheckCircle2 } from "lucide-react";
 
 /**
@@ -50,6 +51,7 @@ export const EMPTY_GUARANTOR_FORM: GuarantorFormValues = {
 };
 
 const MARITAL_STATUS_OPTIONS = [
+  "Não Informado",
   "Solteiro(a)",
   "Casado(a)",
   "União Estável",
@@ -111,6 +113,48 @@ interface Props {
 export default function GuarantorFormFields({ value, onChange, readOnly = false }: Props) {
   const set = <K extends keyof GuarantorFormValues>(key: K, v: GuarantorFormValues[K]) => {
     onChange({ ...value, [key]: v });
+  };
+
+  const [cepFeedback, setCepFeedback] = useState<string>("");
+
+  /**
+   * Busca o CEP no ViaCEP e preenche logradouro, bairro, cidade e UF.
+   * Mesma estratégia usada na tela de Clientes (handleFetchCep).
+   *
+   * Importante: aplica o CEP digitado em `next` ANTES de fazer o fetch para
+   * que, quando o `onChange` final rodar, o zipCode digitado pelo usuário
+   * não seja perdido por causa de um value desatualizado.
+   */
+  const handleCepChange = async (raw: string) => {
+    const masked = maskCEP(raw);
+    const next: GuarantorFormValues = { ...value, zipCode: masked };
+    onChange(next);
+
+    const digits = masked.replace(/\D/g, "");
+    if (digits.length !== 8) {
+      setCepFeedback("");
+      return;
+    }
+
+    setCepFeedback("Buscando...");
+    try {
+      const response = await fetch(`https://viacep.com.br/ws/${digits}/json/`);
+      const data = await response.json();
+      if (data.erro) {
+        setCepFeedback("CEP não encontrado.");
+        return;
+      }
+      onChange({
+        ...next, // preserva zipCode digitado
+        street:       data.logradouro || next.street,
+        neighborhood: data.bairro     || next.neighborhood,
+        city:         data.localidade || next.city,
+        state:        data.uf         || next.state,
+      });
+      setCepFeedback(`${data.logradouro || ""}, ${data.bairro || ""} — ${data.localidade || ""}/${data.uf || ""}`);
+    } catch {
+      setCepFeedback("Falha ao consultar o CEP.");
+    }
   };
 
   const switchPersonType = (next: PersonType) => {
@@ -260,14 +304,13 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
               />
             </div>
             <div>
-              <label className="sigx-label">RG *</label>
+              <label className="sigx-label">RG</label>
               <input
                 type="text"
                 className="sigx-input"
                 placeholder="MG-00.000.000"
                 value={value.rg}
                 onChange={(e) => set("rg", e.target.value)}
-                required
                 readOnly={readOnly}
                 style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
               />
@@ -332,27 +375,48 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
         }}
       />
 
+      {/* 🚀 CEP no topo do bloco — dispara busca automática no ViaCEP
+          assim que os 8 dígitos forem completados (mesmo padrão da tela
+          de Clientes). Preenche RUA, BAIRRO, CIDADE e UF abaixo. */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 14 }}>
+        <div>
+          <label className="sigx-label">CEP</label>
+          <input
+            type="text"
+            className="sigx-input mono"
+            placeholder="00000-000"
+            value={value.zipCode}
+            onChange={(e) => handleCepChange(e.target.value)}
+            readOnly={readOnly}
+            style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+          />
+          {cepFeedback && (
+            <span className="keep-case" style={{ fontSize: 10, color: "#16a34a", fontWeight: 600 }}>
+              {cepFeedback}
+            </span>
+          )}
+        </div>
+      </div>
+
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14 }}>
         <div>
-          <label className="sigx-label">RUA / LOGRADOURO *</label>
+          <label className="sigx-label">RUA / LOGRADOURO</label>
           <input
             type="text"
             className="sigx-input"
             value={value.street}
             onChange={(e) => set("street", e.target.value)}
-            required
             readOnly={readOnly}
             style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
           />
         </div>
         <div>
-          <label className="sigx-label">NÚMERO *</label>
+          <label className="sigx-label">NÚMERO</label>
           <input
             type="text"
             className="sigx-input"
             value={value.number}
             onChange={(e) => set("number", e.target.value)}
-            required
             readOnly={readOnly}
             style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
           />
@@ -360,38 +424,35 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
       </div>
 
       <div>
-        <label className="sigx-label">BAIRRO *</label>
+        <label className="sigx-label">BAIRRO</label>
         <input
           type="text"
           className="sigx-input"
           value={value.neighborhood}
           onChange={(e) => set("neighborhood", e.target.value)}
-          required
           readOnly={readOnly}
           style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
         />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 0.6fr 1fr", gap: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "3fr 1fr", gap: 14 }}>
         <div>
-          <label className="sigx-label">CIDADE *</label>
+          <label className="sigx-label">CIDADE</label>
           <input
             type="text"
             className="sigx-input"
             value={value.city}
             onChange={(e) => set("city", e.target.value)}
-            required
             readOnly={readOnly}
             style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
           />
         </div>
         <div>
-          <label className="sigx-label">UF *</label>
+          <label className="sigx-label">UF</label>
           <select
             className="sigx-input"
             value={value.state}
             onChange={(e) => set("state", e.target.value)}
-            required
             disabled={readOnly}
             style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
           >
@@ -400,20 +461,6 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
               <option key={uf} value={uf}>{uf}</option>
             ))}
           </select>
-        </div>
-        <div>
-          <label className="sigx-label">CEP *</label>
-          <input
-            type="text"
-            className="sigx-input mono"
-            placeholder="00000-000"
-            value={value.zipCode}
-            onChange={(e) => set("zipCode", maskCEP(e.target.value))}
-            required
-            minLength={9}
-            readOnly={readOnly}
-            style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
-          />
         </div>
       </div>
     </div>

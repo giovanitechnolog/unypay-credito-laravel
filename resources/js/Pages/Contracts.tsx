@@ -4,6 +4,7 @@ import {
   CreditCard, QrCode, UserCheck, Scale, Ban, RotateCcw, Paperclip,
   CircleDollarSign, Percent, Landmark, Shield, BookOpen,
   UserPlus, Users, Sparkles, Building2, User as UserIcon,
+  Car, Home,
 } from "lucide-react";
 import { Head, router } from "@inertiajs/react";
 import { toast } from "sonner";
@@ -21,6 +22,11 @@ import {
   maskCEP,
   onlyDigits,
 } from "../Components/GuarantorFormFields";
+import AssetQuickCreateModal, { AssetModalMode } from "../Components/AssetQuickCreateModal";
+import {
+  AssetFormValues,
+  maskArea,
+} from "../Components/AssetFormFields";
 import { api, extractFirstError } from "../lib/api";
 import { useColumnVisibility } from "../hooks/useColumnVisibility";
 import {
@@ -126,6 +132,92 @@ const formatGuarantorDocument = (doc: string | null | undefined, type: "PF" | "P
   return digits;
 };
 
+/**
+ * Item de Bem em Garantia associado ao contrato em edição (1:N).
+ *
+ * Diferente de fiadores, todos os bens são internos do contrato — não há
+ * distinção isFromDb. O campo `id` só vem preenchido quando o bem já está
+ * persistido (modo edição). O backend usa diff manual: ids existentes são
+ * UPDATE, ausentes viram CREATE, removidos do array viram DELETE.
+ */
+type ContractAssetItem = AssetFormValues & {
+  /** Chave estável usada como key do React. */
+  localId: string;
+  /** ID do registro em `contract_assets` (apenas em modo edição). */
+  id?: number;
+};
+
+/**
+ * Converte a string de área formatada (ex.: "1.000.000,00") em float ou null.
+ * Aceita formato BR "1.234,56", "521,81", "521.81" e dígitos puros.
+ *
+ * Estratégia: remove TODOS os pontos (separador de milhar BR), troca a
+ * vírgula por ponto (separador decimal) e converte para número.
+ */
+const parseAreaForBackend = (raw: string): number | null => {
+  if (!raw || !raw.trim()) return null;
+  const cleaned = raw.replace(/\./g, "").replace(",", ".");
+  const num = Number(cleaned);
+  return isFinite(num) && num > 0 ? num : null;
+};
+
+/**
+ * Serializa a lista de bens para o backend — mantém só os campos que o
+ * `ContractController@store/@update` espera receber dentro de `assets[]`.
+ *
+ * Regras importantes:
+ *   - O `id` só vai quando >0 (no create, todos os bens são novos);
+ *   - Strings vazias viram null para baterem com `nullable` no banco;
+ *   - manufactureYear/modelYear viram inteiros;
+ *   - totalArea vira float (parseAreaForBackend lida com vírgula/ponto);
+ *   - localId nunca é enviado (é interno do React).
+ */
+const serializeAssetsForBackend = (assets: ContractAssetItem[]) =>
+  assets.map((a) => ({
+    ...(a.id && a.id > 0 ? { id: a.id } : {}),
+    assetType: a.assetType,
+    brand:           a.brand?.trim() || null,
+    model:           a.model?.trim() || null,
+    manufactureYear: a.manufactureYear ? Number(a.manufactureYear) : null,
+    modelYear:       a.modelYear       ? Number(a.modelYear)       : null,
+    plate:           a.plate?.trim()   || null,
+    renavam:         a.renavam?.trim() || null,
+    chassis:         a.chassis?.trim() || null,
+    description:     a.description?.trim()    || null,
+    location:        a.location?.trim()       || null,
+    registryNumber:  a.registryNumber?.trim() || null,
+    totalArea:       parseAreaForBackend(a.totalArea),
+    boundaries:      a.boundaries?.trim() || null,
+  }));
+
+/**
+ * Devolve uma string curta usada na tabela da aba "Garantias" para
+ * identificar o bem (linha "Identificação").
+ */
+const formatAssetTitle = (a: ContractAssetItem): string => {
+  if (a.assetType === "vehicle") {
+    return [a.brand, a.model].filter(Boolean).join(" ").trim() || "Veículo sem identificação";
+  }
+  return a.description?.trim() || a.location?.trim() || "Imóvel sem descrição";
+};
+
+/**
+ * Devolve a linha de detalhe usada na tabela ("Detalhe").
+ */
+const formatAssetDetail = (a: ContractAssetItem): string => {
+  if (a.assetType === "vehicle") {
+    const years = [a.manufactureYear, a.modelYear].filter(Boolean).join("/");
+    return [a.plate ? `Placa ${a.plate}` : null, years || null].filter(Boolean).join(" · ") || "—";
+  }
+  return [
+    a.registryNumber ? `Mat. ${a.registryNumber}` : null,
+    // a.totalArea já vem formatado (ex.: "1.000.000,00") porque a hidratação
+    // aplicou maskArea. Para bens recém-criados em memória, o valor também
+    // está mascarado pelo onChange do input.
+    a.totalArea ? `${a.totalArea} m²` : null,
+  ].filter(Boolean).join(" · ") || "—";
+};
+
 // Tradução amigável dos tipos de conta para exibição na guia "Dados Bancários"
 const ACCOUNT_TYPE_LABELS: Record<string, string> = {
   corrente: "Corrente",
@@ -153,6 +245,48 @@ const tdBase: React.CSSProperties = { padding: "3px 7px", borderBottom: "1px sol
 // 🛠️ FIX 1: Recolocada a constante tdNum para formatação alinhada à direita dos valores financeiros
 const tdNum: React.CSSProperties = { ...tdBase, fontFamily: "'IBM Plex Mono',monospace", textAlign: "right" };
 const tdCenter: React.CSSProperties = { ...tdBase, textAlign: "center" };
+
+// 🚀 Máscaras estilo maskmoney — armazenam o valor como número (Reais ou fração)
+// e re-renderizam a string formatada a cada keystroke. Evita o sofrimento do
+// `type="number"` com vírgula/ponto e dá UX consistente com sistemas bancários.
+//
+//   maskMoneyDisplay(1234.5)         → "1.234,50"
+//   maskMoneyParse("1.234,50")       → 1234.5 (reais)
+//   maskPercentDisplay(0.0125)       → "1,25"
+//   maskPercentParse("125")          → 0.0125 (taxa decimal)
+const maskMoneyDisplay = (value: number | null | undefined): string => {
+  const cents = Math.round((Number(value) || 0) * 100);
+  if (cents === 0) return "";
+  const sign = cents < 0 ? "-" : "";
+  const abs = Math.abs(cents);
+  const intPart = Math.floor(abs / 100);
+  const decPart = (abs % 100).toString().padStart(2, "0");
+  return `${sign}${intPart.toLocaleString("pt-BR")},${decPart}`;
+};
+
+const maskMoneyParse = (raw: string): number => {
+  const digits = (raw ?? "").replace(/\D/g, "");
+  if (!digits) return 0;
+  return parseInt(digits, 10) / 100;
+};
+
+const maskPercentDisplay = (value: number | null | undefined): string => {
+  // O valor é armazenado como decimal (0.0125 = 1,25%). Multiplico por 100 para obter
+  // a representação percentual exibida ao usuário e mantenho 2 casas via centavos.
+  const cents = Math.round((Number(value) || 0) * 10000);
+  if (cents === 0) return "";
+  const sign = cents < 0 ? "-" : "";
+  const abs = Math.abs(cents);
+  const intPart = Math.floor(abs / 100);
+  const decPart = (abs % 100).toString().padStart(2, "0");
+  return `${sign}${intPart.toLocaleString("pt-BR")},${decPart}`;
+};
+
+const maskPercentParse = (raw: string): number => {
+  const digits = (raw ?? "").replace(/\D/g, "");
+  if (!digits) return 0;
+  return parseInt(digits, 10) / 10000;
+};
 
 export default function Contracts({ contracts, clients, contractTypes = [], filters }: any) {
   const [search, setSearch] = useState(filters?.search || "");
@@ -190,6 +324,17 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     mode: QuickCreateMode;
     editIndex?: number;
     initialValue?: Partial<GuarantorFormValues>;
+  }>({ open: false, mode: "create" });
+
+  // 🚀 Estados da seção "Bens em Garantia" (aba Garantias) — também em memória
+  // até o submit do contrato. Ao salvar, viram JSON dentro do FormData; o
+  // backend faz diff manual contra contract_assets preservando ids/createdAt.
+  const [selectedAssets, setSelectedAssets] = useState<ContractAssetItem[]>([]);
+  const [assetModalState, setAssetModalState] = useState<{
+    open: boolean;
+    mode: AssetModalMode;
+    editIndex?: number;
+    initialValue?: Partial<AssetFormValues>;
   }>({ open: false, mode: "create" });
 
   const selectedClientMeta = useMemo(() => {
@@ -357,6 +502,8 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     setSuggestedGuarantors([]);
     setSearchModalOpen(false);
     setQuickModalState({ open: false, mode: "create" });
+    setSelectedAssets([]);
+    setAssetModalState({ open: false, mode: "create" });
   };
 
   const handleOpenCreate = () => {
@@ -435,6 +582,34 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       }))
     );
 
+    // 🚀 Popula a lista de bens em garantia a partir do c.assets que o
+    // ContractController@index hidrata. O id preservado aqui é fundamental
+    // para o backend fazer UPDATE em vez de DELETE+INSERT (estratégia
+    // diff manual definida na Etapa 2).
+    const incomingAssets = Array.isArray(c.assets) ? c.assets : [];
+    setSelectedAssets(
+      incomingAssets.map((a: any): ContractAssetItem => ({
+        localId: newLocalId(),
+        id: a.id,
+        assetType: a.assetType,
+        brand:           a.brand           ?? "",
+        model:           a.model           ?? "",
+        manufactureYear: a.manufactureYear != null ? String(a.manufactureYear) : "",
+        modelYear:       a.modelYear       != null ? String(a.modelYear)       : "",
+        plate:           a.plate           ?? "",
+        renavam:         a.renavam         ?? "",
+        chassis:         a.chassis         ?? "",
+        description:     a.description     ?? "",
+        location:        a.location        ?? "",
+        registryNumber:  a.registryNumber  ?? "",
+        // 🚀 Aplica a máscara monetária BR (1.234,56) na hidratação para
+        // bater visualmente com o formato exigido pelo input.
+        // .toFixed(2) garante os 2 decimais mesmo quando o valor é "1234.5".
+        totalArea:       a.totalArea != null ? maskArea(Number(a.totalArea).toFixed(2)) : "",
+        boundaries:      a.boundaries      ?? "",
+      }))
+    );
+
     setActiveTab("basico");
     setOpen(true);
   };
@@ -510,6 +685,13 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       // para que ele faça o detach completo na pivot.
       fd.append("guarantor_ids", "");
     }
+
+    // 🚀 Bens em garantia (1:N — tabela contract_assets).
+    // Vai como JSON string dentro do FormData porque o request também
+    // carrega PDFs (multipart). O ContractController decodifica em
+    // `extractAssets` antes de validar e aplicar o diff manual.
+    fd.append("assets", JSON.stringify(serializeAssetsForBackend(selectedAssets)));
+
     return fd;
   };
 
@@ -1016,7 +1198,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                         <label className="sigx-label">CLIENTE DEVEDOR *</label>
                         <select className="sigx-input" value={String(form.clientId || "")} onChange={e => setForm(p => ({ ...p, clientId: Number(e.target.value), chosenBankAccount: "" }))}>
                           <option value="">Selecione o cliente</option>
-                          {clients?.map((c: any) => <option key={c.id} value={String(c.id)}>{c.name} ({c.document})</option>)}
+                          {clients?.map((c: any) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
                         </select>
                       </div>
 
@@ -1220,10 +1402,46 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                   {/* TAB 2: FINANCEIRO */}
                   {activeTab === "financeiro" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
-                        <div><label className="sigx-label">VALOR PRINCIPAL (R$) *</label><input type="number" step="0.01" className="sigx-input" value={form.principalAmount || ""} onChange={num("principalAmount")} required /></div>
-                        <div><label className="sigx-label">Nº DE PARCELAS *</label><input type="number" className="sigx-input" value={form.installmentCount} onChange={numI("installmentCount")} required /></div>
-                        <div><label className="sigx-label">VALOR DA PARCELA (R$) *</label><input type="number" step="0.01" className="sigx-input" value={form.installmentAmount || ""} onChange={num("installmentAmount")} required /></div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 14 }}>
+                        <div>
+                          <label className="sigx-label">VALOR PRINCIPAL (R$) *</label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            className="sigx-input mono"
+                            placeholder="0,00"
+                            value={maskMoneyDisplay(form.principalAmount)}
+                            onChange={e => setForm(p => ({ ...p, principalAmount: maskMoneyParse(e.target.value) }))}
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="sigx-label">VALOR FINANCIADO (R$)</label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            className="sigx-input mono"
+                            placeholder="0,00"
+                            value={maskMoneyDisplay(form.financedTotal)}
+                            onChange={e => setForm(p => ({ ...p, financedTotal: maskMoneyParse(e.target.value) }))}
+                          />
+                        </div>
+                        <div>
+                          <label className="sigx-label">Nº DE PARCELAS *</label>
+                          <input type="number" className="sigx-input" value={form.installmentCount} onChange={numI("installmentCount")} required />
+                        </div>
+                        <div>
+                          <label className="sigx-label">VALOR DA PARCELA (R$) *</label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            className="sigx-input mono"
+                            placeholder="0,00"
+                            value={maskMoneyDisplay(form.installmentAmount)}
+                            onChange={e => setForm(p => ({ ...p, installmentAmount: maskMoneyParse(e.target.value) }))}
+                            required
+                          />
+                        </div>
                       </div>
 
                       <div style={{ borderTop: "1px dashed #cbd5e1", paddingTop: 14 }}>
@@ -1296,22 +1514,51 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                         </div>
                         <div>
                           <label className="sigx-label" style={{ color: "#2563eb", fontWeight: 700 }}>TARIFA DE ESTRUTURAÇÃO (TAC R$)</label>
-                          <input type="number" step="0.01" className="sigx-input" style={{ borderColor: "#2563eb" }} value={form.tacAmount || ""} onChange={num("tacAmount")} placeholder="Ex: 500.00" />
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            className="sigx-input mono"
+                            style={{ borderColor: "#2563eb" }}
+                            placeholder="0,00"
+                            value={maskMoneyDisplay(form.tacAmount)}
+                            onChange={e => setForm(p => ({ ...p, tacAmount: maskMoneyParse(e.target.value) }))}
+                          />
                         </div>
                       </div>
 
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, borderTop: "1px dashed #e2e8f0", paddingTop: 14 }}>
                         <div>
                           <label className="sigx-label">JUROS REMUNERATÓRIOS MENSAL (%)</label>
-                          <input type="number" step="0.001" className="sigx-input" value={form.monthlyInterestRate ? (form.monthlyInterestRate * 100).toFixed(3) : ""} onChange={e => setForm(p => ({ ...p, monthlyInterestRate: parseFloat(e.target.value) / 100 || 0 }))} />
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            className="sigx-input mono"
+                            placeholder="0,00"
+                            value={maskPercentDisplay(form.monthlyInterestRate)}
+                            onChange={e => setForm(p => ({ ...p, monthlyInterestRate: maskPercentParse(e.target.value) }))}
+                          />
                         </div>
                         <div>
                           <label className="sigx-label">MORA MENSAL (ATRASO) (%)</label>
-                          <input type="number" step="0.001" className="sigx-input" value={form.moraRateMonthly ? (form.moraRateMonthly * 100).toFixed(3) : ""} onChange={e => setForm(p => ({ ...p, moraRateMonthly: parseFloat(e.target.value) / 100 || 0 }))} />
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            className="sigx-input mono"
+                            placeholder="0,00"
+                            value={maskPercentDisplay(form.moraRateMonthly)}
+                            onChange={e => setForm(p => ({ ...p, moraRateMonthly: maskPercentParse(e.target.value) }))}
+                          />
                         </div>
                         <div>
                           <label className="sigx-label">MULTA PENAL POR ATRASO (%)</label>
-                          <input type="number" step="0.001" className="sigx-input" value={form.penaltyRate ? (form.penaltyRate * 100).toFixed(3) : ""} onChange={e => setForm(p => ({ ...p, penaltyRate: parseFloat(e.target.value) / 100 || 0 }))} />
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            className="sigx-input mono"
+                            placeholder="0,00"
+                            value={maskPercentDisplay(form.penaltyRate)}
+                            onChange={e => setForm(p => ({ ...p, penaltyRate: maskPercentParse(e.target.value) }))}
+                          />
                         </div>
                       </div>
 
@@ -1321,7 +1568,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                         const positive = ready && (jurosTotal as number) >= 0;
                         const accent = !ready ? "#94a3b8" : (positive ? "#0369a1" : "#dc2626");
                         const accentSoft = !ready ? "#f1f5f9" : (positive ? "#e0f2fe" : "#fee2e2");
-                        const totalPagar = (Number(form.installmentAmount) || 0) * (Number(form.installmentCount) || 0);
+                        const totalPagar = Number(form.financedTotal) || 0;
                         const hasTotal = totalPagar > 0;
 
                         const cards = [
@@ -1595,7 +1842,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                       )}
 
                       {/* 🚀 Sugeridos: fiadores já vinculados a este cliente (tabela client_guarantor) */}
-                      {form.clientId && suggestedGuarantors.length > 0 && (() => {
+                      {!!form.clientId && suggestedGuarantors.length > 0 && (() => {
                         const stillToAdd = suggestedGuarantors.filter(
                           (g) => !selectedGuarantors.some((s) => s.isFromDb && s.id === g.id)
                         );
@@ -1813,18 +2060,144 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                     </div>
                   )}
 
-                  {/* TAB 5: GARANTIAS (apenas garantias reais + confissão de dívida) */}
+                  {/* TAB 5: GARANTIAS (bens em garantia + confissão de dívida) */}
                   {activeTab === "garantias" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                      <div>
-                        <label className="sigx-label">GARANTIAS REAIS ACOPLADAS</label>
-                        <textarea
-                          className="sigx-input"
-                          value={form.guarantees}
-                          onChange={n("guarantees")}
-                          rows={4}
-                          placeholder="Descreva as garantias reais (imóveis, veículos, recebíveis, equipamentos, etc.)..."
-                        />
+                      {/* Botão de ação principal — mesmo padrão da aba Fiadores */}
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAssetModalState({
+                              open: true,
+                              mode: "create",
+                              initialValue: { assetType: "vehicle" },
+                            })
+                          }
+                          className="btn-primary"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            padding: "7px 14px",
+                            fontSize: 11,
+                          }}
+                        >
+                          <Shield size={12} /> Adicionar Garantia
+                        </button>
+                      </div>
+
+                      {/* Tabela de bens vinculados — mesma estilização da tabela de fiadores */}
+                      <div
+                        style={{
+                          border: "1px solid #e5e7eb",
+                          borderRadius: 8,
+                          overflow: "hidden",
+                          background: "white",
+                        }}
+                      >
+                        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11 }}>
+                          <thead>
+                            <tr style={{ background: "#f1f5f9" }}>
+                              <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 90 }}>Tipo</th>
+                              <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>Identificação</th>
+                              <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 220 }}>Detalhe</th>
+                              <th style={{ padding: "7px 10px", textAlign: "center", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 110 }}>Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedAssets.length === 0 ? (
+                              <tr>
+                                <td colSpan={4} style={{ padding: 28, textAlign: "center", color: "#94a3b8" }}>
+                                  <Shield size={24} style={{ opacity: 0.3, margin: "0 auto 6px", display: "block" }} />
+                                  <span style={{ fontSize: 11.5 }}>
+                                    Nenhum bem vinculado. Use os botões acima para adicionar.
+                                  </span>
+                                </td>
+                              </tr>
+                            ) : (
+                              selectedAssets.map((a, idx) => {
+                                const isVehicle = a.assetType === "vehicle";
+                                const Icon = isVehicle ? Car : Home;
+                                return (
+                                  <tr key={a.localId} style={{ background: idx % 2 === 1 ? "#fafafa" : "white" }}>
+                                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9" }}>
+                                      <span
+                                        style={{
+                                          display: "inline-flex",
+                                          alignItems: "center",
+                                          gap: 4,
+                                          padding: "2px 8px",
+                                          borderRadius: 4,
+                                          fontSize: 9,
+                                          fontWeight: 700,
+                                          background: isVehicle ? "#ecfdf5" : "#eff6ff",
+                                          color: isVehicle ? "#065f46" : "#1e40af",
+                                        }}
+                                      >
+                                        <Icon size={10} />
+                                        {isVehicle ? "Veículo" : "Imóvel"}
+                                      </span>
+                                    </td>
+                                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", fontWeight: 600, color: "#0f172a" }}>
+                                      {formatAssetTitle(a)}
+                                    </td>
+                                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", color: "#475569" }}>
+                                      {formatAssetDetail(a)}
+                                    </td>
+                                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", textAlign: "center" }}>
+                                      <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
+                                        <button
+                                          type="button"
+                                          className="btn-icon"
+                                          title="Visualizar dados"
+                                          onClick={() =>
+                                            setAssetModalState({
+                                              open: true,
+                                              mode: "view",
+                                              editIndex: idx,
+                                              initialValue: a,
+                                            })
+                                          }
+                                        >
+                                          <Eye size={11} style={{ color: "#2563eb" }} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn-icon"
+                                          title="Editar bem"
+                                          onClick={() =>
+                                            setAssetModalState({
+                                              open: true,
+                                              mode: "edit",
+                                              editIndex: idx,
+                                              initialValue: a,
+                                            })
+                                          }
+                                        >
+                                          <Edit2 size={11} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn-icon text-danger"
+                                          title="Remover do contrato"
+                                          onClick={() => setSelectedAssets((prev) => prev.filter((_, i) => i !== idx))}
+                                        >
+                                          <Trash2 size={11} />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="keep-case" style={{ fontSize: 10.5, color: "#64748b", lineHeight: 1.5 }}>
+                        Bens (veículos e imóveis) são gravados junto com o contrato em uma única transação.
+                        Ao remover um bem desta lista, ele será excluído do contrato no próximo salvamento.
                       </div>
 
                       {/* 🚀 Confissão de Dívida */}
@@ -2130,6 +2503,43 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
         onPick={(picked) => {
           picked.forEach((g) => addGuarantorFromDb(g));
           setSearchModalOpen(false);
+        }}
+      />
+
+      {/* ── SUB-MODAL DA SEÇÃO "BENS EM GARANTIA" ───────────────────────── */}
+      <AssetQuickCreateModal
+        open={assetModalState.open}
+        mode={assetModalState.mode}
+        initialValue={assetModalState.initialValue}
+        onClose={() => setAssetModalState({ open: false, mode: "create" })}
+        onConfirm={(values) => {
+          // Edição: substitui o item pelo índice preservando id e localId
+          if (
+            (assetModalState.mode === "edit" || assetModalState.mode === "view") &&
+            typeof assetModalState.editIndex === "number"
+          ) {
+            const idx = assetModalState.editIndex;
+            setSelectedAssets((prev) =>
+              prev.map((it, i) =>
+                i === idx
+                  ? {
+                      ...it,           // preserva localId e id (DB)
+                      ...values,       // sobrescreve campos do formulário
+                    }
+                  : it
+              )
+            );
+          } else {
+            // Criação on-the-fly
+            setSelectedAssets((prev) => [
+              ...prev,
+              {
+                ...values,
+                localId: newLocalId(),
+              },
+            ]);
+          }
+          setAssetModalState({ open: false, mode: "create" });
         }}
       />
     </UnyPayLayout>
