@@ -25,7 +25,35 @@ class ClientController extends Controller
                   ->orWhere('email', 'like', '%' . $search . '%');
         }
 
-        $clients = $query->orderBy('name', 'asc')->get()->toArray();
+        $clients = $query->orderBy('name', 'asc')->get();
+
+        // 🚀 Hidrata os fiadores vinculados a cada cliente (NxN — client_guarantor)
+        // em um único JOIN extra, evitando N+1. O front consome em `client.guarantors`
+        // para exibir na aba "Fiadores" do modal.
+        $clientIds = $clients->pluck('id')->all();
+        $guarantorsByClient = [];
+        if (!empty($clientIds)) {
+            $rows = DB::table('client_guarantor as cg')
+                ->join('guarantors as g', 'g.id', '=', 'cg.guarantorId')
+                ->whereIn('cg.clientId', $clientIds)
+                ->orderBy('g.name')
+                ->get(['cg.clientId', 'g.id', 'g.name', 'g.personType', 'g.cpf', 'g.cnpj']);
+
+            foreach ($rows as $row) {
+                $guarantorsByClient[$row->clientId][] = [
+                    'id'         => (int) $row->id,
+                    'name'       => $row->name,
+                    'personType' => $row->personType,
+                    'document'   => $row->personType === 'PJ' ? $row->cnpj : $row->cpf,
+                ];
+            }
+        }
+
+        $clients = $clients->map(function ($c) use ($guarantorsByClient) {
+            $arr = (array) $c;
+            $arr['guarantors'] = $guarantorsByClient[$c->id] ?? [];
+            return $arr;
+        })->all();
 
         return Inertia::render('Clients', [
             'clients' => $clients,
@@ -41,35 +69,53 @@ class ClientController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'name'       => 'required|string|max:255',
-            'document'   => 'nullable|string',
-            'personType' => 'required|string|in:PF,PJ',
-            'riskRating' => 'required|string|in:A,B,C,D,E',
-            'phone'      => 'nullable|string',
-            'email'      => 'nullable|email',
-            'address'    => 'nullable|string',
-            'city'       => 'nullable|string',
-            'state'      => 'nullable|string|max:2',
-            'zipCode'    => 'nullable|string',
-            'notes'      => 'nullable|string', 
+            'name'            => 'required|string|max:255',
+            'document'        => 'nullable|string',
+            'personType'      => 'required|string|in:PF,PJ',
+            'riskRating'      => 'required|string|in:A,B,C,D,E',
+            'phone'           => 'nullable|string',
+            'email'           => 'nullable|email',
+            'address'         => 'nullable|string',
+            'city'            => 'nullable|string',
+            'state'           => 'nullable|string|max:2',
+            'zipCode'         => 'nullable|string',
+            'notes'           => 'nullable|string',
+            'guarantor_ids'   => 'nullable|array',
+            'guarantor_ids.*' => 'integer|exists:guarantors,id',
         ]);
 
-        DB::table('clients')->insert([
+        $clientId = DB::table('clients')->insertGetId([
             'user_id'    => Auth::id(),
             'name'       => $validated['name'],
-            'document'   => $validated['document'],
+            'document'   => $validated['document'] ?? null,
             'personType' => $validated['personType'],
             'riskRating' => $validated['riskRating'],
-            'phone'      => $validated['phone'],
-            'email'      => $validated['email'],
-            'address'    => $validated['address'],
-            'city'       => $validated['city'],
-            'state'      => $validated['state'],
-            'zipCode'    => $validated['zipCode'],
-            'notes'      => $validated['notes'], // JSON contendo as Contas + PIX + Fiadores
+            'phone'      => $validated['phone'] ?? null,
+            'email'      => $validated['email'] ?? null,
+            'address'    => $validated['address'] ?? null,
+            'city'       => $validated['city'] ?? null,
+            'state'      => $validated['state'] ?? null,
+            'zipCode'    => $validated['zipCode'] ?? null,
+            'notes'      => $validated['notes'] ?? null, // JSON contendo as Contas + PIX + Fiadores
             'createdAt'  => now(),
             'updatedAt'  => now()
         ]);
+
+        // 🚀 Sincroniza os fiadores vinculados (NxN — tabela client_guarantor).
+        // Apenas executado se a chave guarantor_ids veio no payload (mesmo que vazia),
+        // permitindo que o cadastro do cliente continue suportando carteiras sem fiador.
+        if ($request->has('guarantor_ids')) {
+            $ids = collect($request->input('guarantor_ids', []))
+                ->filter(fn ($v) => $v !== '' && $v !== null)
+                ->map(fn ($v) => (int) $v)
+                ->values()
+                ->all();
+
+            $client = Client::find($clientId);
+            if ($client) {
+                $client->guarantors()->sync($ids);
+            }
+        }
 
         return redirect()->back();
     }
@@ -80,34 +126,51 @@ class ClientController extends Controller
     public function update(Request $request, int $id)
     {
         $validated = $request->validate([
-            'name'       => 'required|string|max:255',
-            'document'   => 'nullable|string',
-            'personType' => 'required|string|in:PF,PJ',
-            'riskRating' => 'required|string|in:A,B,C,D,E',
-            'phone'      => 'nullable|string',
-            'email'      => 'nullable|email',
-            'address'    => 'nullable|string',
-            'city'       => 'nullable|string',
-            'state'      => 'nullable|string|max:2',
-            'zipCode'    => 'nullable|string',
-            'notes'      => 'nullable|string',
+            'name'            => 'required|string|max:255',
+            'document'        => 'nullable|string',
+            'personType'      => 'required|string|in:PF,PJ',
+            'riskRating'      => 'required|string|in:A,B,C,D,E',
+            'phone'           => 'nullable|string',
+            'email'           => 'nullable|email',
+            'address'         => 'nullable|string',
+            'city'            => 'nullable|string',
+            'state'           => 'nullable|string|max:2',
+            'zipCode'         => 'nullable|string',
+            'notes'           => 'nullable|string',
+            'guarantor_ids'   => 'nullable|array',
+            'guarantor_ids.*' => 'integer|exists:guarantors,id',
         ]);
 
         DB::table('clients')->where('id', $id)->update([
             'user_id'    => Auth::id(),
             'name'       => $validated['name'],
-            'document'   => $validated['document'],
+            'document'   => $validated['document'] ?? null,
             'personType' => $validated['personType'],
             'riskRating' => $validated['riskRating'],
-            'phone'      => $validated['phone'],
-            'email'      => $validated['email'],
-            'address'    => $validated['address'],
-            'city'       => $validated['city'],
-            'state'      => $validated['state'],
-            'zipCode'    => $validated['zipCode'],
-            'notes'      => $validated['notes'], 
+            'phone'      => $validated['phone'] ?? null,
+            'email'      => $validated['email'] ?? null,
+            'address'    => $validated['address'] ?? null,
+            'city'       => $validated['city'] ?? null,
+            'state'      => $validated['state'] ?? null,
+            'zipCode'    => $validated['zipCode'] ?? null,
+            'notes'      => $validated['notes'] ?? null,
             'updatedAt'  => now() // 🚀 Garantido Letra Maiúscula conforme a imagem do HeidiSQL
         ]);
+
+        // 🚀 Sincroniza os fiadores vinculados quando a chave veio no payload.
+        // Se vier vazia, faz detach completo (estratégia idêntica ao GuarantorController).
+        if ($request->has('guarantor_ids')) {
+            $ids = collect($request->input('guarantor_ids', []))
+                ->filter(fn ($v) => $v !== '' && $v !== null)
+                ->map(fn ($v) => (int) $v)
+                ->values()
+                ->all();
+
+            $client = Client::find($id);
+            if ($client) {
+                $client->guarantors()->sync($ids);
+            }
+        }
 
         return redirect()->back();
     }

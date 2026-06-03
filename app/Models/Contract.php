@@ -53,4 +53,16 @@ class Contract extends Model
             'guarantorId'
         )->withTimestamps('createdAt', 'updatedAt');
     }
+
+    /**
+     * Bens ofertados em garantia (1:N — veículos e imóveis).
+     *
+     * Estratégia de update no controller: diff manual (preserva IDs e createdAt
+     * dos registros que continuam) — definido na Etapa 2 desta feature.
+     * Cascade configurado na migration de contract_assets.
+     */
+    public function assets(): HasMany
+    {
+        return $this->hasMany(ContractAsset::class, 'contractId');
+    }
 }
