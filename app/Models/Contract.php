@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Contract extends Model
@@ -38,5 +39,18 @@ class Contract extends Model
     public function installments(): HasMany
     {
         return $this->hasMany(Installment::class, 'contractId');
+    }
+
+    /**
+     * Fiadores vinculados a este contrato (NxN — substitui o antigo campo texto `guarantors`).
+     */
+    public function guarantors(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            Guarantor::class,
+            'contract_guarantor',
+            'contractId',
+            'guarantorId'
+        )->withTimestamps('createdAt', 'updatedAt');
     }
 }

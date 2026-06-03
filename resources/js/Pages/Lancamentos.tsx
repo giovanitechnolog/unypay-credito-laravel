@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
+import ConfirmDialog from "../Components/ConfirmDialog";
 import TableGroupBadges from "../Components/TableGroupBadges";
 import TableColumnPicker from "../Components/TableColumnPicker";
 import { useColumnVisibility } from "../hooks/useColumnVisibility";
@@ -116,6 +117,7 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
   const [priceId, setPriceId]           = useState<number|null>(null);
   const [priceData, setPriceData]       = useState<any>(null);
   const [priceLoading, setPriceLoading] = useState(false);
+  const [contractToDelete, setContractToDelete] = useState<any | null>(null);
 
   // ── Visibilidade de colunas (persistida) ─────────────────────────────────
   const { visibleIds, toggleColumn, setColumnsVisible, resetDefaults } =
@@ -195,10 +197,17 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
       .catch(() => setPriceLoading(false));
   };
 
-  const handleDelete = (id: number) => {
-    if (!confirm("Deseja expurgar este contrato e seus lançamentos da auditoria?")) return;
-    router.delete(`/api/contracts/destroy/${id}`, {
-      onSuccess: () => toast.success("Contrato excluído com sucesso do sistema!"),
+  const handleDelete = (contract: any) => {
+    setContractToDelete(contract);
+  };
+
+  const confirmDelete = () => {
+    if (!contractToDelete) return;
+    router.delete(`/api/contracts/destroy/${contractToDelete.id}`, {
+      onSuccess: () => {
+        toast.success("Contrato excluído com sucesso do sistema!");
+        setContractToDelete(null);
+      },
       onError:   (err: any) => toast.error("Erro ao deletar ativo: " + err.message),
     });
   };
@@ -727,7 +736,7 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
                             <ExternalLink size={12}/>
                           </a>
                         )}
-                        <button type="button" style={{ width:22, height:22, border:"none", background:"transparent", cursor:"pointer", borderRadius:3, display:"flex", alignItems:"center", justifyContent:"center", color:"#dc2626" }} title="Excluir" onClick={() => handleDelete(c.id)}>
+                        <button type="button" style={{ width:22, height:22, border:"none", background:"transparent", cursor:"pointer", borderRadius:3, display:"flex", alignItems:"center", justifyContent:"center", color:"#dc2626" }} title="Excluir" onClick={() => handleDelete(c)}>
                           <Trash2 size={12}/>
                         </button>
                       </div>
@@ -872,6 +881,23 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!contractToDelete}
+        tone="danger"
+        title="Expurgar Contrato"
+        description="Esta ação remove permanentemente o contrato e toda a auditoria de lançamentos vinculada. Não é possível desfazer."
+        entityLabel="Contrato"
+        entityName={contractToDelete?.contractName}
+        entityDetail={contractToDelete?.code}
+        consequences={[
+          "Lançamentos, parcelas e baixas associadas serão apagados.",
+          "Documentos digitais anexados ao contrato também serão removidos.",
+        ]}
+        confirmLabel="Expurgar Contrato"
+        onConfirm={confirmDelete}
+        onClose={() => setContractToDelete(null)}
+      />
     </UnyPayLayout>
   );
 }

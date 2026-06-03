@@ -4,7 +4,7 @@ import {
   LayoutDashboard, List, Users, FileText, Calculator,
   TrendingUp, ClipboardList, LogOut, Menu, Bell,
   ChevronDown, Shield, CreditCard, ChevronRight, History,
-  UserCog
+  UserCog, Handshake
 } from "lucide-react";
 
 const NAV_SECTIONS = [
@@ -14,6 +14,7 @@ const NAV_SECTIONS = [
       { href: "/",            label: "Dashboard",      icon: LayoutDashboard }, // Ajustado para a raiz do Laravel
       { href: "/lancamentos", label: "Lançamentos",     icon: List },
       { href: "/clients",     label: "Clientes",        icon: Users },
+      { href: "/fiadores",    label: "Fiadores",        icon: Handshake },
       { href: "/contracts",   label: "Contratos",       icon: FileText },
       { href: "/pagamentos",  label: "Pagamentos",      icon: CreditCard },
     ],
@@ -47,6 +48,7 @@ function getPageTitle(url: string) {
   if (url === "/lancamentos") return "Lançamentos";
   if (url === "/clients") return "Clientes";
   if (url.startsWith("/clients/")) return "Detalhe do Cliente";
+  if (url === "/fiadores") return "Fiadores";
   if (url.startsWith("/contracts/") && url.endsWith("/price")) return "Tabela Price";
   if (url.startsWith("/contracts/")) return "Detalhe do Contrato";
   if (url === "/contracts") return "Contratos";
@@ -65,6 +67,7 @@ function getBreadcrumb(url: string) {
   if (url === "/lancamentos") return [base, { label: "Lançamentos" }];
   if (url === "/clients") return [base, { label: "Clientes" }];
   if (url.startsWith("/clients/")) return [base, { label: "Clientes", href: "/clients" }, { label: "Detalhe" }];
+  if (url === "/fiadores") return [base, { label: "Fiadores" }];
   if (url.startsWith("/contracts/") && url.endsWith("/price")) return [base, { label: "Contratos", href: "/contracts" }, { label: "Tabela Price" }];
   if (url.startsWith("/contracts/")) return [base, { label: "Contratos", href: "/contracts" }, { label: "Detalhe" }];
   if (url === "/contracts") return [base, { label: "Contratos" }];

@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
+import ConfirmDialog from "../Components/ConfirmDialog";
 import { api, extractFirstError } from "../lib/api";
 
 interface User {
@@ -681,25 +682,28 @@ export default function UsersPage() {
           </div>
         )}
 
-        {/* ── MODAL: EXCLUSÃO DE COLABORADOR ─────────────────────────────────── */}
-        {deleteModalUser && (
-          <div className="modal-overlay" style={{ display: "flex" }}>
-            <div className="modal-content" style={{ maxWidth: 440 }}>
-              <div className="modal-header">
-                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "#dc2626", display: "flex", alignItems: "center", gap: 6 }}><ShieldAlert size={16} /> Revogar Credenciais</h3>
-                <button onClick={() => setDeleteModalUser(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8" }}><X size={16} /></button>
-              </div>
-              <div className="modal-body" style={{ fontSize: 12, color: "#475569", lineHeight: "1.5" }}>
-                Tem certeza que deseja remover permanentemente o operador <strong style={{ color: "#0f172a" }}>{deleteModalUser.name}</strong>?<br />
-                Esta ação revogará imediatamente todas as chaves digitais e chaves de auditoria ligadas a este perfil.
-              </div>
-              <div className="modal-footer">
-                <button className="btn-secondary" onClick={() => setDeleteModalUser(null)}>Voltar</button>
-                <button className="btn-danger" onClick={handleExecuteDelete}>Confirmar Revogação</button>
-              </div>
-            </div>
-          </div>
-        )}
+        <ConfirmDialog
+          open={!!deleteModalUser}
+          tone="danger"
+          icon={ShieldAlert}
+          title="Revogar Credenciais"
+          description={
+            <>
+              Esta ação <strong>revoga imediatamente</strong> todas as chaves
+              digitais e de auditoria deste operador. Não é possível desfazer.
+            </>
+          }
+          entityLabel="Operador"
+          entityName={deleteModalUser?.name}
+          entityDetail={deleteModalUser?.email}
+          consequences={[
+            "O acesso à plataforma será encerrado em todas as sessões ativas.",
+            "Histórico de auditoria do usuário será preservado para fins legais.",
+          ]}
+          confirmLabel="Confirmar Revogação"
+          onConfirm={handleExecuteDelete}
+          onClose={() => setDeleteModalUser(null)}
+        />
       </div>
 
     </UnyPayLayout>
