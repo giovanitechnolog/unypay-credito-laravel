@@ -31,7 +31,16 @@ class GuarantorController extends Controller
 
         $query = Guarantor::query()
             ->with(['clients:id,name'])
-            ->withCount('clients');
+            ->withCount('clients')
+            // 🚀 Contagens por papel exercido em CONTRATOS — alimentam os
+            // cards "Vínculos Fiadores" / "Vínculos Codevedores" e as colunas
+            // "Vínculo Fiador" / "Vínculo Codevedor" da grade. A relação
+            // `contracts()` aponta para a pivot contract_guarantor; aqui
+            // filtramos por role para separar as duas contagens.
+            ->withCount([
+                'contracts as fiadores_count'    => fn ($q) => $q->where('contract_guarantor.role', 'FIADOR'),
+                'contracts as codevedores_count' => fn ($q) => $q->where('contract_guarantor.role', 'CODEVEDOR'),
+            ]);
 
         if ($search !== '') {
             $query->where(function ($q) use ($search) {

@@ -9,6 +9,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Contract extends Model
 {
+    /** Papéis aceitos na pivot contract_guarantor. Reflete o ENUM da migration. */
+    public const ROLE_FIADOR    = 'FIADOR';
+    public const ROLE_CODEVEDOR = 'CODEVEDOR';
+
     protected $fillable = [
         'clientId', 'code', 'contractName', 'creditor', 'contractType', 'contractDate',
         'status', 'validated', 'principalAmount', 'financedTotal', 'tacAmount', 'iofAmount',
@@ -42,7 +46,13 @@ class Contract extends Model
     }
 
     /**
-     * Fiadores vinculados a este contrato (NxN — substitui o antigo campo texto `guarantors`).
+     * Fiadores vinculados a este contrato (NxN — pivot contract_guarantor com role='FIADOR').
+     *
+     * O cadastro mestre (`guarantors`) é compartilhado entre Fiadores e Codevedores;
+     * o que diferencia o papel é a coluna `role` na pivot. Por isso a relação aplica
+     * `wherePivot('role', Contract::ROLE_FIADOR)` para escopar somente quem está
+     * vinculado neste papel — e é por isso que `syncWithPivotValues()` é seguro:
+     * o detach automático considera apenas as linhas que casam com o filtro.
      */
     public function guarantors(): BelongsToMany
     {
@@ -51,7 +61,30 @@ class Contract extends Model
             'contract_guarantor',
             'contractId',
             'guarantorId'
-        )->withTimestamps('createdAt', 'updatedAt');
+        )
+            ->wherePivot('role', self::ROLE_FIADOR)
+            ->withPivot('role')
+            ->withTimestamps('createdAt', 'updatedAt');
+    }
+
+    /**
+     * Codevedores vinculados a este contrato (NxN — pivot contract_guarantor com role='CODEVEDOR').
+     *
+     * Mesma estrutura da relação guarantors(), apenas com o filtro de role invertido.
+     * Usar o mesmo cadastro `guarantors` evita duplicação e permite que a mesma
+     * pessoa figure como Fiador em um contrato e Codevedor em outro.
+     */
+    public function codebtors(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            Guarantor::class,
+            'contract_guarantor',
+            'contractId',
+            'guarantorId'
+        )
+            ->wherePivot('role', self::ROLE_CODEVEDOR)
+            ->withPivot('role')
+            ->withTimestamps('createdAt', 'updatedAt');
     }
 
     /**

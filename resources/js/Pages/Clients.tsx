@@ -3,16 +3,16 @@ import { Head, router } from "@inertiajs/react";
 import {
   Plus, Search, Edit2, Trash2, Users, Building2,
   User, Shield, FileText, X, Eye, Upload, Loader2, CreditCard, QrCode,
-  UserPlus, Sparkles, CheckCircle,
+  UserCheck, Scale, IdCard, MapPin, Landmark, ScrollText,
 } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
 import ConfirmDialog from "../Components/ConfirmDialog";
 import TableGroupBadges from "../Components/TableGroupBadges";
 import TableColumnPicker from "../Components/TableColumnPicker";
-import GuarantorQuickCreateModal, { QuickCreateMode } from "../Components/GuarantorQuickCreateModal";
-import GuarantorSearchModal, { GuarantorLite } from "../Components/GuarantorSearchModal";
-import { GuarantorFormValues, EMPTY_GUARANTOR_FORM } from "../Components/GuarantorFormFields";
+import GuarantorQuickCreateModal from "../Components/GuarantorQuickCreateModal";
+import ClientGuarantorsTable, { ClientGuarantorRow } from "../Components/ClientGuarantorsTable";
+import { GuarantorFormValues } from "../Components/GuarantorFormFields";
 import { api, extractFirstError } from "../lib/api";
 import { useColumnVisibility } from "../hooks/useColumnVisibility";
 import {
@@ -99,25 +99,20 @@ const maskPhone = (v: string) => v.replace(/\D/g, "").replace(/^(\d{2})(\d)/, "(
 
 const onlyDigits = (v: string) => (v ?? "").replace(/\D/g, "");
 
-// 🚀 Estrutura usada pela aba "Fiadores" do modal — espelha o padrão do
-// modal de Contratos (selectedGuarantors). Cada item carrega os dados
-// resumidos para a tabela e, quando "Novo", o snapshot do form para reedição.
+// 🚀 Vínculo apresentado na aba "Fiadores / Codevedores" do modal — agora
+// é uma listagem somente-leitura derivada dos CONTRATOS do cliente. Cada
+// item representa uma combinação única (pessoa, papel) extraída da pivot
+// contract_guarantor. Não há mais criação/edição/remoção aqui — esta tela
+// apenas exibe quem atua como Fiador ou Codevedor nos contratos do cliente.
 type ClientGuarantor = {
-  /** Chave estável para o React (também distingue novos antes do POST). */
+  /** Chave estável para o React. Composta por `${id}-${role}` no hidrate. */
   localId: string;
-  /** Presente apenas quando isFromDb=true. */
-  id?: number;
-  isFromDb: boolean;
+  id: number;
   name: string;
   personType: "PF" | "PJ";
   document: string | null;
-  formValues?: GuarantorFormValues;
+  role: "FIADOR" | "CODEVEDOR";
 };
-
-const newLocalId = () =>
-  typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `cg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 /** Formata CPF/CNPJ a partir dos dígitos persistidos para a tabela da aba. */
 const formatGuarantorDocument = (doc: string | null | undefined, type: "PF" | "PJ"): string => {
@@ -141,11 +136,11 @@ const maskPixKey = (v: string, type: string) => {
 };
 
 const TABS = [
-  { key: "dados", label: "Dados Pessoais" },
-  { key: "endereco", label: "Endereço" },
-  { key: "financeiro", label: "Dados Financeiros" },
-  { key: "fiadores", label: "Fiadores" },
-  { key: "obs", label: "Obs. Jurídicas" },
+  { key: "dados",      label: "Dados Pessoais",         icon: IdCard },
+  { key: "endereco",   label: "Endereço",               icon: MapPin },
+  { key: "financeiro", label: "Dados Financeiros",      icon: Landmark },
+  { key: "fiadores",   label: "Fiadores / Codevedores", icon: UserCheck },
+  { key: "obs",        label: "Obs. Jurídicas",         icon: ScrollText },
 ];
 
 const Label = ({ children }: { children: React.ReactNode }) => (
@@ -176,16 +171,26 @@ export default function Clients({ clients, filters }: any) {
   const [focusedBankIdx, setFocusedBankIdx] = useState<number | null>(null);
   const [cepMeta, setCepMeta] = useState({ main: "", fiador1: "", fiador2: "" });
 
-  // 🚀 Estados da aba "Fiadores" — gerenciados em memória até o submit do cliente.
-  // Espelha o padrão usado no modal de Contratos para uniformizar a UX.
+  // 🚀 Lista de pessoas (Fiador/Codevedor) que aparecem em CONTRATOS do
+  // cliente — somente leitura. A fonte é a pivot contract_guarantor (com role)
+  // e os dados chegam hidratados pelo ClientController@index. Não há mais UI
+  // para adicionar/buscar/editar — gerenciar vínculos é feito na aba
+  // "Fiador / Codevedor" do contrato.
   const [selectedGuarantors, setSelectedGuarantors] = useState<ClientGuarantor[]>([]);
-  const [searchModalOpen, setSearchModalOpen] = useState(false);
-  const [quickModalState, setQuickModalState] = useState<{
+  // Modal usado APENAS para visualizar (modo "view") os dados completos da
+  // pessoa quando o usuário clica no olhinho. Não há mais "create"/"edit-new"
+  // nesta tela.
+  const [viewModalState, setViewModalState] = useState<{
     open: boolean;
-    mode: QuickCreateMode;
-    editIndex?: number;
     initialValue?: Partial<GuarantorFormValues>;
-  }>({ open: false, mode: "create" });
+  }>({ open: false });
+
+  // Modal popup acionado pelo ícone da nova coluna "Fiadores" da grade
+  // principal — mostra a tabela completa de Fiadores+Codevedores do cliente.
+  const [guarantorsModal, setGuarantorsModal] = useState<{
+    client: any;
+    list: ClientGuarantorRow[];
+  } | null>(null);
 
   const { visibleIds, toggleColumn, setColumnsVisible, resetDefaults } =
     useColumnVisibility<ClientsColumnId>("unypay.clients.columns.v1", CLIENTS_COLUMNS);
@@ -251,12 +256,14 @@ export default function Clients({ clients, filters }: any) {
       // (vindos do back via index() — relação NxN client_guarantor).
       const linked: any[] = client.guarantors ?? [];
       setSelectedGuarantors(linked.map((g: any) => ({
-        localId: newLocalId(),
+        // localId composto evita colisão quando a mesma pessoa aparece em
+        // dois papéis distintos para o mesmo cliente (Fiador e Codevedor).
+        localId: `${g.id}-${g.role ?? "FIADOR"}`,
         id: Number(g.id),
-        isFromDb: true,
         name: g.name,
         personType: (g.personType as "PF" | "PJ") ?? "PF",
         document: g.document ?? null,
+        role: (g.role as "FIADOR" | "CODEVEDOR") ?? "FIADOR",
       })));
     } else {
       setEditing(null);
@@ -285,74 +292,10 @@ export default function Clients({ clients, filters }: any) {
   };
 
   /**
-   * 🚀 Persiste os fiadores marcados como "Novo" e devolve a lista final de IDs
-   * prontos para o sync na pivot client_guarantor.
-   *
-   * Estratégia: faz POST sequencial em /api/guarantors. Como nesta tela ainda
-   * não temos o id do cliente em modo "create", criamos os fiadores SEM
-   * vinculação prévia (clientIds=[]) — o sync correto acontece logo depois,
-   * via guarantor_ids[] no payload do próprio cliente (ClientController).
-   */
-  const persistNewGuarantors = async (): Promise<number[]> => {
-    const finalIds: number[] = [];
-
-    for (const g of selectedGuarantors) {
-      if (g.isFromDb && typeof g.id === "number") {
-        finalIds.push(g.id);
-        continue;
-      }
-      if (!g.formValues) {
-        toast.error(`Fiador "${g.name}" sem dados completos.`);
-        throw new Error("guarantor-missing-data");
-      }
-      const fv = g.formValues;
-      const basePayload = {
-        personType: fv.personType,
-        name: fv.name,
-        street: fv.street,
-        number: fv.number,
-        neighborhood: fv.neighborhood,
-        city: fv.city,
-        state: fv.state.toUpperCase(),
-        zipCode: onlyDigits(fv.zipCode),
-        clientIds: [], // a vinculação será feita no sync do ClientController
-      };
-      const payload =
-        fv.personType === "PF"
-          ? {
-              ...basePayload,
-              nationality: fv.nationality,
-              maritalStatus: fv.maritalStatus,
-              cpf: onlyDigits(fv.cpf),
-              rg: fv.rg,
-              cnpj: null,
-              tradeName: null,
-              stateRegistration: null,
-            }
-          : {
-              ...basePayload,
-              cnpj: onlyDigits(fv.cnpj),
-              tradeName: fv.tradeName,
-              stateRegistration: fv.stateRegistration,
-              nationality: null,
-              maritalStatus: null,
-              cpf: null,
-              rg: null,
-            };
-      const { data } = await api.post("/api/guarantors", payload);
-      const createdId = Number(data?.guarantor?.id);
-      if (!createdId) throw new Error("guarantor-create-failed");
-      finalIds.push(createdId);
-    }
-
-    return finalIds;
-  };
-
-  /**
    * 🚀 Abre o sub-modal em modo "view" (somente leitura) com TODOS os dados
-   * do fiador. Como a tabela mantém apenas o resumo (nome, tipo, documento),
-   * buscamos o detalhe completo no backend antes de exibir endereço, RG,
-   * nacionalidade, etc. Espelha o comportamento da aba Fiadores em Contratos.
+   * da pessoa (Fiador ou Codevedor). Como a tabela mantém apenas o resumo
+   * (nome, tipo, documento, papel), buscamos o detalhe completo no backend
+   * antes de exibir endereço, RG, nacionalidade, etc.
    */
   const openGuarantorViewModal = async (guarantorId: number) => {
     try {
@@ -379,23 +322,18 @@ export default function Clients({ clients, filters }: any) {
         state: g.state ?? "",
         zipCode: g.zipCode ? maskCEP(g.zipCode) : "",
       };
-      setQuickModalState({ open: true, mode: "view", initialValue });
+      setViewModalState({ open: true, initialValue });
     } catch (err) {
-      toast.error(extractFirstError(err, "Falha ao carregar dados do fiador."));
+      toast.error(extractFirstError(err, "Falha ao carregar dados da pessoa."));
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    let finalGuarantorIds: number[] = [];
-    try {
-      finalGuarantorIds = await persistNewGuarantors();
-    } catch (err) {
-      toast.error(extractFirstError(err, "Falha ao salvar os fiadores novos."));
-      return;
-    }
-
+    // 🚀 A aba "Fiadores / Codevedores" virou somente leitura — o vínculo
+    // pessoa↔cliente passou a ser derivado dos contratos do cliente, então
+    // não precisamos mais persistir/sincronizar guarantor_ids aqui.
     const data: Record<string, any> = {
       name: form.name, document: form.document || null,
       email: form.email || null, phone: form.phone || null,
@@ -403,9 +341,6 @@ export default function Clients({ clients, filters }: any) {
       state: form.state || null, zipCode: form.zipCode || null,
       personType: form.personType, riskRating: form.riskRating,
       notes: buildNotes(form),
-      // 🚀 Inertia/Laravel aceita arrays nativos no payload — o backend valida
-      // como guarantor_ids.* e faz $client->guarantors()->sync($ids).
-      guarantor_ids: finalGuarantorIds,
     };
     if (editing) {
       router.put(`/clients/${editing}`, data, { onSuccess: () => setOpen(false) });
@@ -496,22 +431,43 @@ export default function Clients({ clients, filters }: any) {
         // 🚀 Exibe de forma inteligente a primeira chave PIX que encontrar nas contas bancárias
         const primeiraContaComPix = extra.bankAccounts?.find((b: any) => b.hasPix && b.pixKey);
         return <span style={{ fontSize: 10, color: "#475569", fontWeight: 500 }}>{primeiraContaComPix ? primeiraContaComPix.pixKey : "—"}</span>;
-      case "fiador1": {
-        // 🚀 Agora exibe os fiadores institucionais vinculados (NxN — client_guarantor),
-        // hidratados pelo ClientController@index. Mantemos o fallback nos campos
-        // legados (notes JSON) para clientes que ainda não migraram.
-        const linked = (client.guarantors ?? []) as Array<{ name: string }>;
-        if (linked.length > 0) {
-          return <span style={{ fontSize: 10, color: "#6b7280" }}>{linked[0].name}</span>;
-        }
-        return <span style={{ fontSize: 10, color: "#6b7280" }}>{extra.fiador1Nome || "—"}</span>;
-      }
-      case "fiador2": {
-        const linked = (client.guarantors ?? []) as Array<{ name: string }>;
-        if (linked.length > 1) {
-          return <span style={{ fontSize: 10, color: "#6b7280" }}>{linked[1].name}</span>;
-        }
-        return <span style={{ fontSize: 10, color: "#6b7280" }}>{extra.fiador2Nome || "—"}</span>;
+      case "fiadores": {
+        // 🚀 Coluna única que substitui as antigas "fiador1"/"fiador2".
+        // Mostra um chip com a contagem total de Fiadores + Codevedores
+        // (provenientes dos contratos do cliente) e abre um modal com a
+        // tabela detalhada quando o usuário clica.
+        const linked = (client.guarantors ?? []) as ClientGuarantorRow[];
+        const total = linked.length;
+        return (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setGuarantorsModal({ client, list: linked });
+            }}
+            title={total === 0
+              ? "Nenhum fiador / codevedor"
+              : `Ver ${total} vínculo(s) — fiadores e codevedores`
+            }
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "3px 9px",
+              borderRadius: 12,
+              fontSize: 10,
+              fontWeight: 700,
+              cursor: "pointer",
+              background: total > 0 ? "#fbf7ff" : "#f1f5f9",
+              color: total > 0 ? "#6b21a8" : "#94a3b8",
+              border: total > 0 ? "1px solid #e9d5ff" : "1px solid #e2e8f0",
+              transition: "all 0.12s",
+            }}
+          >
+            <Users size={11} /> {total}
+            <Eye size={10} style={{ marginLeft: 2 }} />
+          </button>
+        );
       }
       default: return null;
     }
@@ -629,31 +585,148 @@ export default function Clients({ clients, filters }: any) {
           </div>
         </div>
 
-        {/* Modal de Formulário Completo */}
+        {/* Modal de Formulário Completo — header com gradiente + tabs estilo
+            pílula, alinhando o visual ao modal de Fiadores e Contratos. */}
         {open && (
           <div className="sigx-modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setOpen(false); }}>
-            <div className="sigx-modal" style={{ maxWidth: 860 }} onMouseDown={e => e.stopPropagation()}>
-              <div className="sigx-modal-header">
-                <span className="sigx-modal-title">{editing ? "Editar Cliente" : "Novo Cliente"}</span>
+            <div
+              className="sigx-modal"
+              style={{
+                maxWidth: 880,
+                width: "min(880px, calc(100vw - 32px))",
+                padding: 0,
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+              }}
+              onMouseDown={e => e.stopPropagation()}
+            >
+              {/* HEADER com gradiente — mesmo padrão dos modais de Fiadores e Contratos */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "14px 22px",
+                  background: "linear-gradient(135deg, #1e2139 0%, #2d3154 100%)",
+                  color: "white",
+                  borderBottom: "1px solid #2d3154",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 8, background: "rgba(255,255,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <Users size={16} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
+                      {editing ? "Editar Cliente" : "Novo Cliente"}
+                    </span>
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>
+                      {editing ? `Atualizando registro #${editing}` : "Preencha as guias abaixo para registrar um novo cliente"}
+                    </span>
+                  </div>
+                </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <label style={{ cursor: "pointer" }}>
-                    <button type="button" className="btn-secondary" style={{ fontSize: 11 }} onClick={() => document.getElementById("ocr-upload")?.click()} disabled={ocrLoading}>
+                    <button
+                      type="button"
+                      onClick={() => document.getElementById("ocr-upload")?.click()}
+                      disabled={ocrLoading}
+                      style={{
+                        background: "rgba(255,255,255,0.12)",
+                        border: "1px solid rgba(255,255,255,0.2)",
+                        cursor: ocrLoading ? "not-allowed" : "pointer",
+                        color: "white",
+                        height: 30,
+                        padding: "0 12px",
+                        borderRadius: 6,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        opacity: ocrLoading ? 0.6 : 1,
+                      }}
+                    >
                       {ocrLoading ? <><Loader2 size={11} className="animate-spin" /> Lendo PDF...</> : <><Upload size={11} /> Preencher via PDF (OCR)</>}
                     </button>
                     <input id="ocr-upload" type="file" style={{ display: "none" }} onChange={handleOcrUpload} accept=".pdf" />
                   </label>
-                  <button type="button" onClick={() => setOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted-foreground)", display: "flex" }}><X size={18} /></button>
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    style={{
+                      background: "rgba(255,255,255,0.08)",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "white",
+                      width: 30,
+                      height: 30,
+                      borderRadius: 6,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <X size={16} />
+                  </button>
                 </div>
               </div>
 
-              <div className="sigx-tabs">
-                {TABS.map(tab => (
-                  <div key={tab.key} className={`sigx-tab${activeTab === tab.key ? " active" : ""}`} onClick={() => setActiveTab(tab.key)}>{tab.label}</div>
-                ))}
+              {/* TABS estilo pílula — fundo claro, botões arredondados com indicador */}
+              <div
+                style={{
+                  display: "flex",
+                  gap: 4,
+                  background: "#f8fafc",
+                  padding: "8px 12px",
+                  borderBottom: "1px solid #e5e7eb",
+                  overflowX: "auto",
+                  flexWrap: "nowrap",
+                }}
+              >
+                {TABS.map(tab => {
+                  const Icon = tab.icon;
+                  const active = activeTab === tab.key;
+                  return (
+                    <button
+                      type="button"
+                      key={tab.key}
+                      onClick={() => setActiveTab(tab.key)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "7px 14px",
+                        fontSize: 11,
+                        fontWeight: active ? 700 : 500,
+                        cursor: "pointer",
+                        borderRadius: 6,
+                        background: active ? "white" : "transparent",
+                        color: active ? "#1e2139" : "#475569",
+                        border: active ? "1px solid #e2e8f0" : "1px solid transparent",
+                        boxShadow: active ? "0 1px 2px rgba(15,23,42,0.06)" : "none",
+                        whiteSpace: "nowrap",
+                        transition: "all 0.1s",
+                      }}
+                    >
+                      <Icon size={12} style={{ color: active ? "#2563eb" : "#94a3b8" }} />
+                      {tab.label}
+                    </button>
+                  );
+                })}
               </div>
 
-              <form onSubmit={handleSubmit}>
-                <div className="sigx-modal-body" style={{ maxHeight: "60vh", overflowY: "auto", padding: 20 }}>
+              <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+                <div
+                  className="sigx-modal-body"
+                  style={{
+                    padding: 22,
+                    height: "clamp(380px, 56vh, 64vh)",
+                    overflowY: "auto",
+                    background: "white",
+                  }}
+                >
                   
                   {activeTab === "dados" && (
                     <div className="form-grid-3">
@@ -711,11 +784,78 @@ export default function Clients({ clients, filters }: any) {
 
                   {activeTab === "financeiro" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                      {/* Banner informativo no estilo dos modais de Fiadores/Contratos */}
+                      <div
+                        className="keep-case"
+                        style={{
+                          padding: "10px 12px",
+                          background: "linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%)",
+                          border: "1px solid #e0e7ff",
+                          borderRadius: 8,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                        }}
+                      >
+                        <div style={{ width: 32, height: 32, borderRadius: 8, background: "#2563eb", color: "white", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <Landmark size={15} />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <strong style={{ fontSize: 12, color: "#1e2139", display: "block" }}>Contas Bancárias e Chaves PIX</strong>
+                          <span style={{ fontSize: 10.5, color: "#64748b" }}>
+                            Cadastre uma ou mais contas bancárias do cliente. As chaves PIX podem ser vinculadas individualmente a cada conta.
+                          </span>
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#2563eb" }}>
+                          {form.bankAccounts.length} CONTA(S)
+                        </span>
+                      </div>
+
+                      {form.bankAccounts.length === 0 && (
+                        <div
+                          style={{
+                            border: "1px dashed #cbd5e1",
+                            borderRadius: 8,
+                            padding: 28,
+                            background: "#f8fafc",
+                            textAlign: "center",
+                            color: "#94a3b8",
+                          }}
+                        >
+                          <Landmark size={26} style={{ opacity: 0.3, margin: "0 auto 6px", display: "block" }} />
+                          <span style={{ fontSize: 11.5 }}>
+                            Nenhuma conta cadastrada. Use o botão abaixo para adicionar a primeira.
+                          </span>
+                        </div>
+                      )}
+
                       {form.bankAccounts.map((acc, idx) => (
                         <div key={idx} style={{ padding: 16, border: "1px solid #e2e8f0", borderRadius: 8, background: "#f8fafc", boxShadow: "0 1px 2px rgba(0,0,0,0.02)" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, borderBottom: "1px solid #e2e8f0", paddingBottom: 6 }}>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: "#1e293b", display: "flex", alignItems: "center", gap: 4 }}><CreditCard size={13} /> CONTA BANCÁRIA {idx + 1}</span>
-                            {form.bankAccounts.length > 1 && <button type="button" style={{ background: "none", border: "none", color: "#dc2626", cursor: "pointer", display: "flex" }} onClick={() => setForm(p => ({ ...p, bankAccounts: p.bankAccounts.filter((_, i) => i !== idx) }))}><X size={14} /></button>}
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, borderBottom: "1px solid #e2e8f0", paddingBottom: 8 }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#1e293b", display: "flex", alignItems: "center", gap: 6 }}>
+                              <CreditCard size={13} style={{ color: "#2563eb" }} /> CONTA BANCÁRIA {idx + 1}
+                            </span>
+                            <button
+                              type="button"
+                              title="Remover conta"
+                              onClick={() => setForm(p => ({ ...p, bankAccounts: p.bankAccounts.filter((_, i) => i !== idx) }))}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 4,
+                                padding: "4px 10px",
+                                background: "white",
+                                border: "1px solid #fecaca",
+                                color: "#dc2626",
+                                borderRadius: 6,
+                                fontSize: 10,
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                transition: "all 0.12s",
+                              }}
+                            >
+                              <Trash2 size={11} /> Remover
+                            </button>
                           </div>
                           
                           {/* Grade da Conta Tradicional */}
@@ -784,196 +924,155 @@ export default function Clients({ clients, filters }: any) {
                         </div>
                       ))}
                       
-                      <button type="button" className="btn-secondary" style={{ fontSize: 11, width: "max-content" }} onClick={() => setForm(p => ({ ...p, bankAccounts: [...p.bankAccounts, emptyBankAccount()] }))}>+ Adicionar outra conta</button>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ fontSize: 11, width: "max-content", display: "inline-flex", alignItems: "center", gap: 6 }}
+                        onClick={() => setForm(p => ({ ...p, bankAccounts: [...p.bankAccounts, emptyBankAccount()] }))}
+                      >
+                        <Plus size={12} /> Adicionar outra conta
+                      </button>
                       <div style={{ marginTop: 6 }}><Label>Observações Financeiras Gerais</Label><textarea className="sigx-input" value={form.notes} onChange={f("notes")} rows={3} style={{ resize: "vertical" }} /></div>
                     </div>
                   )}
 
-                  {activeTab === "fiadores" && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                      <div
-                        className="keep-case"
-                        style={{
-                          padding: "10px 12px",
-                          background: "linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%)",
-                          border: "1px solid #e0e7ff",
-                          borderRadius: 8,
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 10,
-                        }}
-                      >
-                        <div style={{ width: 32, height: 32, borderRadius: 8, background: "#2563eb", color: "white", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                          <Shield size={15} />
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <strong style={{ fontSize: 12, color: "#1e2139", display: "block" }}>Fiadores Vinculados ao Cliente</strong>
-                          <span style={{ fontSize: 10.5, color: "#64748b" }}>
-                            Os fiadores cadastrados aqui ficam disponíveis automaticamente como sugeridos nos contratos deste cliente.
-                          </span>
-                        </div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: "#2563eb" }}>
-                          {selectedGuarantors.length} VINCULADO(S)
-                        </span>
-                      </div>
-
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button
-                          type="button"
-                          onClick={() => setQuickModalState({ open: true, mode: "create" })}
-                          className="btn-primary"
+                  {activeTab === "fiadores" && (() => {
+                    const fiadoresCount = selectedGuarantors.filter(g => g.role === "FIADOR").length;
+                    const codevedoresCount = selectedGuarantors.filter(g => g.role === "CODEVEDOR").length;
+                    return (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                        <div
+                          className="keep-case"
                           style={{
-                            display: "inline-flex",
+                            padding: "10px 12px",
+                            background: "linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%)",
+                            border: "1px solid #e0e7ff",
+                            borderRadius: 8,
+                            display: "flex",
                             alignItems: "center",
-                            gap: 6,
-                            padding: "7px 14px",
-                            fontSize: 11,
+                            gap: 10,
                           }}
                         >
-                          <UserPlus size={12} /> Novo Fiador
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSearchModalOpen(true)}
-                          className="btn-secondary"
+                          <div style={{ width: 32, height: 32, borderRadius: 8, background: "#2563eb", color: "white", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            <Shield size={15} />
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <strong style={{ fontSize: 12, color: "#1e2139", display: "block" }}>Fiadores e Codevedores em Contratos do Cliente</strong>
+                            <span style={{ fontSize: 10.5, color: "#64748b" }}>
+                              Lista somente leitura derivada dos contratos. Para vincular ou desvincular pessoas, edite o contrato correspondente.
+                            </span>
+                          </div>
+                          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: "#6b21a8", background: "#fbf7ff", padding: "3px 8px", borderRadius: 6, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                              <UserCheck size={11} /> {fiadoresCount} FIADOR(ES)
+                            </span>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: "#c2410c", background: "#fff7ed", padding: "3px 8px", borderRadius: 6, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                              <Scale size={11} /> {codevedoresCount} CODEVEDOR(ES)
+                            </span>
+                          </div>
+                        </div>
+
+                        <div
                           style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 6,
-                            padding: "7px 14px",
-                            fontSize: 11,
+                            border: "1px solid #e5e7eb",
+                            borderRadius: 8,
+                            overflow: "hidden",
+                            background: "white",
                           }}
                         >
-                          <Search size={12} /> Buscar Fiadores
-                        </button>
-                      </div>
-
-                      <div
-                        style={{
-                          border: "1px solid #e5e7eb",
-                          borderRadius: 8,
-                          overflow: "hidden",
-                          background: "white",
-                        }}
-                      >
-                        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11 }}>
-                          <thead>
-                            <tr style={{ background: "#f1f5f9" }}>
-                              <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 70 }}>Tipo</th>
-                              <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>Nome / Razão Social</th>
-                              <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 160 }}>Documento</th>
-                              <th style={{ padding: "7px 10px", textAlign: "center", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 110 }}>Origem</th>
-                              <th style={{ padding: "7px 10px", textAlign: "center", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 110 }}>Ações</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {selectedGuarantors.length === 0 ? (
-                              <tr>
-                                <td colSpan={5} style={{ padding: 28, textAlign: "center", color: "#94a3b8" }}>
-                                  <Users size={24} style={{ opacity: 0.3, margin: "0 auto 6px", display: "block" }} />
-                                  <span style={{ fontSize: 11.5 }}>
-                                    Nenhum fiador vinculado. Use os botões acima para adicionar.
-                                  </span>
-                                </td>
+                          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11 }}>
+                            <thead>
+                              <tr style={{ background: "#f1f5f9" }}>
+                                <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 70 }}>Tipo</th>
+                                <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>Nome / Razão Social</th>
+                                <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 160 }}>Documento</th>
+                                <th style={{ padding: "7px 10px", textAlign: "center", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 130 }}>Vínculo</th>
+                                <th style={{ padding: "7px 10px", textAlign: "center", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 80 }}>Ações</th>
                               </tr>
-                            ) : (
-                              selectedGuarantors.map((g, idx) => {
-                                const isPJ = g.personType === "PJ";
-                                return (
-                                  <tr key={g.localId} style={{ background: idx % 2 === 1 ? "#fafafa" : "white" }}>
-                                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9" }}>
-                                      <span
-                                        style={{
-                                          display: "inline-flex",
-                                          alignItems: "center",
-                                          gap: 4,
-                                          padding: "2px 8px",
-                                          borderRadius: 4,
-                                          fontSize: 9,
-                                          fontWeight: 700,
-                                          background: isPJ ? "#eff6ff" : "#ecfdf5",
-                                          color: isPJ ? "#1e40af" : "#065f46",
-                                        }}
-                                      >
-                                        {isPJ ? <Building2 size={10} /> : <User size={10} />}
-                                        {g.personType}
-                                      </span>
-                                    </td>
-                                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", fontWeight: 600, color: "#0f172a" }}>
-                                      {g.name}
-                                    </td>
-                                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: "#475569" }}>
-                                      {formatGuarantorDocument(g.document, g.personType)}
-                                    </td>
-                                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", textAlign: "center" }}>
-                                      <span
-                                        style={{
-                                          display: "inline-flex",
-                                          alignItems: "center",
-                                          gap: 4,
-                                          padding: "2px 8px",
-                                          borderRadius: 4,
-                                          fontSize: 9,
-                                          fontWeight: 700,
-                                          background: g.isFromDb ? "#dcfce7" : "#fef3c7",
-                                          color: g.isFromDb ? "#166534" : "#92400e",
-                                        }}
-                                      >
-                                        {g.isFromDb ? <CheckCircle size={10} /> : <Sparkles size={10} />}
-                                        {g.isFromDb ? "Cadastrado" : "Novo"}
-                                      </span>
-                                    </td>
-                                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", textAlign: "center" }}>
-                                      <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
-                                        {g.isFromDb ? (
-                                          <button
-                                            type="button"
-                                            className="btn-icon"
-                                            title="Visualizar dados"
-                                            onClick={() => g.id && openGuarantorViewModal(g.id)}
-                                          >
-                                            <Eye size={11} style={{ color: "#2563eb" }} />
-                                          </button>
-                                        ) : (
-                                          <button
-                                            type="button"
-                                            className="btn-icon"
-                                            title="Editar fiador"
-                                            onClick={() => setQuickModalState({
-                                              open: true,
-                                              mode: "edit-new",
-                                              editIndex: idx,
-                                              initialValue: g.formValues ?? EMPTY_GUARANTOR_FORM,
-                                            })}
-                                          >
-                                            <Edit2 size={11} />
-                                          </button>
-                                        )}
+                            </thead>
+                            <tbody>
+                              {selectedGuarantors.length === 0 ? (
+                                <tr>
+                                  <td colSpan={5} style={{ padding: 28, textAlign: "center", color: "#94a3b8" }}>
+                                    <Users size={24} style={{ opacity: 0.3, margin: "0 auto 6px", display: "block" }} />
+                                    <span style={{ fontSize: 11.5 }}>
+                                      Nenhum fiador ou codevedor está vinculado a contratos deste cliente.
+                                    </span>
+                                  </td>
+                                </tr>
+                              ) : (
+                                selectedGuarantors.map((g, idx) => {
+                                  const isPJ = g.personType === "PJ";
+                                  const isCodevedor = g.role === "CODEVEDOR";
+                                  return (
+                                    <tr key={g.localId} style={{ background: idx % 2 === 1 ? "#fafafa" : "white" }}>
+                                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9" }}>
+                                        <span
+                                          style={{
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            gap: 4,
+                                            padding: "2px 8px",
+                                            borderRadius: 4,
+                                            fontSize: 9,
+                                            fontWeight: 700,
+                                            background: isPJ ? "#eff6ff" : "#ecfdf5",
+                                            color: isPJ ? "#1e40af" : "#065f46",
+                                          }}
+                                        >
+                                          {isPJ ? <Building2 size={10} /> : <User size={10} />}
+                                          {g.personType}
+                                        </span>
+                                      </td>
+                                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", fontWeight: 600, color: "#0f172a" }}>
+                                        {g.name}
+                                      </td>
+                                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: "#475569" }}>
+                                        {formatGuarantorDocument(g.document, g.personType)}
+                                      </td>
+                                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", textAlign: "center" }}>
+                                        <span
+                                          style={{
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            gap: 4,
+                                            padding: "2px 8px",
+                                            borderRadius: 4,
+                                            fontSize: 9,
+                                            fontWeight: 700,
+                                            background: isCodevedor ? "#fff7ed" : "#fbf7ff",
+                                            color:      isCodevedor ? "#c2410c" : "#6b21a8",
+                                          }}
+                                        >
+                                          {isCodevedor ? <Scale size={10} /> : <UserCheck size={10} />}
+                                          {isCodevedor ? "Codevedor" : "Fiador"}
+                                        </span>
+                                      </td>
+                                      <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", textAlign: "center" }}>
                                         <button
                                           type="button"
-                                          className="btn-icon text-danger"
-                                          title="Remover do cliente"
-                                          onClick={() => setSelectedGuarantors((prev) => prev.filter((_, i) => i !== idx))}
+                                          className="btn-icon"
+                                          title="Visualizar dados"
+                                          onClick={() => openGuarantorViewModal(g.id)}
                                         >
-                                          <Trash2 size={11} />
+                                          <Eye size={11} style={{ color: "#2563eb" }} />
                                         </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              })
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
 
-                      <div className="keep-case" style={{ fontSize: 10.5, color: "#64748b", lineHeight: 1.5 }}>
-                        Fiadores marcados como <strong style={{ color: "#92400e" }}>Novo</strong> serão cadastrados e
-                        vinculados a este cliente quando você salvar. Os marcados como{" "}
-                        <strong style={{ color: "#166534" }}>Cadastrado</strong> não podem ser editados aqui (use a tela de Fiadores).
+                        <div className="keep-case" style={{ fontSize: 10.5, color: "#64748b", lineHeight: 1.5 }}>
+                          Esta listagem é gerada automaticamente a partir da pivot de contratos. Para gerenciar vínculos
+                          (adicionar, remover ou alterar papel) acesse o contrato correspondente na tela de Contratos.
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {activeTab === "obs" && (
                     <div><Label>Observações Jurídicas e Contratuais</Label><textarea className="sigx-input" value={form.observacoesJuridicas} onChange={f("observacoesJuridicas")} rows={8} style={{ resize: "vertical" }} /></div>
@@ -1007,69 +1106,92 @@ export default function Clients({ clients, filters }: any) {
         onClose={() => setConfirmDelete(null)}
       />
 
-      {/* ── SUB-MODAIS DA ABA "FIADORES" ─────────────────────────────────── */}
-      <GuarantorQuickCreateModal
-        open={quickModalState.open}
-        mode={quickModalState.mode}
-        initialValue={quickModalState.initialValue}
-        onClose={() => setQuickModalState({ open: false, mode: "create" })}
-        onConfirm={(values) => {
-          if (quickModalState.mode === "edit-new" && typeof quickModalState.editIndex === "number") {
-            const idx = quickModalState.editIndex;
-            setSelectedGuarantors((prev) =>
-              prev.map((it, i) =>
-                i === idx
-                  ? {
-                      ...it,
-                      name: values.name,
-                      personType: values.personType,
-                      document: values.personType === "PJ" ? onlyDigits(values.cnpj) : onlyDigits(values.cpf),
-                      formValues: values,
-                    }
-                  : it
-              )
-            );
-          } else {
-            setSelectedGuarantors((prev) => [
-              ...prev,
-              {
-                localId: newLocalId(),
-                isFromDb: false,
-                name: values.name,
-                personType: values.personType,
-                document: values.personType === "PJ" ? onlyDigits(values.cnpj) : onlyDigits(values.cpf),
-                formValues: values,
-              },
-            ]);
-          }
-          setQuickModalState({ open: false, mode: "create" });
-        }}
-      />
+      {/* ── MODAL POPUP "FIADORES / CODEVEDORES" ──────────────────────────
+          Acionado pelo ícone da nova coluna "Fiadores" da grade principal
+          de Clientes. Reusa ClientGuarantorsTable, que também é usado na
+          aba homônima da tela de Detalhes do Cliente. */}
+      {guarantorsModal && (
+        <div
+          className="sigx-modal-backdrop"
+          onClick={() => setGuarantorsModal(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.55)",
+            zIndex: 1000,
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "center",
+            padding: "8vh 16px 16px",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(820px, 100%)",
+              maxHeight: "84vh",
+              background: "white",
+              borderRadius: 10,
+              boxShadow: "0 20px 50px rgba(2,6,23,0.25)",
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <div
+              style={{
+                padding: "14px 18px",
+                background: "linear-gradient(135deg, #1e3a8a 0%, #6b21a8 100%)",
+                color: "white",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <Users size={18} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <strong style={{ fontSize: 13, display: "block" }}>Fiadores / Codevedores</strong>
+                <span style={{ fontSize: 11, opacity: 0.85 }}>
+                  Cliente: <strong>{guarantorsModal.client.name}</strong>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGuarantorsModal(null)}
+                title="Fechar"
+                style={{
+                  background: "rgba(255,255,255,0.18)",
+                  border: "none",
+                  color: "white",
+                  width: 28,
+                  height: 28,
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div style={{ padding: 18, overflowY: "auto" }}>
+              <ClientGuarantorsTable data={guarantorsModal.list} compact />
+            </div>
+          </div>
+        </div>
+      )}
 
-      <GuarantorSearchModal
-        open={searchModalOpen}
-        excludeIds={selectedGuarantors
-          .filter((g) => g.isFromDb && typeof g.id === "number")
-          .map((g) => g.id as number)}
-        onClose={() => setSearchModalOpen(false)}
-        onPick={(picked) => {
-          setSelectedGuarantors((prev) => {
-            const next = [...prev];
-            picked.forEach((g: GuarantorLite) => {
-              if (next.some((it) => it.isFromDb && it.id === g.id)) return;
-              next.push({
-                localId: newLocalId(),
-                id: g.id,
-                isFromDb: true,
-                name: g.name,
-                personType: g.personType,
-                document: g.document,
-              });
-            });
-            return next;
-          });
-          setSearchModalOpen(false);
-        }}
+      {/* ── MODAL DE VISUALIZAÇÃO (somente leitura) ──────────────────────
+          Acionado pelo botão de olhinho na aba "Fiadores / Codevedores".
+          Reusa o GuarantorQuickCreateModal em modo "view" — sem onConfirm
+          ativo, pois esta tela não permite editar/criar pessoas. */}
+      <GuarantorQuickCreateModal
+        open={viewModalState.open}
+        mode="view"
+        initialValue={viewModalState.initialValue}
+        onClose={() => setViewModalState({ open: false })}
+        onConfirm={() => setViewModalState({ open: false })}
       />
     </UnyPayLayout>
   );
