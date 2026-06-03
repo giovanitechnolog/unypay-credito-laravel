@@ -27,17 +27,32 @@ class ClientController extends Controller
 
         $clients = $query->orderBy('name', 'asc')->get();
 
-        // 🚀 Hidrata os fiadores vinculados a cada cliente (NxN — client_guarantor)
-        // em um único JOIN extra, evitando N+1. O front consome em `client.guarantors`
-        // para exibir na aba "Fiadores" do modal.
+        // 🚀 Hidrata as PESSOAS que aparecem como Fiador/Codevedor em algum
+        // CONTRATO de cada cliente. A fonte de verdade é a pivot
+        // contract_guarantor, que tem a coluna `role`. Agrupamos por
+        // (clientId, guarantorId, role) para evitar duplicação quando a
+        // mesma pessoa aparece em múltiplos contratos do mesmo cliente
+        // exercendo o mesmo papel — uma única linha de exibição.
+        // Continua sendo um único JOIN extra (zero N+1).
         $clientIds = $clients->pluck('id')->all();
         $guarantorsByClient = [];
         if (!empty($clientIds)) {
-            $rows = DB::table('client_guarantor as cg')
-                ->join('guarantors as g', 'g.id', '=', 'cg.guarantorId')
-                ->whereIn('cg.clientId', $clientIds)
+            $rows = DB::table('contracts as ct')
+                ->join('contract_guarantor as cg', 'cg.contractId', '=', 'ct.id')
+                ->join('guarantors as g',          'g.id',          '=', 'cg.guarantorId')
+                ->whereIn('ct.clientId', $clientIds)
+                ->select(
+                    'ct.clientId',
+                    'g.id',
+                    'g.name',
+                    'g.personType',
+                    'g.cpf',
+                    'g.cnpj',
+                    'cg.role'
+                )
+                ->distinct()
                 ->orderBy('g.name')
-                ->get(['cg.clientId', 'g.id', 'g.name', 'g.personType', 'g.cpf', 'g.cnpj']);
+                ->get();
 
             foreach ($rows as $row) {
                 $guarantorsByClient[$row->clientId][] = [
@@ -45,6 +60,7 @@ class ClientController extends Controller
                     'name'       => $row->name,
                     'personType' => $row->personType,
                     'document'   => $row->personType === 'PJ' ? $row->cnpj : $row->cpf,
+                    'role'       => $row->role, // FIADOR | CODEVEDOR
                 ];
             }
         }
@@ -210,13 +226,39 @@ class ClientController extends Controller
 
     public function show(int $id)
     {
-        // 🚀 Inclui os fiadores junto com os contratos para que a página
-        // ClientDetails (e qualquer outro consumidor Inertia) tenha acesso
-        // direto à relação NxN client_guarantor.
-        $client = Client::with(['contracts', 'guarantors'])->findOrFail($id);
+        // 🚀 Carrega contratos do cliente e, em uma única query auxiliar,
+        // hidrata as PESSOAS que aparecem como Fiador/Codevedor em qualquer
+        // contrato dele (pivot contract_guarantor com role).
+        // Mesma estratégia usada em index() — distinct por (guarantorId, role).
+        $client = Client::with(['contracts'])->findOrFail($id);
+
+        $rows = DB::table('contracts as ct')
+            ->join('contract_guarantor as cg', 'cg.contractId', '=', 'ct.id')
+            ->join('guarantors as g',          'g.id',          '=', 'cg.guarantorId')
+            ->where('ct.clientId', $id)
+            ->select(
+                'g.id',
+                'g.name',
+                'g.personType',
+                'g.cpf',
+                'g.cnpj',
+                'cg.role'
+            )
+            ->distinct()
+            ->orderBy('g.name')
+            ->get();
+
+        $clientArray = $client->toArray();
+        $clientArray['guarantors'] = $rows->map(fn ($row) => [
+            'id'         => (int) $row->id,
+            'name'       => $row->name,
+            'personType' => $row->personType,
+            'document'   => $row->personType === 'PJ' ? $row->cnpj : $row->cpf,
+            'role'       => $row->role,
+        ])->all();
 
         return inertia('ClientDetails', [
-            'client' => $client
+            'client' => $clientArray,
         ]);
     }
 

@@ -4,6 +4,7 @@ import {
   Plus, Search, RefreshCw, X, Edit2, Trash2,
   Handshake, IdCard, MapPin, Users as UsersIcon,
   ShieldAlert, CheckCircle2, UserPlus, User, Building2,
+  Scale,
 } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
@@ -37,6 +38,10 @@ interface Guarantor {
   zipCode: string | null;
   clients?: ClientLite[];
   clients_count?: number;
+  /** Vínculos como FIADOR em contratos (pivot contract_guarantor com role='FIADOR'). */
+  fiadores_count?: number;
+  /** Vínculos como CODEVEDOR em contratos (pivot contract_guarantor com role='CODEVEDOR'). */
+  codevedores_count?: number;
 }
 
 interface PaginatedGuarantors {
@@ -216,7 +221,10 @@ export default function GuarantorsPage() {
     total: guarantors.length,
     pf: guarantors.filter(g => g.personType === "PF").length,
     pj: guarantors.filter(g => g.personType === "PJ").length,
-    vinculados: guarantors.filter(g => (g.clients_count ?? 0) > 0).length,
+    // Contagem de PESSOAS que atuam em pelo menos 1 contrato como cada papel.
+    // (Diferente de `clients_count`, que mede vínculo direto pessoa↔cliente.)
+    fiadores: guarantors.filter(g => (g.fiadores_count ?? 0) > 0).length,
+    codevedores: guarantors.filter(g => (g.codevedores_count ?? 0) > 0).length,
   }), [guarantors]);
 
   const openCreate = () => {
@@ -411,7 +419,7 @@ export default function GuarantorsPage() {
 
   return (
     <UnyPayLayout>
-      <Head title="Gerenciamento de Fiadores" />
+      <Head title="Gerenciamento de Fiador / Codevedor" />
 
       <style>{`
         /* —— Caixa alta visual da tela inteira (incluindo modal) —— */
@@ -454,8 +462,8 @@ export default function GuarantorsPage() {
 
       <div className="guarantors-page" style={{ display: "flex", flexDirection: "column", gap: 16, padding: "4px 4px 24px 4px" }}>
         <div>
-          <h2 style={{ fontSize: 20, fontWeight: 700, color: "#1e293b", margin: 0 }}>Cadastro de Fiadores</h2>
-          <p style={{ fontSize: 12, color: "#64748b", margin: "2px 0 0 0" }}>Gerencie os fiadores institucionais e seus vínculos com clientes da carteira.</p>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: "#1e293b", margin: 0 }}>Cadastro de Fiador / Codevedor</h2>
+          <p style={{ fontSize: 12, color: "#64748b", margin: "2px 0 0 0" }}>Gerencie as pessoas (Fiadores e Codevedores) institucionais e seus vínculos com clientes da carteira.</p>
         </div>
 
         {/* Cards de resumo */}
@@ -474,7 +482,11 @@ export default function GuarantorsPage() {
           </div>
           <div style={{ background: "white", border: "1px solid #e2e8f0", padding: 14, borderRadius: 8, display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ padding: 8, background: "#fbf7ff", borderRadius: 6, color: "#6b21a8" }}><UsersIcon size={18} /></div>
-            <div><span style={{ fontSize: 11, color: "#64748b", display: "block" }}>Vinculados a Clientes</span><strong style={{ fontSize: 18, color: "#6b21a8" }}>{counters.vinculados}</strong></div>
+            <div><span style={{ fontSize: 11, color: "#64748b", display: "block" }}>Vínculos Fiadores</span><strong style={{ fontSize: 18, color: "#6b21a8" }}>{counters.fiadores}</strong></div>
+          </div>
+          <div style={{ background: "white", border: "1px solid #e2e8f0", padding: 14, borderRadius: 8, display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ padding: 8, background: "#fff7ed", borderRadius: 6, color: "#c2410c" }}><Scale size={18} /></div>
+            <div><span style={{ fontSize: 11, color: "#64748b", display: "block" }}>Vínculos Codevedores</span><strong style={{ fontSize: 18, color: "#c2410c" }}>{counters.codevedores}</strong></div>
           </div>
         </div>
 
@@ -494,7 +506,7 @@ export default function GuarantorsPage() {
               </div>
               <button onClick={() => fetchGuarantors(search)} title="Atualizar Grade" style={{ background: "white", border: "1px solid #cbd5e1", borderRadius: 6, padding: "6px 8px", cursor: "pointer", color: "#64748b", display: "flex" }}><RefreshCw size={13} /></button>
             </div>
-            <button onClick={openCreate} style={{ display: "flex", alignItems: "center", gap: 6, background: "#1e2139", color: "white", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}><Plus size={14} /> Novo Fiador</button>
+            <button onClick={openCreate} style={{ display: "flex", alignItems: "center", gap: 6, background: "#1e2139", color: "white", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}><Plus size={14} /> Novo Fiador / Codevedor</button>
           </div>
 
           <div style={{ overflowX: "auto" }}>
@@ -505,15 +517,16 @@ export default function GuarantorsPage() {
                   <th style={{ padding: "10px 14px", color: "#475569", fontWeight: 600, textAlign: "center" }}>TIPO</th>
                   <th style={{ padding: "10px 14px", color: "#475569", fontWeight: 600 }}>DOCUMENTOS</th>
                   <th style={{ padding: "10px 14px", color: "#475569", fontWeight: 600 }}>LOCALIZAÇÃO</th>
-                  <th style={{ padding: "10px 14px", color: "#475569", fontWeight: 600, textAlign: "center" }}>VÍNCULOS</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontWeight: 600, textAlign: "center" }}>VÍNCULO FIADOR</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontWeight: 600, textAlign: "center" }}>VÍNCULO CODEVEDOR</th>
                   <th style={{ padding: "10px 14px", color: "#475569", fontWeight: 600, textAlign: "right" }}>AÇÕES</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={6} style={{ padding: 32, textAlign: "center", color: "#64748b" }}>Carregando fiadores...</td></tr>
+                  <tr><td colSpan={7} style={{ padding: 32, textAlign: "center", color: "#64748b" }}>Carregando fiadores...</td></tr>
                 ) : guarantors.length === 0 ? (
-                  <tr><td colSpan={6} style={{ padding: 32, textAlign: "center", color: "#94a3b8" }}>Nenhum fiador localizado.</td></tr>
+                  <tr><td colSpan={7} style={{ padding: 32, textAlign: "center", color: "#94a3b8" }}>Nenhum fiador localizado.</td></tr>
                 ) : (
                   guarantors.map(g => {
                     const isPJ = g.personType === "PJ";
@@ -585,8 +598,13 @@ export default function GuarantorsPage() {
                         </div>
                       </td>
                       <td style={{ padding: "10px 14px", textAlign: "center" }}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: (g.clients_count ?? 0) > 0 ? "#ecfdf5" : "#f1f5f9", color: (g.clients_count ?? 0) > 0 ? "#059669" : "#94a3b8" }}>
-                          <UsersIcon size={11} /> {g.clients_count ?? 0}
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: (g.fiadores_count ?? 0) > 0 ? "#fbf7ff" : "#f1f5f9", color: (g.fiadores_count ?? 0) > 0 ? "#6b21a8" : "#94a3b8" }}>
+                          <Handshake size={11} /> {g.fiadores_count ?? 0}
+                        </span>
+                      </td>
+                      <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: (g.codevedores_count ?? 0) > 0 ? "#fff7ed" : "#f1f5f9", color: (g.codevedores_count ?? 0) > 0 ? "#c2410c" : "#94a3b8" }}>
+                          <Scale size={11} /> {g.codevedores_count ?? 0}
                         </span>
                       </td>
                       <td style={{ padding: "10px 14px", textAlign: "right" }}>
