@@ -2,14 +2,18 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\ConsignorsExport;
 use App\Http\Requests\Consignors\StoreConsignorRequest;
 use App\Http\Requests\Consignors\UpdateConsignorRequest;
 use App\Models\Consignor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
+use Maatwebsite\Excel\Facades\Excel;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * CRUD de Credores (Consignors).
@@ -31,6 +35,13 @@ class ConsignorController extends Controller
         return Inertia::render('Credores');
     }
 
+    public function export(Request $request): BinaryFileResponse
+    {
+        $rows = $this->buildConsignorsForExport($request);
+
+        return Excel::download(new ConsignorsExport($rows), 'credores.xlsx');
+    }
+
     /**
      * GET /api/consignors — lista paginada/filtrável em JSON,
      * já incluindo a contagem de contas bancárias por credor.
@@ -40,27 +51,43 @@ class ConsignorController extends Controller
         $search  = trim((string) $request->input('search', ''));
         $perPage = (int) $request->input('per_page', 25);
 
-        $query = Consignor::query()
-            ->with(['bankAccounts'])
-            ->withCount('bankAccounts');
-
-        if ($search !== '') {
-            $digits = preg_replace('/\D/', '', $search);
-
-            $query->where(function ($q) use ($search, $digits) {
-                $q->where('name',  'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%");
-
-                if ($digits !== '') {
-                    $q->orWhere('document', 'like', "%{$digits}%")
-                      ->orWhere('phone',    'like', "%{$digits}%");
-                }
-            });
-        }
+        $query = $this->applyConsignorSearch(
+            Consignor::query()->with(['bankAccounts'])->withCount('bankAccounts'),
+            $search
+        );
 
         $consignors = $query->orderBy('name')->paginate($perPage);
 
         return response()->json($consignors);
+    }
+
+    private function buildConsignorsForExport(Request $request): Collection
+    {
+        $search = trim((string) $request->input('search', ''));
+
+        return $this->applyConsignorSearch(
+            Consignor::query()->with(['bankAccounts'])->withCount('bankAccounts'),
+            $search
+        )->orderBy('name')->get();
+    }
+
+    private function applyConsignorSearch($query, string $search)
+    {
+        if ($search === '') {
+            return $query;
+        }
+
+        $digits = preg_replace('/\D/', '', $search);
+
+        return $query->where(function ($q) use ($search, $digits) {
+            $q->where('name', 'like', "%{$search}%")
+                ->orWhere('email', 'like', "%{$search}%");
+
+            if ($digits !== '') {
+                $q->orWhere('document', 'like', "%{$digits}%")
+                    ->orWhere('phone', 'like', "%{$digits}%");
+            }
+        });
     }
 
     /**

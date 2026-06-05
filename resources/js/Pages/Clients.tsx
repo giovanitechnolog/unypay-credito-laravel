@@ -1,9 +1,9 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { Head, router } from "@inertiajs/react";
 import {
   Plus, Search, Edit2, Trash2, Users, Building2,
   User, Shield, FileText, X, Eye, Upload, Loader2, CreditCard, QrCode,
-  UserCheck, Scale, IdCard, MapPin, Landmark, ScrollText,
+  UserCheck, Scale, IdCard, MapPin, Landmark, ScrollText, Download,
 } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
@@ -14,6 +14,7 @@ import GuarantorQuickCreateModal from "../Components/GuarantorQuickCreateModal";
 import ClientGuarantorsTable, { ClientGuarantorRow } from "../Components/ClientGuarantorsTable";
 import { GuarantorFormValues } from "../Components/GuarantorFormFields";
 import { api, extractFirstError } from "../lib/api";
+import { downloadExcelWithState } from "../lib/exportHelper";
 import { useColumnVisibility } from "../hooks/useColumnVisibility";
 import {
   CLIENTS_COLUMNS,
@@ -161,6 +162,7 @@ const tdCenter: React.CSSProperties = { ...tdBase, textAlign: "center" };
 
 export default function Clients({ clients, filters }: any) {
   const [search, setSearch] = useState(filters?.search || "");
+  const [exporting, setExporting] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [open, setOpen] = useState(false);
@@ -227,6 +229,15 @@ export default function Clients({ clients, filters }: any) {
     setPage(1);
     router.get("/clients", { search: value }, { preserveState: true, replace: true });
   };
+
+  const handleExportExcel = useCallback(() => {
+    downloadExcelWithState(
+      "/clients/export",
+      "clientes.xlsx",
+      setExporting,
+      { params: { search: search || undefined } },
+    );
+  }, [search]);
 
   const handleOpen = (client?: any) => {
     if (client) {
@@ -481,9 +492,20 @@ export default function Clients({ clients, filters }: any) {
       <div style={{ padding: "12px 20px 16px 20px", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#111827" }}>Gerenciamento de Clientes</h1>
-          <button className="btn-primary" onClick={() => handleOpen()} style={{ padding: "6px 14px", fontSize: 11 }}>
-            <Plus size={12} /> Novo Cliente
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button className="btn-primary" onClick={() => handleOpen()} style={{ padding: "6px 14px", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
+              <Plus size={12} /> Novo Cliente
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={handleExportExcel}
+              disabled={exporting}
+              style={{ padding: "6px 14px", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}
+            >
+              <Download size={12} /> {exporting ? "Exportando..." : "Exportar Excel"}
+            </button>
+          </div>
         </div>
 
         <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 6, padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>

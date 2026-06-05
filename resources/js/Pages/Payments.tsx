@@ -1,10 +1,11 @@
-import React, { useState, useMemo, useEffect, Fragment } from "react";
+import React, { useState, useMemo, useEffect, Fragment, useCallback } from "react";
 import { Head, router } from "@inertiajs/react";
-import { Search, ChevronDown, ChevronRight, X, CreditCard } from "lucide-react";
+import { Search, ChevronDown, ChevronRight, X, CreditCard, Download } from "lucide-react";
 import UnyPayLayout from "../Components/UnyPayLayout";
 import TableGroupBadges from "../Components/TableGroupBadges";
 import TableColumnPicker from "../Components/TableColumnPicker";
 import { useColumnVisibility } from "../hooks/useColumnVisibility";
+import { downloadExcelWithState } from "../lib/exportHelper";
 import {
   PAYMENTS_COLUMNS,
   PAYMENTS_GROUP_META,
@@ -72,6 +73,7 @@ const PAGE_SIZES = [20, 50, 100];
 export default function Payments({ contracts, interestData, filters }: any) {
   const [search, setSearch] = useState(filters?.search || "");
   const [statusFilter, setStatusFilter] = useState(filters?.statusFilter || "Todos");
+  const [exporting, setExporting] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -122,6 +124,20 @@ export default function Payments({ contracts, interestData, filters }: any) {
     setPage(1);
     router.get("/payments", { search: newSearch, statusFilter: newStatus }, { preserveState: true, replace: true });
   };
+
+  const handleExportExcel = useCallback(() => {
+    downloadExcelWithState(
+      "/payments/export",
+      "pagamentos.xlsx",
+      setExporting,
+      {
+        params: {
+          search: search || undefined,
+          statusFilter: statusFilter !== "Todos" ? statusFilter : undefined,
+        },
+      },
+    );
+  }, [search, statusFilter]);
 
   const interestMap = useMemo(() => {
     if (!interestData) return new Map<number, any>();
@@ -317,6 +333,15 @@ export default function Payments({ contracts, interestData, filters }: any) {
               setColumnsVisible={setColumnsVisible}
               resetDefaults={resetDefaults}
             />
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={handleExportExcel}
+              disabled={exporting}
+              style={{ padding: "6px 14px", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}
+            >
+              <Download size={12} /> {exporting ? "Exportando..." : "Exportar Excel"}
+            </button>
           </div>
         </div>
 

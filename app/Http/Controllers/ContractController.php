@@ -2,14 +2,18 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\ContractsExport;
 use App\Http\Requests\ContractAssets\StoreContractAssetRequest;
 use App\Http\Requests\ContractWitnesses\StoreContractWitnessRequest;
 use App\Models\Contract;
 use App\Models\ContractAsset;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
+use Maatwebsite\Excel\Facades\Excel;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ContractController extends Controller
@@ -223,6 +227,60 @@ class ContractController extends Controller
             'clients'       => $clients,
             'filters'       => $request->only(['search', 'statusFilter'])
         ]);
+    }
+
+    public function export(Request $request): BinaryFileResponse
+    {
+        $rows = $this->buildContractsForExport($request);
+
+        return Excel::download(new ContractsExport($rows), 'contratos.xlsx');
+    }
+
+    private function buildContractsForExport(Request $request): Collection
+    {
+        $search = $request->input('search');
+        $statusFilter = $request->input('statusFilter');
+
+        $query = Contract::query()
+            ->with([
+                'client:id,name',
+                'consignor:id,name',
+            ])
+            ->leftJoin('contract_types', 'contracts.contract_type_id', '=', 'contract_types.id')
+            ->select('contracts.*', 'contract_types.name as contract_type_name');
+
+        if (! empty($search)) {
+            $query->where(function ($q) use ($search) {
+                $q->where('contracts.code', 'like', "%{$search}%")
+                    ->orWhere('contracts.contractName', 'like', "%{$search}%")
+                    ->orWhere('contracts.creditor', 'like', "%{$search}%")
+                    ->orWhereHas('client', function ($c) use ($search) {
+                        $c->where('name', 'like', "%{$search}%");
+                    });
+            });
+        }
+
+        if (! empty($statusFilter) && $statusFilter !== 'Todos') {
+            $query->where('contracts.status', $statusFilter);
+        }
+
+        return $query->orderBy('contracts.id', 'desc')->get()->map(function (Contract $contract) {
+            return [
+                'code' => $contract->code,
+                'clientName' => $contract->client?->name ?? '—',
+                'contractType' => $contract->contract_type_name ?? $contract->contractType ?? 'Outro',
+                'contractName' => $contract->contractName,
+                'creditorName' => $contract->consignor?->name ?? $contract->creditor ?? '—',
+                'principalAmount' => (float) $contract->principalAmount,
+                'financedTotal' => (float) $contract->financedTotal,
+                'installmentCount' => (int) $contract->installmentCount,
+                'installmentAmount' => (float) $contract->installmentAmount,
+                'status' => $contract->status,
+                'contractDate' => $contract->contractDate,
+                'firstDueDate' => $contract->firstDueDate,
+                'moraRateMonthly' => (float) ($contract->moraRateMonthly ?? 0.02),
+            ];
+        });
     }
 
     public function store(Request $request)
