@@ -21,6 +21,7 @@ class Guarantor extends Model
         'stateRegistration',
         'street',
         'number',
+        'complement',
         'neighborhood',
         'city',
         'state',

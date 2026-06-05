@@ -142,6 +142,7 @@ class ContractController extends Controller
                     'id'   => (int) $w->id,
                     'name' => $w->name,
                     'cpf'  => $w->cpf,
+                    'ci'   => $w->ci,
                 ];
             }
         }
@@ -583,6 +584,7 @@ class ContractController extends Controller
         return [
             'name' => $witness['name'] ?? null,
             'cpf'  => $witness['cpf']  ?? null,
+            'ci'   => $witness['ci']   ?? null,
         ];
     }
 

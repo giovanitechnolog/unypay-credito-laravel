@@ -32,6 +32,7 @@ interface Guarantor {
   stateRegistration: string | null;
   street: string | null;
   number: string | null;
+  complement: string | null;
   neighborhood: string | null;
   city: string | null;
   state: string | null;
@@ -105,6 +106,7 @@ interface FormState {
   // Endereço
   street: string;
   number: string;
+  complement: string;
   neighborhood: string;
   city: string;
   state: string;
@@ -125,6 +127,7 @@ const EMPTY_FORM: FormState = {
   stateRegistration: "",
   street: "",
   number: "",
+  complement: "",
   neighborhood: "",
   city: "",
   state: "",
@@ -250,6 +253,7 @@ export default function GuarantorsPage() {
       stateRegistration: g.stateRegistration ?? "",
       street: g.street ?? "",
       number: g.number ?? "",
+      complement: g.complement ?? "",
       neighborhood: g.neighborhood ?? "",
       city: g.city ?? "",
       state: g.state ?? "",
@@ -346,6 +350,7 @@ export default function GuarantorsPage() {
       name: formData.name,
       street: formData.street,
       number: formData.number,
+      complement: formData.complement,
       neighborhood: formData.neighborhood,
       city: formData.city,
       state: formData.state.toUpperCase(),
@@ -928,31 +933,30 @@ export default function GuarantorsPage() {
 
                   {activeFormTab === "endereco" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                      <div>
-                        <label className="sigx-label">CEP</label>
-                        <input
-                          type="text"
-                          className="sigx-input mono"
-                          style={{ width: "38%" }}
-                          placeholder="00000-000"
-                          value={formData.zipCode}
-                          onChange={e => handleCepChange(e.target.value)}
-                        />
-                        {cepFeedback && (
-                          <div style={{
-                            color: cepFeedback.includes("não") || cepFeedback.includes("Não")
-                              ? "var(--color-red, #b91c1c)"
-                              : "var(--color-green, #15803d)",
-                            fontSize: 11,
-                            fontWeight: 600,
-                            marginTop: 4,
-                          }}>
-                            {cepFeedback}
-                          </div>
-                        )}
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 14 }}>
                         <div>
+                          <label className="sigx-label">CEP</label>
+                          <input
+                            type="text"
+                            className="sigx-input mono"
+                            placeholder="00000-000"
+                            value={formData.zipCode}
+                            onChange={e => handleCepChange(e.target.value)}
+                          />
+                          {cepFeedback && (
+                            <div style={{
+                              color: cepFeedback.includes("não") || cepFeedback.includes("Não")
+                                ? "var(--color-red, #b91c1c)"
+                                : "var(--color-green, #15803d)",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              marginTop: 4,
+                            }}>
+                              {cepFeedback}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ gridColumn: "span 2" }}>
                           <label className="sigx-label">RUA / LOGRADOURO</label>
                           <input
                             type="text"
@@ -970,15 +974,24 @@ export default function GuarantorsPage() {
                             onChange={e => setFormData(p => ({ ...p, number: e.target.value }))}
                           />
                         </div>
-                      </div>
-                      <div>
-                        <label className="sigx-label">BAIRRO</label>
-                        <input
-                          type="text"
-                          className="sigx-input"
-                          value={formData.neighborhood}
-                          onChange={e => setFormData(p => ({ ...p, neighborhood: e.target.value }))}
-                        />
+                        <div>
+                          <label className="sigx-label">BAIRRO</label>
+                          <input
+                            type="text"
+                            className="sigx-input"
+                            value={formData.neighborhood}
+                            onChange={e => setFormData(p => ({ ...p, neighborhood: e.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label className="sigx-label">COMPLEMENTO</label>
+                          <input
+                            type="text"
+                            className="sigx-input"
+                            value={formData.complement}
+                            onChange={e => setFormData(p => ({ ...p, complement: e.target.value }))}
+                          />
+                        </div>
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "2fr 0.6fr", gap: 14 }}>
                         <div>

@@ -13,6 +13,7 @@ class ContractWitness extends Model
         'contractId',
         'name',
         'cpf',
+        'ci',
     ];
 
     const CREATED_AT = 'createdAt';
