@@ -111,4 +111,15 @@ class Contract extends Model
     {
         return $this->hasMany(ContractAsset::class, 'contractId');
     }
+
+    /**
+     * Testemunhas do contrato (1:N — nome + CPF, sem cadastro mestre).
+     *
+     * Estratégia de update no controller: delete + recreate dentro de transação
+     * (definido na Etapa 2 desta feature).
+     */
+    public function witnesses(): HasMany
+    {
+        return $this->hasMany(ContractWitness::class, 'contractId');
+    }
 }
