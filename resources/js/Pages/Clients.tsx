@@ -489,7 +489,31 @@ export default function Clients({ clients, filters }: any) {
     <UnyPayLayout>
       <Head title="Gerenciamento de Clientes" />
 
-      <div style={{ padding: "12px 20px 16px 20px", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", gap: 12 }}>
+      <style>{`
+        /* —— Caixa alta visual da tela inteira (incluindo modal) —— */
+        .clients-page,
+        .clients-page input,
+        .clients-page select,
+        .clients-page textarea,
+        .clients-page button,
+        .clients-page option,
+        .clients-page label,
+        .clients-page h1, .clients-page h2, .clients-page h3,
+        .clients-page p, .clients-page span, .clients-page strong,
+        .clients-page td, .clients-page th { text-transform: uppercase; }
+
+        .clients-page input.mono,
+        .clients-page input[type="email"],
+        .clients-page input[type="password"],
+        .clients-page input[type="date"],
+        .clients-page input[type="number"] { text-transform: none; }
+        .clients-page input::placeholder,
+        .clients-page textarea::placeholder { text-transform: none; }
+        .clients-page .keep-case,
+        .clients-page .keep-case * { text-transform: none !important; }
+      `}</style>
+
+      <div className="clients-page" style={{ padding: "12px 20px 16px 20px", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#111827" }}>Gerenciamento de Clientes</h1>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>

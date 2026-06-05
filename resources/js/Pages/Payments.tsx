@@ -203,20 +203,34 @@ export default function Payments({ contracts, interestData, filters }: any) {
       case "code":
         return <span className="mono" style={{ fontSize: 10, fontWeight: 600, color: "#1e40af" }}>{contract.code}</span>;
       case "client":
+        // 🧹 Segunda linha (identificação do contrato) removida a pedido.
+        //    O contrato já é identificado pela coluna "Código" à esquerda,
+        //    então duplicar aqui só polui a tabela.
         return (
           <div style={{ maxWidth: col.width - 14, overflow: "hidden" }}>
             <div style={{ fontWeight: 700, fontSize: 11, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {row.clientName}
             </div>
-            <div style={{ fontSize: 9, color: "#6b7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {contract.contractName}
-            </div>
           </div>
         );
       case "date":
         return <span style={{ color: "#6b7280" }}>{fmtDate(contract.contractDate)}</span>;
-      case "creditor":
-        return <span style={{ color: "#6b7280" }}>{contract.creditor}</span>;
+      case "creditor": {
+        // 🔗 Preferência: credor formalmente vinculado (contracts.consignorId → consignors.name).
+        //    Fallback: campo legado `creditor` (texto livre) para contratos antigos.
+        const credorLabel = contract.consignor?.name ?? contract.creditor;
+        return (
+          <span
+            title={credorLabel}
+            style={{
+              color: contract.consignor?.name ? "#0f172a" : "#6b7280",
+              fontWeight: contract.consignor?.name ? 600 : 400,
+            }}
+          >
+            {credorLabel}
+          </span>
+        );
+      }
       case "principal":
         return <span className="mono" style={{ fontWeight: 700 }}>{fmt(contract.principalAmount)}</span>;
       case "financed":
@@ -284,7 +298,31 @@ export default function Payments({ contracts, interestData, filters }: any) {
     <UnyPayLayout>
       <Head title="Controle de Pagamentos" />
 
-      <div style={{ padding: "12px 20px 16px 20px", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", gap: 12 }}>
+      <style>{`
+        /* —— Caixa alta visual da tela inteira —— */
+        .payments-page,
+        .payments-page input,
+        .payments-page select,
+        .payments-page textarea,
+        .payments-page button,
+        .payments-page option,
+        .payments-page label,
+        .payments-page h1, .payments-page h2, .payments-page h3,
+        .payments-page p, .payments-page span, .payments-page strong,
+        .payments-page td, .payments-page th { text-transform: uppercase; }
+
+        .payments-page input.mono,
+        .payments-page input[type="email"],
+        .payments-page input[type="password"],
+        .payments-page input[type="date"],
+        .payments-page input[type="number"] { text-transform: none; }
+        .payments-page input::placeholder,
+        .payments-page textarea::placeholder { text-transform: none; }
+        .payments-page .keep-case,
+        .payments-page .keep-case * { text-transform: none !important; }
+      `}</style>
+
+      <div className="payments-page" style={{ padding: "12px 20px 16px 20px", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", gap: 12 }}>
         <div style={{ flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#111827" }}>Controle de Pagamentos</h1>
         </div>

@@ -572,12 +572,10 @@ export default function GuarantorsPage() {
                             {isPJ ? <Building2 size={14} /> : <User size={14} />}
                           </div>
                           <div>
+                            {/* 🧹 Coluna "Fiador" exibe apenas o nome (PF) ou razão social (PJ).
+                                Subtítulos removidos a pedido: nacionalidade + estado civil (PF)
+                                e nome fantasia (PJ). */}
                             <strong style={{ color: "#0f172a", fontSize: 13, display: "block" }}>{g.name}</strong>
-                            <span style={{ fontSize: 10, color: "#94a3b8" }}>
-                              {isPJ
-                                ? (g.tradeName ? g.tradeName : "—")
-                                : `${g.nationality ?? "—"}${g.maritalStatus ? ` · ${g.maritalStatus}` : ""}`}
-                            </span>
                           </div>
                         </div>
                       </td>

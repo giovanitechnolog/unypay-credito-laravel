@@ -65,7 +65,23 @@ class LancamentosController extends Controller
 
         $clientMap = $clients->pluck('name', 'id')->toArray();
 
-        return $contracts->map(function ($contract) use ($installments, $payments, $clientMap, $baseDate) {
+        // 🔗 Hidratação dos credores (consignors) vinculados via contracts.consignorId.
+        //    Buscamos só os ids referenciados pelos contratos exibidos para evitar
+        //    trazer toda a tabela quando a base crescer.
+        $consignorIds = $contracts
+            ->pluck('consignorId')
+            ->filter()
+            ->unique()
+            ->values();
+
+        $consignorMap = $consignorIds->isNotEmpty()
+            ? DB::table('consignors')
+                ->whereIn('id', $consignorIds)
+                ->pluck('name', 'id')
+                ->toArray()
+            : [];
+
+        return $contracts->map(function ($contract) use ($installments, $payments, $clientMap, $consignorMap, $baseDate) {
             $contractInst = $installments->where('contractId', $contract->id);
 
             $paidInstallmentsCount = 0;
@@ -156,7 +172,11 @@ class LancamentosController extends Controller
                 'contractDate' => $contract->contractDate,
                 'firstDueDate' => $contract->firstDueDate,
                 'status' => $contract->status,
+                // Mantemos o campo legado por compatibilidade com export/relatórios.
                 'creditor' => $contract->creditor ?? 'UnyPay® S.A.',
+                // ✅ Credor formal (relação contracts.consignorId → consignors.name).
+                'consignorId' => $contract->consignorId ?? null,
+                'consignorName' => $consignorMap[$contract->consignorId] ?? null,
                 'validated' => (bool) ($contract->validated ?? false),
                 'principalAmount' => (float) $contract->principalAmount,
                 'financedTotal' => $financedTotal,
