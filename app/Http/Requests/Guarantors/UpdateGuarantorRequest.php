@@ -61,6 +61,7 @@ class UpdateGuarantorRequest extends FormRequest
 
             'street'            => ['nullable', 'string', 'max:255'],
             'number'            => ['nullable', 'string', 'max:20'],
+            'complement'        => ['nullable', 'string', 'max:255'],
             'neighborhood'      => ['nullable', 'string', 'max:120'],
             'city'              => ['nullable', 'string', 'max:120'],
             'state'             => ['nullable', 'string', 'size:2'],

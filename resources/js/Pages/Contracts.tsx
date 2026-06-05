@@ -1,10 +1,10 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import {
-  Plus, Search, FileText, CheckCircle, X, Edit2, Trash2, Upload, Eye,
+  Plus, Search, FileText, X, Edit2, Trash2, Upload, Eye,
   CreditCard, QrCode, UserCheck, Scale, Paperclip,
   CircleDollarSign, Percent, Shield, BookOpen,
   UserPlus, Users, Sparkles, Building2, User as UserIcon,
-  Car, Home, Landmark, Mail, Phone, IdCard,
+  Car, Home, Landmark, Mail, Phone, MapPin,
 } from "lucide-react";
 import { Head, router } from "@inertiajs/react";
 import { toast } from "sonner";
@@ -101,7 +101,7 @@ const TABS = [
  * 🚀 Tipos da aba "Consignante".
  *
  * ConsignorLite reflete o que o endpoint /api/consignors devolve no autocomplete
- * (campos suficientes para identificar e exibir read-only). ConsignorBankAccountLite
+ * (campos suficientes para identificar, exibir endereço read-only e contas bancárias).
  * é o item da relação 1:N hidratada junto na response.
  *
  * O formato bate exatamente com o que o ContractController@index agora hidrata
@@ -123,8 +123,31 @@ interface ConsignorLite {
   document: string | null;
   phone: string | null;
   email: string | null;
+  street: string | null;
+  number: string | null;
+  neighborhood: string | null;
+  zipCode: string | null;
+  complement: string | null;
+  city: string | null;
+  state: string | null;
   bankAccounts: ConsignorBankAccountLite[];
 }
+
+const mapConsignorLite = (c: any): ConsignorLite => ({
+  id: Number(c.id),
+  name: c.name ?? "",
+  document: c.document ?? null,
+  phone: c.phone ?? null,
+  email: c.email ?? null,
+  street: c.street ?? null,
+  number: c.number ?? null,
+  neighborhood: c.neighborhood ?? null,
+  zipCode: c.zipCode ?? null,
+  complement: c.complement ?? null,
+  city: c.city ?? null,
+  state: c.state ?? null,
+  bankAccounts: Array.isArray(c.bankAccounts) ? c.bankAccounts : [],
+});
 
 /** Formata CPF/CNPJ a partir dos dígitos persistidos para o input read-only. */
 const formatConsignorDocument = (doc: string | null | undefined): string => {
@@ -233,6 +256,7 @@ interface ContractWitness {
   id?: number;
   name: string;
   cpf: string;
+  ci?: string;
 }
 
 /** Item em memória na aba "Regras Contratuais" — inclui chave estável do React. */
@@ -244,6 +268,7 @@ const serializeWitnessesForBackend = (witnesses: ContractWitnessItem[]) =>
   witnesses.map((w) => ({
     name: w.name.trim(),
     cpf: onlyDigits(w.cpf),
+    ci: w.ci?.trim() || null,
   }));
 
 const serializeAssetsForBackend = (assets: ContractAssetItem[]) =>
@@ -530,6 +555,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
         stateRegistration: g.stateRegistration ?? "",
         street: g.street ?? "",
         number: g.number ?? "",
+        complement: g.complement ?? "",
         neighborhood: g.neighborhood ?? "",
         city: g.city ?? "",
         state: g.state ?? "",
@@ -715,14 +741,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     // virá null e o estado fica vazio.
     if (c.consignor && typeof c.consignor === "object") {
       const cs = c.consignor;
-      setSelectedConsignor({
-        id: Number(cs.id),
-        name: cs.name ?? "",
-        document: cs.document ?? null,
-        phone: cs.phone ?? null,
-        email: cs.email ?? null,
-        bankAccounts: Array.isArray(cs.bankAccounts) ? cs.bankAccounts : [],
-      });
+      setSelectedConsignor(mapConsignorLite(cs));
     } else {
       setSelectedConsignor(null);
     }
@@ -759,6 +778,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
         id: w.id,
         name: w.name ?? "",
         cpf: w.cpf ? maskCPF(w.cpf) : "",
+        ci: w.ci ?? "",
       }))
     );
 
@@ -890,6 +910,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
         name: fv.name,
         street: fv.street,
         number: fv.number,
+        complement: fv.complement,
         neighborhood: fv.neighborhood,
         city: fv.city,
         state: fv.state.toUpperCase(),
@@ -952,14 +973,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
           params: { per_page: 999 },
         });
         if (cancelled) return;
-        const rows: ConsignorLite[] = (data?.data ?? []).map((c: any) => ({
-          id: Number(c.id),
-          name: c.name ?? "",
-          document: c.document ?? null,
-          phone: c.phone ?? null,
-          email: c.email ?? null,
-          bankAccounts: Array.isArray(c.bankAccounts) ? c.bankAccounts : [],
-        }));
+        const rows: ConsignorLite[] = (data?.data ?? []).map(mapConsignorLite);
         setConsignorList(rows);
       } catch (err) {
         console.error("[consignor list]", err);
@@ -1128,7 +1142,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       case "installments": return <span style={{ color: "#6b7280" }}>{contract.installmentCount}×</span>;
       case "installmentAmt": return <span style={{ ...tdNum, fontSize: 11, color: "#6b7280" }}>{fmt(contract.installmentAmount)}</span>;
       case "status": return <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 4, fontSize: 9, fontWeight: 700, textTransform: "uppercase", background: sc.bg, color: sc.color }}>{contract.status}</span>;
-      case "validated": return contract.validated ? <CheckCircle size={12} style={{ color: "#059669" }} /> : <span style={{ color: "#9ca3af" }}>—</span>;
+      case "contractDate": return <span style={{ fontSize: 10, whiteSpace: "nowrap", color: "#6b7280" }}>{fmtDate(contract.contractDate)}</span>;
       case "firstDue": return <span style={{ fontSize: 10, whiteSpace: "nowrap" }}>{fmtDate(contract.firstDueDate)}</span>;
       case "moraRate": return <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10 }}>{fmtPct(contract.moraRateMonthly)}</span>;
       default: return null;
@@ -1645,7 +1659,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <strong style={{ fontSize: 12, color: "#1e2139", display: "block" }}>Credor deste contrato</strong>
                           <span style={{ fontSize: 10.5, color: "#64748b" }}>
-                            Escolha um credor cadastrado em "Credores". Os dados gerais e contas bancárias serão exibidos abaixo apenas para conferência.
+                            Escolha um credor cadastrado em "Credores". O endereço e as contas bancárias serão exibidos abaixo apenas para conferência.
                           </span>
                         </div>
                         {selectedConsignor && (
@@ -1742,19 +1756,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                       {/* Dados Gerais — read-only */}
                       {selectedConsignor && (
                         <>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#475569", fontSize: 11, fontWeight: 700, textTransform: "uppercase", marginTop: 4 }}>
-                            <IdCard size={13} /> Dados Gerais do Credor
-                          </div>
-
-                          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 2fr", gap: 12 }}>
-                            <div>
-                              <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>NOME / RAZÃO SOCIAL</label>
-                              <input className="sigx-input" disabled readOnly value={selectedConsignor.name} />
-                            </div>
-                            <div>
-                              <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>CNPJ / CPF</label>
-                              <input className="sigx-input mono" disabled readOnly value={formatConsignorDocument(selectedConsignor.document) || "—"} />
-                            </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                             <div>
                               <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>TELEFONE</label>
                               <input className="sigx-input" disabled readOnly value={selectedConsignor.phone ?? "—"} />
@@ -1762,6 +1764,41 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                             <div>
                               <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>E-MAIL</label>
                               <input className="sigx-input" disabled readOnly value={selectedConsignor.email ?? "—"} />
+                            </div>
+                          </div>
+
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#475569", fontSize: 11, fontWeight: 700, textTransform: "uppercase", marginTop: 4 }}>
+                            <MapPin size={13} /> Endereço do Credor
+                          </div>
+
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
+                            <div>
+                              <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>CEP</label>
+                              <input className="sigx-input mono" disabled readOnly value={selectedConsignor.zipCode ? maskCEP(selectedConsignor.zipCode) : "—"} />
+                            </div>
+                            <div style={{ gridColumn: "span 2" }}>
+                              <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>RUA</label>
+                              <input className="sigx-input" disabled readOnly value={selectedConsignor.street ?? "—"} />
+                            </div>
+                            <div>
+                              <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>NÚMERO</label>
+                              <input className="sigx-input" disabled readOnly value={selectedConsignor.number ?? "—"} />
+                            </div>
+                            <div>
+                              <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>BAIRRO</label>
+                              <input className="sigx-input" disabled readOnly value={selectedConsignor.neighborhood ?? "—"} />
+                            </div>
+                            <div>
+                              <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>COMPLEMENTO</label>
+                              <input className="sigx-input" disabled readOnly value={selectedConsignor.complement ?? "—"} />
+                            </div>
+                            <div style={{ gridColumn: "span 2" }}>
+                              <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>CIDADE</label>
+                              <input className="sigx-input" disabled readOnly value={selectedConsignor.city ?? "—"} />
+                            </div>
+                            <div>
+                              <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>ESTADO (UF)</label>
+                              <input className="sigx-input" disabled readOnly value={selectedConsignor.state ?? "—"} />
                             </div>
                           </div>
 
@@ -2565,7 +2602,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                             onClick={() =>
                               setSelectedWitnesses((prev) => [
                                 ...prev,
-                                { localId: newLocalId(), name: "", cpf: "" },
+                                { localId: newLocalId(), name: "", cpf: "", ci: "" },
                               ])
                             }
                             className="btn-primary"
@@ -2602,7 +2639,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                                 key={w.localId}
                                 style={{
                                   display: "grid",
-                                  gridTemplateColumns: "1fr minmax(160px, 220px) 36px",
+                                  gridTemplateColumns: "1fr minmax(120px, 160px) minmax(160px, 220px) 36px",
                                   gap: 8,
                                   alignItems: "end",
                                 }}
@@ -2620,6 +2657,21 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                                       )
                                     }
                                     placeholder="Nome completo da testemunha"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="sigx-label">CI (RG)</label>
+                                  <input
+                                    className="sigx-input"
+                                    value={w.ci ?? ""}
+                                    onChange={(e) =>
+                                      setSelectedWitnesses((prev) =>
+                                        prev.map((item, i) =>
+                                          i === idx ? { ...item, ci: e.target.value } : item
+                                        )
+                                      )
+                                    }
+                                    placeholder="Ex: MG-8.421.530"
                                   />
                                 </div>
                                 <div>
