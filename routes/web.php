@@ -15,6 +15,7 @@ use App\Http\Controllers\SimulatorController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\ContractTypeController;
 use App\Http\Controllers\GuarantorController;
+use App\Http\Controllers\ConsignorController;
 use App\Models\UserColumnPreference; // 🚀 MODELO IMPORTADO PARA O UPSERT
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -150,6 +151,19 @@ Route::middleware('auth')->group(function () {
 
     // Lookup auxiliar para o multi-select de clientes no modal
     Route::get('/api/guarantors-clients-lookup', [GuarantorController::class, 'clientsLookup'])->name('guarantors.clients-lookup');
+
+    /*
+    |--------------------------------------------------------------------------
+    | CRUD de Credores (Consignors) — Inertia page + JSON API resource
+    |--------------------------------------------------------------------------
+    */
+    Route::get('/credores', [ConsignorController::class, 'page'])->name('consignors.index');
+
+    Route::get   ('/api/consignors',              [ConsignorController::class, 'index'])->name('consignors.list');
+    Route::post  ('/api/consignors',              [ConsignorController::class, 'store'])->name('consignors.store');
+    Route::get   ('/api/consignors/{consignor}',  [ConsignorController::class, 'show'])->name('consignors.show');
+    Route::put   ('/api/consignors/{consignor}',  [ConsignorController::class, 'update'])->name('consignors.update');
+    Route::delete('/api/consignors/{consignor}',  [ConsignorController::class, 'destroy'])->name('consignors.destroy');
 
     // Tipificações Estruturais
     Route::get('/contract-types', [ContractTypeController::class, 'index'])->name('contract-types.index');
