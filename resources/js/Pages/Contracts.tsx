@@ -4,7 +4,7 @@ import {
   CreditCard, QrCode, UserCheck, Scale, Paperclip,
   CircleDollarSign, Percent, Shield, BookOpen,
   UserPlus, Users, Sparkles, Building2, User as UserIcon,
-  Car, Home, Landmark, Mail, Phone, MapPin,
+  Car, Home, Landmark, Mail, Phone, MapPin, Download,
 } from "lucide-react";
 import { Head, router } from "@inertiajs/react";
 import { toast } from "sonner";
@@ -32,6 +32,7 @@ import {
   maskArea,
 } from "../Components/AssetFormFields";
 import { api, extractFirstError } from "../lib/api";
+import { downloadExcelWithState } from "../lib/exportHelper";
 import { useColumnVisibility } from "../hooks/useColumnVisibility";
 import {
   CONTRACTS_COLUMNS,
@@ -373,6 +374,7 @@ const maskPercentParse = (raw: string): number => {
 export default function Contracts({ contracts, clients, contractTypes = [], filters }: any) {
   const [search, setSearch] = useState(filters?.search || "");
   const [statusFilter, setStatusFilter] = useState(filters?.statusFilter || "Todos");
+  const [exporting, setExporting] = useState(false);
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("basico");
   const [form, setForm] = useState(emptyForm);
@@ -617,6 +619,20 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     setPage(1);
     router.get("/contracts", { search: newSearch, statusFilter: newStatus }, { preserveState: true, replace: true });
   };
+
+  const handleExportExcel = useCallback(() => {
+    downloadExcelWithState(
+      "/contracts/export",
+      "contratos.xlsx",
+      setExporting,
+      {
+        params: {
+          search: search || undefined,
+          statusFilter: statusFilter !== "Todos" ? statusFilter : undefined,
+        },
+      },
+    );
+  }, [search, statusFilter]);
 
   const resetModal = () => {
     setForm(emptyForm);
@@ -1198,9 +1214,20 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#111827" }}>Contratos e Ativos</h1>
-          <button onClick={handleOpenCreate} className="btn-primary" style={{ padding: "6px 14px", fontSize: 11 }}>
-            <Plus size={12} /> Novo Contrato
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button type="button" onClick={handleOpenCreate} className="btn-primary" style={{ padding: "6px 14px", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
+              <Plus size={12} /> Novo Contrato
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={handleExportExcel}
+              disabled={exporting}
+              style={{ padding: "6px 14px", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}
+            >
+              <Download size={12} /> {exporting ? "Exportando..." : "Exportar Excel"}
+            </button>
+          </div>
         </div>
 
         <div style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 6, padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>

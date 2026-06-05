@@ -4,12 +4,13 @@ import {
   Plus, Search, RefreshCw, X, Edit2, Trash2,
   Handshake, IdCard, MapPin, Users as UsersIcon,
   ShieldAlert, CheckCircle2, UserPlus, User, Building2,
-  Scale,
+  Scale, Download,
 } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
 import ConfirmDialog from "../Components/ConfirmDialog";
 import { api, extractFirstError } from "../lib/api";
+import { downloadExcelWithState } from "../lib/exportHelper";
 
 interface ClientLite {
   id: number;
@@ -139,6 +140,7 @@ export default function GuarantorsPage() {
   const [guarantors, setGuarantors] = useState<Guarantor[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [exporting, setExporting] = useState(false);
 
   const [formOpen, setFormOpen] = useState(false);
   const [activeFormTab, setActiveFormTab] = useState<"pessoal" | "endereco" | "clientes">("pessoal");
@@ -215,6 +217,15 @@ export default function GuarantorsPage() {
     const t = setTimeout(() => fetchGuarantors(search), 350);
     return () => clearTimeout(t);
   }, [search, fetchGuarantors]);
+
+  const handleExportExcel = useCallback(() => {
+    downloadExcelWithState(
+      "/fiadores/export",
+      "fiadores.xlsx",
+      setExporting,
+      { params: { search: search.trim() || undefined } },
+    );
+  }, [search]);
 
   useEffect(() => {
     if (formOpen) fetchClientsCatalog(clientSearch);
@@ -511,7 +522,20 @@ export default function GuarantorsPage() {
               </div>
               <button onClick={() => fetchGuarantors(search)} title="Atualizar Grade" style={{ background: "white", border: "1px solid #cbd5e1", borderRadius: 6, padding: "6px 8px", cursor: "pointer", color: "#64748b", display: "flex" }}><RefreshCw size={13} /></button>
             </div>
-            <button onClick={openCreate} style={{ display: "flex", alignItems: "center", gap: 6, background: "#1e2139", color: "white", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}><Plus size={14} /> Novo Fiador / Codevedor</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+              <button type="button" className="btn-primary" onClick={openCreate} style={{ padding: "6px 14px", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
+                <Plus size={12} /> Novo Fiador / Codevedor
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={handleExportExcel}
+                disabled={exporting}
+                style={{ padding: "6px 14px", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}
+              >
+                <Download size={12} /> {exporting ? "Exportando..." : "Exportar Excel"}
+              </button>
+            </div>
           </div>
 
           <div style={{ overflowX: "auto" }}>
