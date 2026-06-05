@@ -4,7 +4,7 @@ import {
   LayoutDashboard, List, Users, FileText, Calculator,
   TrendingUp, ClipboardList, LogOut, Menu, Bell,
   ChevronDown, Shield, CreditCard, ChevronRight, History,
-  UserCog, Handshake
+  UserCog, Handshake, Landmark
 } from "lucide-react";
 
 const NAV_SECTIONS = [
@@ -14,6 +14,7 @@ const NAV_SECTIONS = [
       { href: "/",            label: "Dashboard",      icon: LayoutDashboard }, // Ajustado para a raiz do Laravel
       { href: "/lancamentos", label: "Lançamentos",     icon: List },
       { href: "/clients",     label: "Clientes",        icon: Users },
+      { href: "/credores",    label: "Credores",        icon: Landmark },
       { href: "/fiadores",    label: "Fiador / Codevedor", icon: Handshake },
       { href: "/contracts",   label: "Contratos",       icon: FileText },
       { href: "/pagamentos",  label: "Pagamentos",      icon: CreditCard },
@@ -48,6 +49,7 @@ function getPageTitle(url: string) {
   if (url === "/lancamentos") return "Lançamentos";
   if (url === "/clients") return "Clientes";
   if (url.startsWith("/clients/")) return "Detalhe do Cliente";
+  if (url === "/credores") return "Credores";
   if (url === "/fiadores") return "Fiador / Codevedor";
   if (url.startsWith("/contracts/") && url.endsWith("/price")) return "Tabela Price";
   if (url.startsWith("/contracts/")) return "Detalhe do Contrato";
@@ -67,6 +69,7 @@ function getBreadcrumb(url: string) {
   if (url === "/lancamentos") return [base, { label: "Lançamentos" }];
   if (url === "/clients") return [base, { label: "Clientes" }];
   if (url.startsWith("/clients/")) return [base, { label: "Clientes", href: "/clients" }, { label: "Detalhe" }];
+  if (url === "/credores") return [base, { label: "Credores" }];
   if (url === "/fiadores") return [base, { label: "Fiador / Codevedor" }];
   if (url.startsWith("/contracts/") && url.endsWith("/price")) return [base, { label: "Contratos", href: "/contracts" }, { label: "Tabela Price" }];
   if (url.startsWith("/contracts/")) return [base, { label: "Contratos", href: "/contracts" }, { label: "Detalhe" }];
@@ -107,6 +110,7 @@ export default function UnyPayLayout({ children }: { children: React.ReactNode }
     "/pagamentos",
     "/contracts",
     "/clients",
+    "/credores",
     "/simulacoes",
   ].includes(pathname);
 
