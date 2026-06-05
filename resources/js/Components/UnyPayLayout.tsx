@@ -101,7 +101,6 @@ export default function UnyPayLayout({ children }: { children: React.ReactNode }
   };
 
   const breadcrumb = getBreadcrumb(url);
-  const pageTitle = getPageTitle(url);
   // Páginas que gerenciam o próprio padding/altura interna (tabela cheia / dashboard).
   const pathname = url.split("?")[0];
   const isFullWidth = [
@@ -304,10 +303,10 @@ export default function UnyPayLayout({ children }: { children: React.ReactNode }
           </div>
         </header>
 
-        {/* Page title bar */}
-        <div style={{ background: "white", borderBottom: "1px solid #e5e7eb", padding: "8px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-          <h1 style={{ fontSize: 16, fontWeight: 700, color: "#111827", margin: 0 }}>{pageTitle}</h1>
-        </div>
+        {/* 🚀 Faixa de "page title bar" removida — a identificação da tela
+            agora vive somente no breadcrumb do header + no h1 interno de
+            cada Page (ex.: "Gerenciamento de Lançamentos"). Evita duplicação
+            visual e ganha um pouco de altura útil para a grade. */}
 
         {/* Content */}
         <main style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>

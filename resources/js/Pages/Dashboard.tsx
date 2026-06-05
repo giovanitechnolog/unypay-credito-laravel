@@ -103,7 +103,36 @@ export default function Dashboard({ kpis, monthlyEvolution, interestTable, overd
   return (
     <UnyPayLayout>
       <Head title="Performance de Crédito" />
-      <div style={{ padding: "0px 24px 24px 24px" }}>
+
+      <style>{`
+        /* —— Caixa alta visual da tela inteira —— */
+        .dashboard-page,
+        .dashboard-page input,
+        .dashboard-page select,
+        .dashboard-page textarea,
+        .dashboard-page button,
+        .dashboard-page option,
+        .dashboard-page label,
+        .dashboard-page h1, .dashboard-page h2, .dashboard-page h3,
+        .dashboard-page p, .dashboard-page span, .dashboard-page strong,
+        .dashboard-page td, .dashboard-page th { text-transform: uppercase; }
+
+        /* Mantém legibilidade onde caixa alta atrapalha */
+        .dashboard-page input.mono,
+        .dashboard-page input[type="email"],
+        .dashboard-page input[type="password"],
+        .dashboard-page input[type="date"],
+        .dashboard-page input[type="number"] { text-transform: none; }
+        .dashboard-page input::placeholder,
+        .dashboard-page textarea::placeholder { text-transform: none; }
+        .dashboard-page .keep-case,
+        .dashboard-page .keep-case * { text-transform: none !important; }
+
+        /* SVGs do Recharts (eixos, legendas, tooltips) também em caixa alta */
+        .dashboard-page svg text { text-transform: uppercase; }
+      `}</style>
+
+      <div className="dashboard-page" style={{ padding: "0px 24px 24px 24px" }}>
         
         {/* Action Bar */}
         <div style={{ padding: "8px 0px", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, borderBottom: "1px solid #e5e7eb" }}>

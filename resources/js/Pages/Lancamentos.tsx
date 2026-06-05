@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback } from "react";
 import { Link, Head, router } from "@inertiajs/react";
 import {
-  Search, Plus, RefreshCw, Download,
+  Search, RefreshCw, Download,
   Eye, Trash2, ExternalLink, Calculator, X
 } from "lucide-react";
 import { toast } from "sonner";
@@ -239,7 +239,8 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
             c.code.toLowerCase().includes(q) ||
             c.contractName.toLowerCase().includes(q) ||
             (c.clientName ?? "").toLowerCase().includes(q) ||
-            c.creditor.toLowerCase().includes(q)) &&
+            c.creditor.toLowerCase().includes(q) ||
+            (c.consignorName ?? "").toLowerCase().includes(q)) &&
           (statusFilter === "Todos" || c.status === statusFilter) &&
           (clientFilter === "Todos" || String(c.clientId) === clientFilter)
         );
@@ -335,19 +336,26 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
         return <span style={{ fontFamily: FONT_MONO, color: "#6b7280" }}>{fmt(c.installmentAmount)}</span>;
       case "date":
         return <span style={{ color: "#6b7280" }}>{fmtDate(c.contractDate)}</span>;
-      case "creditor":
+      case "creditor": {
+        // 🔗 Preferência: nome do credor formalmente vinculado (consignors).
+        //    Fallback: campo legado `creditor` (texto livre) para contratos
+        //    antigos ainda não migrados.
+        const credorLabel = c.consignorName ?? c.creditor;
         return (
           <span
-            title={c.creditor}
+            title={credorLabel}
             style={{
-              fontSize: 10, color: "#6b7280",
+              fontSize: 10,
+              color: c.consignorName ? "#0f172a" : "#6b7280",
+              fontWeight: c.consignorName ? 600 : 400,
               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
               display: "block", maxWidth: 122,
             }}
           >
-            {c.creditor}
+            {credorLabel}
           </span>
         );
+      }
       case "paid": {
         const paidCount = Number(c.paidInstallmentsCount ?? 0);
         return <span style={{ fontFamily: FONT_MONO, fontWeight: 700, color: "#059669" }}>{paidCount}</span>;
@@ -449,7 +457,32 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
     <UnyPayLayout>
       <Head title="Lançamentos — Carteira de Crédito" />
 
-      <div style={{ padding: "12px 20px 16px 20px", display:"flex", flexDirection:"column", height:"100%", overflow:"hidden", gap: 12 }}>
+      <style>{`
+        /* —— Caixa alta visual da tela inteira —— */
+        .lancamentos-page,
+        .lancamentos-page input,
+        .lancamentos-page select,
+        .lancamentos-page textarea,
+        .lancamentos-page button,
+        .lancamentos-page option,
+        .lancamentos-page label,
+        .lancamentos-page h1, .lancamentos-page h2, .lancamentos-page h3,
+        .lancamentos-page p, .lancamentos-page span, .lancamentos-page strong,
+        .lancamentos-page td, .lancamentos-page th { text-transform: uppercase; }
+
+        /* Mantém legibilidade onde caixa alta atrapalha */
+        .lancamentos-page input.mono,
+        .lancamentos-page input[type="email"],
+        .lancamentos-page input[type="password"],
+        .lancamentos-page input[type="date"],
+        .lancamentos-page input[type="number"] { text-transform: none; }
+        .lancamentos-page input::placeholder,
+        .lancamentos-page textarea::placeholder { text-transform: none; }
+        .lancamentos-page .keep-case,
+        .lancamentos-page .keep-case * { text-transform: none !important; }
+      `}</style>
+
+      <div className="lancamentos-page" style={{ padding: "12px 20px 16px 20px", display:"flex", flexDirection:"column", height:"100%", overflow:"hidden", gap: 12 }}>
 
         {/* ══ HEADER ═════════════════════════════════════════════════════ */}
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
@@ -458,11 +491,9 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
             <button onClick={() => router.get('/lancamentos')} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:5, border:"1px solid #d1d5db", background:"white", fontSize:11, fontWeight:500, cursor:"pointer", color:"#374151" }}>
               <RefreshCw size={12}/> Sincronizar IPCA
             </button>
-            <Link href="/contracts">
-              <button className="btn-primary" style={{ padding: "6px 14px", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
-                <Plus size={12}/> Novo
-              </button>
-            </Link>
+            {/* ❌ Botão "+ Novo" removido: a criação de lançamentos é feita
+                via Contratos (cada contrato gera os lançamentos automaticamente).
+                Manter o botão aqui causava confusão sobre o ponto de entrada. */}
             <button
               type="button"
               className="btn-primary"
