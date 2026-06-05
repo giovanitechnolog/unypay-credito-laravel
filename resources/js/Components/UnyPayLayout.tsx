@@ -4,7 +4,7 @@ import {
   LayoutDashboard, List, Users, FileText, Calculator,
   TrendingUp, ClipboardList, LogOut, Menu, Bell,
   ChevronDown, Shield, CreditCard, ChevronRight, History,
-  UserCog, Handshake
+  UserCog, Handshake, Sparkles
 } from "lucide-react";
 
 const NAV_SECTIONS = [
@@ -16,6 +16,7 @@ const NAV_SECTIONS = [
       { href: "/clients",     label: "Clientes",        icon: Users },
       { href: "/fiadores",    label: "Fiadores",        icon: Handshake },
       { href: "/contracts",   label: "Contratos",       icon: FileText },
+      { href: "/ai-ingestion", label: "Ingestão com IA", icon: Sparkles },
       { href: "/pagamentos",  label: "Pagamentos",      icon: CreditCard },
     ],
   },
