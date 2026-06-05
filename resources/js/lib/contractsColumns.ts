@@ -20,7 +20,7 @@ export type ContractsColumnId =
   | "installmentAmt"
   // situacao
   | "status"
-  | "validated"
+  | "contractDate"
   | "firstDue"
   | "moraRate";
 
@@ -52,7 +52,7 @@ export const CONTRACTS_COLUMNS: readonly ContractsColumnDef[] = [
 
   // —— Situação ——
   { id: "status",    label: "Status",   group: "situacao", width: 100, align: "center", defaultVisible: true, sortable: true, sortKey: "status" },
-  { id: "validated", label: "Valid.",   group: "situacao", width: 60,  align: "center", defaultVisible: true },
+  { id: "contractDate", label: "Emissão", group: "situacao", width: 90, align: "center", defaultVisible: true },
   { id: "firstDue",  label: "1ª Venc.", group: "situacao", width: 90,  align: "center", defaultVisible: true },
   { id: "moraRate",  label: "Mora",     group: "situacao", width: 70,  align: "center", defaultVisible: true },
 ];

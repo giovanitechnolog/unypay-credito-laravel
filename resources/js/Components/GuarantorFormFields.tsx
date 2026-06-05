@@ -26,6 +26,7 @@ export interface GuarantorFormValues {
   // Endereço
   street: string;
   number: string;
+  complement: string;
   neighborhood: string;
   city: string;
   state: string;
@@ -44,6 +45,7 @@ export const EMPTY_GUARANTOR_FORM: GuarantorFormValues = {
   stateRegistration: "",
   street: "",
   number: "",
+  complement: "",
   neighborhood: "",
   city: "",
   state: "",
@@ -377,7 +379,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
       {/* 🚀 CEP no topo do bloco — dispara busca automática no ViaCEP
           assim que os 8 dígitos forem completados (mesmo padrão da tela
           de Clientes). Preenche RUA, BAIRRO, CIDADE e UF abaixo. */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 14 }}>
         <div>
           <label className="sigx-label">CEP</label>
           <input
@@ -395,10 +397,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
             </span>
           )}
         </div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14 }}>
-        <div>
+        <div style={{ gridColumn: "span 2" }}>
           <label className="sigx-label">RUA / LOGRADOURO</label>
           <input
             type="text"
@@ -420,18 +419,28 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
             style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
           />
         </div>
-      </div>
-
-      <div>
-        <label className="sigx-label">BAIRRO</label>
-        <input
-          type="text"
-          className="sigx-input"
-          value={value.neighborhood}
-          onChange={(e) => set("neighborhood", e.target.value)}
-          readOnly={readOnly}
-          style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
-        />
+        <div>
+          <label className="sigx-label">BAIRRO</label>
+          <input
+            type="text"
+            className="sigx-input"
+            value={value.neighborhood}
+            onChange={(e) => set("neighborhood", e.target.value)}
+            readOnly={readOnly}
+            style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+          />
+        </div>
+        <div>
+          <label className="sigx-label">COMPLEMENTO</label>
+          <input
+            type="text"
+            className="sigx-input"
+            value={value.complement}
+            onChange={(e) => set("complement", e.target.value)}
+            readOnly={readOnly}
+            style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+          />
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "3fr 1fr", gap: 14 }}>

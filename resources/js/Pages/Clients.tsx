@@ -317,6 +317,7 @@ export default function Clients({ clients, filters }: any) {
         stateRegistration: g.stateRegistration ?? "",
         street: g.street ?? "",
         number: g.number ?? "",
+        complement: g.complement ?? "",
         neighborhood: g.neighborhood ?? "",
         city: g.city ?? "",
         state: g.state ?? "",

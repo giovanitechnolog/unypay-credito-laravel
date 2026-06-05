@@ -5,7 +5,7 @@ namespace App\Http\Requests\ContractWitnesses;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
- * Valida UMA testemunha de contrato (nome + CPF).
+ * Valida UMA testemunha de contrato (nome + CPF + CI/RG opcional).
  *
  * 💡 Uso na prática:
  *   1. Como FormRequest tradicional em rota dedicada (testes isolados).
@@ -41,6 +41,7 @@ class StoreContractWitnessRequest extends FormRequest
         return [
             "{$p}name" => ['required', 'string', 'max:255'],
             "{$p}cpf"  => ['required', 'string', 'size:11', 'max:14'],
+            "{$p}ci"   => ['nullable', 'string', 'max:50'],
         ];
     }
 
@@ -53,11 +54,12 @@ class StoreContractWitnessRequest extends FormRequest
             "{$p}name.max"      => 'O nome da testemunha não pode ultrapassar 255 caracteres.',
             "{$p}cpf.required"  => 'Informe o CPF da testemunha.',
             "{$p}cpf.size"      => 'O CPF deve conter 11 dígitos numéricos.',
+            "{$p}ci.max"        => 'A CI não pode ultrapassar 50 caracteres.',
         ];
     }
 
     /**
-     * Normaliza CPF (apenas dígitos) e trim no nome antes de validar/persistir.
+     * Normaliza CPF (apenas dígitos), trim no nome e CI antes de validar/persistir.
      */
     public static function normalize(array $witness): array
     {
@@ -67,6 +69,11 @@ class StoreContractWitnessRequest extends FormRequest
 
         if (! empty($witness['cpf'])) {
             $witness['cpf'] = preg_replace('/\D/', '', (string) $witness['cpf']);
+        }
+
+        if (array_key_exists('ci', $witness)) {
+            $ci = trim((string) ($witness['ci'] ?? ''));
+            $witness['ci'] = $ci !== '' ? $ci : null;
         }
 
         return $witness;
