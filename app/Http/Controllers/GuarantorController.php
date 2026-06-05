@@ -2,13 +2,17 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\GuarantorsExport;
 use App\Http\Requests\Guarantors\StoreGuarantorRequest;
 use App\Http\Requests\Guarantors\UpdateGuarantorRequest;
 use App\Models\Guarantor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
+use Maatwebsite\Excel\Facades\Excel;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class GuarantorController extends Controller
 {
@@ -20,6 +24,13 @@ class GuarantorController extends Controller
         return Inertia::render('Guarantors');
     }
 
+    public function export(Request $request): BinaryFileResponse
+    {
+        $rows = $this->buildGuarantorsForExport($request);
+
+        return Excel::download(new GuarantorsExport($rows), 'fiadores.xlsx');
+    }
+
     /**
      * GET /api/guarantors — lista paginada/filtrável em JSON.
      * Inclui a contagem de clientes vinculados e a lista compacta de IDs/nomes.
@@ -29,38 +40,56 @@ class GuarantorController extends Controller
         $search  = trim((string) $request->input('search', ''));
         $perPage = (int) $request->input('per_page', 25);
 
-        $query = Guarantor::query()
-            ->with(['clients:id,name'])
-            ->withCount('clients')
-            // 🚀 Contagens por papel exercido em CONTRATOS — alimentam os
-            // cards "Vínculos Fiadores" / "Vínculos Codevedores" e as colunas
-            // "Vínculo Fiador" / "Vínculo Codevedor" da grade. A relação
-            // `contracts()` aponta para a pivot contract_guarantor; aqui
-            // filtramos por role para separar as duas contagens.
-            ->withCount([
-                'contracts as fiadores_count'    => fn ($q) => $q->where('contract_guarantor.role', 'FIADOR'),
-                'contracts as codevedores_count' => fn ($q) => $q->where('contract_guarantor.role', 'CODEVEDOR'),
-            ]);
-
-        if ($search !== '') {
-            $query->where(function ($q) use ($search) {
-                $digits = preg_replace('/\D/', '', $search);
-
-                $q->where('name',      'like', "%{$search}%")
-                  ->orWhere('tradeName', 'like', "%{$search}%")
-                  ->orWhere('rg',        'like', "%{$search}%")
-                  ->orWhere('city',      'like', "%{$search}%");
-
-                if ($digits !== '') {
-                    $q->orWhere('cpf',  'like', "%{$digits}%")
-                      ->orWhere('cnpj', 'like', "%{$digits}%");
-                }
-            });
-        }
+        $query = $this->applyGuarantorSearch(
+            Guarantor::query()
+                ->with(['clients:id,name'])
+                ->withCount('clients')
+                ->withCount([
+                    'contracts as fiadores_count'    => fn ($q) => $q->where('contract_guarantor.role', 'FIADOR'),
+                    'contracts as codevedores_count' => fn ($q) => $q->where('contract_guarantor.role', 'CODEVEDOR'),
+                ]),
+            $search
+        );
 
         $guarantors = $query->orderBy('name')->paginate($perPage);
 
         return response()->json($guarantors);
+    }
+
+    private function buildGuarantorsForExport(Request $request): Collection
+    {
+        $search = trim((string) $request->input('search', ''));
+
+        return $this->applyGuarantorSearch(
+            Guarantor::query()
+                ->with(['clients:id,name'])
+                ->withCount([
+                    'contracts as fiadores_count'    => fn ($q) => $q->where('contract_guarantor.role', 'FIADOR'),
+                    'contracts as codevedores_count' => fn ($q) => $q->where('contract_guarantor.role', 'CODEVEDOR'),
+                ]),
+            $search
+        )->orderBy('name')->get();
+    }
+
+    private function applyGuarantorSearch($query, string $search)
+    {
+        if ($search === '') {
+            return $query;
+        }
+
+        return $query->where(function ($q) use ($search) {
+            $digits = preg_replace('/\D/', '', $search);
+
+            $q->where('name', 'like', "%{$search}%")
+                ->orWhere('tradeName', 'like', "%{$search}%")
+                ->orWhere('rg', 'like', "%{$search}%")
+                ->orWhere('city', 'like', "%{$search}%");
+
+            if ($digits !== '') {
+                $q->orWhere('cpf', 'like', "%{$digits}%")
+                    ->orWhere('cnpj', 'like', "%{$digits}%");
+            }
+        });
     }
 
     /**

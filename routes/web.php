@@ -52,9 +52,11 @@ Route::middleware('auth')->group(function () {
 
     // Lançamentos
     Route::get('/lancamentos', [LancamentosController::class, 'index']);
+    Route::get('/lancamentos/export', [LancamentosController::class, 'export']);
 
     // Clientes
-    Route::get   ('/clients',      [ClientController::class, 'index'])->name('clients.index');
+    Route::get   ('/clients',        [ClientController::class, 'index'])->name('clients.index');
+    Route::get   ('/clients/export',  [ClientController::class, 'export'])->name('clients.export');
     Route::post  ('/clients',      [ClientController::class, 'store'])->name('clients.store');
     // 🚀 JSON dedicado: fiadores vinculados ao cliente (alimenta "Fiadores Sugeridos"
     // do modal de Contratos). Declarado antes de /clients/{id} de propósito.
@@ -69,6 +71,7 @@ Route::middleware('auth')->group(function () {
     |--------------------------------------------------------------------------
     */
     Route::get   ('/contracts',                [ContractController::class, 'index'])->name('contracts.index');
+    Route::get   ('/contracts/export',         [ContractController::class, 'export'])->name('contracts.export');
     Route::post  ('/contracts/store',          [ContractController::class, 'store'])->name('contracts.store'); // 👈 Mapeado para o envio do formulário limpo
     Route::post  ('/contracts',                [ContractController::class, 'store']); 
     
@@ -85,8 +88,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/api/clients-lookup', [ContractController::class, 'clientsLookup']);
 
     // Pagamentos e Amortizações
-    Route::get('/payments',   [PaymentController::class, 'index'])->name('payments.index');
-    Route::get('/pagamentos', [PaymentController::class, 'index'])->name('pagamentos.index');
+    Route::get('/payments',         [PaymentController::class, 'index'])->name('payments.index');
+    Route::get('/payments/export',  [PaymentController::class, 'export'])->name('payments.export');
+    Route::get('/pagamentos',       [PaymentController::class, 'index'])->name('pagamentos.index');
 
     Route::get ('/api/payments/schedule/{contractId}', [PaymentController::class, 'getSchedule']);
     Route::post('/api/payments/record',                [PaymentController::class, 'recordPayment']);
@@ -138,7 +142,8 @@ Route::middleware('auth')->group(function () {
     | CRUD de Fiadores (Guarantors)
     |--------------------------------------------------------------------------
     */
-    Route::get('/fiadores', [GuarantorController::class, 'page'])->name('guarantors.index');
+    Route::get('/fiadores',        [GuarantorController::class, 'page'])->name('guarantors.index');
+    Route::get('/fiadores/export', [GuarantorController::class, 'export'])->name('guarantors.export');
 
     Route::get   ('/api/guarantors',                    [GuarantorController::class, 'index'])->name('guarantors.list');
     // 🚀 Autocomplete leve usado pelo modal de Contratos (declarado ANTES de /{guarantor}
@@ -157,7 +162,8 @@ Route::middleware('auth')->group(function () {
     | CRUD de Credores (Consignors) — Inertia page + JSON API resource
     |--------------------------------------------------------------------------
     */
-    Route::get('/credores', [ConsignorController::class, 'page'])->name('consignors.index');
+    Route::get('/credores',        [ConsignorController::class, 'page'])->name('consignors.index');
+    Route::get('/credores/export', [ConsignorController::class, 'export'])->name('consignors.export');
 
     Route::get   ('/api/consignors',              [ConsignorController::class, 'index'])->name('consignors.list');
     Route::post  ('/api/consignors',              [ConsignorController::class, 'store'])->name('consignors.store');

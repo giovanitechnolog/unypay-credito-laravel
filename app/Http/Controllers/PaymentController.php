@@ -2,12 +2,16 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
+use App\Exports\PaymentsExport;
 use App\Models\Contract;
 use Carbon\Carbon;
-use Inertia\Inertia;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Inertia\Inertia;
+use Maatwebsite\Excel\Facades\Excel;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class PaymentController extends Controller
 {
@@ -16,109 +20,12 @@ class PaymentController extends Controller
         $search = $request->input('search');
         $statusFilter = $request->input('statusFilter', 'Todos');
 
-        $query = Contract::with('client');
+        $contracts = $this->buildFilteredContractsQuery($request)->get();
 
-        if ($statusFilter && $statusFilter !== 'Todos') {
-            $query->where('status', $statusFilter);
-        }
-
-        if ($search) {
-            $query->where(function($q) use ($search) {
-                $q->where('code', 'like', "%{$search}%")
-                  ->orWhere('contractName', 'like', "%{$search}%")
-                  ->orWhereHas('client', function($c) use ($search) {
-                      $c->where('name', 'like', "%{$search}%");
-                  });
-            });
-        }
-
-        $contracts = $query->latest('createdAt')->get();
-
-        // Totalizadores macros da tabela externa lendo diretamente as tabelas reais do seu Schema
-        $interestTable = $contracts->map(function($contract) {
-            $baseDate = Carbon::now();
-            
-            // Busca o resumo de parcelas reais salvas na tabela 'installments'
-            $installments = DB::table('installments')
-                ->where('contractId', $contract->id)
-                ->get();
-
-            $paidCount = $installments->where('status', 'Pago')->count();
-            
-            // Filtra as inadimplentes reais comparando com a data base atual
-            $overdueInstallments = $installments->filter(function($inst) use ($baseDate) {
-                return $inst->status !== 'Pago' && Carbon::parse($inst->dueDate)->isBefore($baseDate);
-            });
-
-            $maxDays = 0;
-            $totalInterest = 0;
-
-            // Se existirem parcelas físicas no banco, calcula em cima delas
-            if ($installments->count() > 0) {
-                foreach ($overdueInstallments as $inst) {
-                    // Força o cálculo de dias de atraso a retornar um valor estritamente inteiro
-                    $days = (int)ceil(Carbon::parse($inst->dueDate)->diffInDays($baseDate, false));
-                    if ($days < 0) {
-                        $days = 0;
-                    }
-
-                    if ($days > $maxDays) {
-                        $maxDays = $days;
-                    }
-                    
-                    $original = (double)$inst->originalAmount;
-                    $mora = $original * (($contract->moraRateMonthly ?? 0.02) / 30) * $days;
-                    $multa = $original * ($contract->penaltyRate ?? 0.10);
-                    $totalInterest += ($mora + $multa);
-                }
-
-                // 🚀 CORREÇÃO DO OPERADOR: Alterado de '!==' para '!=' para funcionar na Collection do Laravel
-                $remainingBalance = $installments->where('status', '!=', 'Pago')->sum('originalAmount');
-                $overdueCount = $overdueInstallments->count();
-            } else {
-                // FALLBACK MATEMÁTICO: Caso a tabela 'installments' esteja vazia para este contrato
-                $remainingBalance = (double)$contract->financedTotal;
-                
-                // Calcula os dias de atraso macros comparando a data do 1º Vencimento com o dia de hoje
-                if ($contract->firstDueDate) {
-                    $firstDue = Carbon::parse($contract->firstDueDate);
-                    if ($firstDue->isBefore($baseDate)) {
-                        $maxDays = (int)ceil($firstDue->diffInDays($baseDate, false));
-                        if ($maxDays < 0) {
-                            $maxDays = 0;
-                        }
-                        
-                        $overdueCount = 1; 
-                        
-                        $original = (double)$contract->installmentAmount;
-                        $mora = $original * (($contract->moraRateMonthly ?? 0.02) / 30) * $maxDays;
-                        $multa = $original * ($contract->penaltyRate ?? 0.10);
-                        $totalInterest = ($mora + $multa);
-                    } else {
-                        $maxDays = 0;
-                        $overdueCount = 0;
-                        $totalInterest = 0;
-                    }
-                } else {
-                    $maxDays = 0;
-                    $overdueCount = 0;
-                    $totalInterest = 0;
-                }
-            }
-
-            return [
-                'contractId' => $contract->id,
-                'paidInstallments' => $paidCount,
-                'overdueInstallments' => $overdueCount, 
-                'maxDaysOverdue' => (int)$maxDays,           
-                'remainingBalance' => $remainingBalance,
-                'totalInterest' => $totalInterest,
-                'cetMonthly' => $contract->monthlyInterestRate > 0 ? (double)$contract->monthlyInterestRate : 0.025
-            ];
-        });
+        $interestTable = $contracts->map(fn ($contract) => $this->computeContractInterestSummary($contract));
 
         return Inertia::render('Payments', [
-            'contracts' => $contracts->map(function($c) {
+            'contracts' => $contracts->map(function ($c) {
                 return [
                     'contract' => $c,
                     'clientName' => $c->client ? $c->client->name : '—'
@@ -127,6 +34,142 @@ class PaymentController extends Controller
             'interestData' => $interestTable,
             'filters' => $request->only(['search', 'statusFilter'])
         ]);
+    }
+
+    public function export(Request $request): BinaryFileResponse
+    {
+        $rows = $this->buildPaymentsForExport($request);
+
+        return Excel::download(new PaymentsExport($rows), 'pagamentos.xlsx');
+    }
+
+    private function buildFilteredContractsQuery(Request $request)
+    {
+        $search = $request->input('search');
+        $statusFilter = $request->input('statusFilter', 'Todos');
+
+        $query = Contract::with(['client', 'consignor:id,name']);
+
+        if ($statusFilter && $statusFilter !== 'Todos') {
+            $query->where('status', $statusFilter);
+        }
+
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('code', 'like', "%{$search}%")
+                    ->orWhere('contractName', 'like', "%{$search}%")
+                    ->orWhereHas('client', function ($c) use ($search) {
+                        $c->where('name', 'like', "%{$search}%");
+                    });
+            });
+        }
+
+        return $query->latest('createdAt');
+    }
+
+    private function buildPaymentsForExport(Request $request): Collection
+    {
+        return $this->buildFilteredContractsQuery($request)
+            ->get()
+            ->map(function (Contract $contract) {
+                $summary = $this->computeContractInterestSummary($contract);
+
+                return [
+                    'code' => $contract->code,
+                    'clientName' => $contract->client?->name ?? '—',
+                    'contractDate' => $contract->contractDate,
+                    'creditorName' => $contract->consignor?->name ?? $contract->creditor ?? '—',
+                    'principalAmount' => (float) $contract->principalAmount,
+                    'financedTotal' => (float) $contract->financedTotal,
+                    'installmentCount' => (int) $contract->installmentCount,
+                    'installmentAmount' => (float) $contract->installmentAmount,
+                    'paidInstallments' => $summary['paidInstallments'],
+                    'overdueInstallments' => $summary['overdueInstallments'],
+                    'maxDaysOverdue' => $summary['maxDaysOverdue'],
+                    'toReceive' => $summary['remainingBalance'] + $summary['totalInterest'],
+                    'totalInterest' => $summary['totalInterest'],
+                    'cetMonthly' => $summary['cetMonthly'],
+                    'status' => $contract->status,
+                    'firstDueDate' => $contract->firstDueDate,
+                ];
+            });
+    }
+
+    /** @return array<string, float|int> */
+    private function computeContractInterestSummary(Contract $contract): array
+    {
+        $baseDate = Carbon::now();
+
+        $installments = DB::table('installments')
+            ->where('contractId', $contract->id)
+            ->get();
+
+        $paidCount = $installments->where('status', 'Pago')->count();
+
+        $overdueInstallments = $installments->filter(function ($inst) use ($baseDate) {
+            return $inst->status !== 'Pago' && Carbon::parse($inst->dueDate)->isBefore($baseDate);
+        });
+
+        $maxDays = 0;
+        $totalInterest = 0;
+
+        if ($installments->count() > 0) {
+            foreach ($overdueInstallments as $inst) {
+                $days = (int) ceil(Carbon::parse($inst->dueDate)->diffInDays($baseDate, false));
+                if ($days < 0) {
+                    $days = 0;
+                }
+
+                if ($days > $maxDays) {
+                    $maxDays = $days;
+                }
+
+                $original = (float) $inst->originalAmount;
+                $mora = $original * (($contract->moraRateMonthly ?? 0.02) / 30) * $days;
+                $multa = $original * ($contract->penaltyRate ?? 0.10);
+                $totalInterest += ($mora + $multa);
+            }
+
+            $remainingBalance = $installments->where('status', '!=', 'Pago')->sum('originalAmount');
+            $overdueCount = $overdueInstallments->count();
+        } else {
+            $remainingBalance = (float) $contract->financedTotal;
+
+            if ($contract->firstDueDate) {
+                $firstDue = Carbon::parse($contract->firstDueDate);
+                if ($firstDue->isBefore($baseDate)) {
+                    $maxDays = (int) ceil($firstDue->diffInDays($baseDate, false));
+                    if ($maxDays < 0) {
+                        $maxDays = 0;
+                    }
+
+                    $overdueCount = 1;
+
+                    $original = (float) $contract->installmentAmount;
+                    $mora = $original * (($contract->moraRateMonthly ?? 0.02) / 30) * $maxDays;
+                    $multa = $original * ($contract->penaltyRate ?? 0.10);
+                    $totalInterest = ($mora + $multa);
+                } else {
+                    $maxDays = 0;
+                    $overdueCount = 0;
+                    $totalInterest = 0;
+                }
+            } else {
+                $maxDays = 0;
+                $overdueCount = 0;
+                $totalInterest = 0;
+            }
+        }
+
+        return [
+            'contractId' => $contract->id,
+            'paidInstallments' => $paidCount,
+            'overdueInstallments' => $overdueCount ?? 0,
+            'maxDaysOverdue' => (int) $maxDays,
+            'remainingBalance' => (float) $remainingBalance,
+            'totalInterest' => (float) $totalInterest,
+            'cetMonthly' => $contract->monthlyInterestRate > 0 ? (float) $contract->monthlyInterestRate : 0.025,
+        ];
     }
 
    public function getSchedule(Request $request, int $contractId)

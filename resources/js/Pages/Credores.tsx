@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Head } from "@inertiajs/react";
 import {
   Plus, Search, X, Edit2, Trash2, Users, Building2, User,
-  IdCard, MapPin, Landmark, CreditCard, RefreshCw, Mail, Phone,
+  IdCard, MapPin, Landmark, CreditCard, RefreshCw, Mail, Phone, Download,
 } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
 import ConfirmDialog from "../Components/ConfirmDialog";
 import { api, extractFirstError } from "../lib/api";
+import { downloadExcelWithState } from "../lib/exportHelper";
 
 /* ────────────────────────────────────────────────────────────────────────────
  * 🚀 Interfaces TypeScript (Consignor + ConsignorBankAccount).
@@ -262,6 +263,7 @@ export default function CredoresPage() {
   const [consignors, setConsignors] = useState<Consignor[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [exporting, setExporting] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(20);
 
@@ -297,6 +299,15 @@ export default function CredoresPage() {
     const t = setTimeout(() => fetchConsignors(), 250);
     return () => clearTimeout(t);
   }, [fetchConsignors]);
+
+  const handleExportExcel = useCallback(() => {
+    downloadExcelWithState(
+      "/credores/export",
+      "credores.xlsx",
+      setExporting,
+      { params: { search: search.trim() || undefined } },
+    );
+  }, [search]);
 
   /* ── Abrir modal para criar / editar ──────────────────────────────── */
   const openCreateModal = () => {
@@ -453,9 +464,20 @@ export default function CredoresPage() {
         {/* Topo */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#111827" }}>Gerenciamento de Credores</h1>
-          <button className="btn-primary" onClick={openCreateModal} style={{ padding: "6px 14px", fontSize: 11 }}>
-            <Plus size={12} /> Novo Credor
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button className="btn-primary" onClick={openCreateModal} style={{ padding: "6px 14px", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
+              <Plus size={12} /> Novo Credor
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={handleExportExcel}
+              disabled={exporting}
+              style={{ padding: "6px 14px", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}
+            >
+              <Download size={12} /> {exporting ? "Exportando..." : "Exportar Excel"}
+            </button>
+          </div>
         </div>
 
         {/* Barra de busca */}

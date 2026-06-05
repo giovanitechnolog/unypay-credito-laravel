@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { Link, Head, router } from "@inertiajs/react";
 import {
-  Search, Plus, RefreshCw, FileText, Download,
+  Search, Plus, RefreshCw, Download,
   Eye, Trash2, ExternalLink, Calculator, X
 } from "lucide-react";
 import { toast } from "sonner";
+import { downloadExcelWithState } from "../lib/exportHelper";
 import UnyPayLayout from "../Components/UnyPayLayout";
 import ConfirmDialog from "../Components/ConfirmDialog";
 import TableGroupBadges from "../Components/TableGroupBadges";
@@ -118,6 +119,7 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
   const [priceData, setPriceData]       = useState<any>(null);
   const [priceLoading, setPriceLoading] = useState(false);
   const [contractToDelete, setContractToDelete] = useState<any | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   // ── Visibilidade de colunas (persistida) ─────────────────────────────────
   const { visibleIds, toggleColumn, setColumnsVisible, resetDefaults } =
@@ -167,6 +169,21 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
   const handleFilterChange = (newSearch: string, newStatus: string) => {
     router.get("/lancamentos", { search: newSearch, statusFilter: newStatus }, { preserveState: true, replace: true });
   };
+
+  const handleExportExcel = useCallback(() => {
+    downloadExcelWithState(
+      "/lancamentos/export",
+      "lancamentos.xlsx",
+      setExporting,
+      {
+        params: {
+          search: search || undefined,
+          statusFilter: statusFilter !== "Todos" ? statusFilter : undefined,
+          clientFilter: clientFilter !== "Todos" ? clientFilter : undefined,
+        },
+      },
+    );
+  }, [search, statusFilter, clientFilter]);
 
   // ── Handlers existentes ──────────────────────────────────────────────────
   const handleOpenPrice = (contractId: number) => {
@@ -261,26 +278,16 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
         return <span style={{ fontFamily: FONT_MONO, fontSize: 10, fontWeight: 600, color: "#374151" }}>{c.code}</span>;
       case "client":
         return (
-          <div style={{ maxWidth: col.width - 16, minWidth: 0 }}>
-            <div
-              title={c.clientName}
-              style={{
-                fontSize: 11, fontWeight: 600, lineHeight: 1.25, color: "#111827",
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}
-            >
-              {c.clientName}
-            </div>
-            <div
-              title={c.contractName}
-              style={{
-                fontSize: 9, color: "#9ca3af", lineHeight: 1.2, marginTop: 1,
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}
-            >
-              {c.contractName}
-            </div>
-          </div>
+          <span
+            title={c.clientName}
+            style={{
+              fontSize: 11, fontWeight: 600, color: "#111827",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              display: "block", maxWidth: col.width - 16,
+            }}
+          >
+            {c.clientName}
+          </span>
         );
       case "type": {
         const tc = getType(c.contractType);
@@ -447,20 +454,23 @@ export default function Lancamentos({ contracts, clients, kpis, filters }: any) 
         {/* ══ HEADER ═════════════════════════════════════════════════════ */}
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
           <h1 style={{ margin:0, fontSize:16, fontWeight:700, color:"#111827" }}>Lançamentos — Carteira de Crédito</h1>
-          <div style={{ display:"flex", gap:6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <button onClick={() => router.get('/lancamentos')} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:5, border:"1px solid #d1d5db", background:"white", fontSize:11, fontWeight:500, cursor:"pointer", color:"#374151" }}>
               <RefreshCw size={12}/> Sincronizar IPCA
             </button>
             <Link href="/contracts">
-              <button style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:5, border:"1px solid #d1d5db", background:"white", color:"#374151", fontSize:11, fontWeight:500, cursor:"pointer" }}>
+              <button className="btn-primary" style={{ padding: "6px 14px", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
                 <Plus size={12}/> Novo
               </button>
             </Link>
-            <button onClick={() => alert("Geração de PDF acionada.")} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:5, border:"none", background:"#991b1b", color:"white", fontSize:11, fontWeight:600, cursor:"pointer" }}>
-              <FileText size={12}/> Relatório PDF
-            </button>
-            <button onClick={() => alert("Geração de XLS acionada.")} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:5, border:"none", background:"#1e3a8a", color:"white", fontSize:11, fontWeight:600, cursor:"pointer" }}>
-              <Download size={12}/> Exportar Excel
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={handleExportExcel}
+              disabled={exporting}
+              style={{ padding: "6px 14px", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}
+            >
+              <Download size={12}/> {exporting ? "Exportando..." : "Exportar Excel"}
             </button>
           </div>
         </div>

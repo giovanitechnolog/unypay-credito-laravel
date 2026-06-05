@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-use Inertia\Inertia;
+use App\Exports\ClientsExport;
 use App\Models\Client;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Inertia\Inertia;
+use Maatwebsite\Excel\Facades\Excel;
 
 class ClientController extends Controller
 {
@@ -77,6 +80,69 @@ class ClientController extends Controller
                 'search' => $search
             ]
         ]);
+    }
+
+    public function export(Request $request)
+    {
+        $rows = $this->buildClientsForExport($request);
+
+        return Excel::download(new ClientsExport($rows), 'clientes.xlsx');
+    }
+
+    private function buildClientsForExport(Request $request): Collection
+    {
+        $search = $request->input('search', '');
+
+        $query = DB::table('clients');
+
+        if (! empty($search)) {
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', '%' . $search . '%')
+                    ->orWhere('document', 'like', '%' . $search . '%')
+                    ->orWhere('email', 'like', '%' . $search . '%');
+            });
+        }
+
+        $clients = $query->orderBy('name', 'asc')->get();
+
+        $clientIds = $clients->pluck('id')->all();
+        $guarantorsByClient = [];
+
+        if (! empty($clientIds)) {
+            $rows = DB::table('contracts as ct')
+                ->join('contract_guarantor as cg', 'cg.contractId', '=', 'ct.id')
+                ->join('guarantors as g', 'g.id', '=', 'cg.guarantorId')
+                ->whereIn('ct.clientId', $clientIds)
+                ->select('ct.clientId', 'g.name', 'cg.role')
+                ->distinct()
+                ->orderBy('g.name')
+                ->get();
+
+            foreach ($rows as $row) {
+                $guarantorsByClient[$row->clientId][] = [
+                    'name' => $row->name,
+                    'role' => $row->role,
+                ];
+            }
+        }
+
+        return $clients->map(function ($c) use ($guarantorsByClient) {
+            return [
+                'name' => $c->name,
+                'document' => $c->document,
+                'personType' => $c->personType,
+                'email' => $c->email,
+                'phone' => $c->phone,
+                'address' => $c->address,
+                'city' => $c->city,
+                'state' => $c->state,
+                'zipCode' => $c->zipCode,
+                'riskRating' => $c->riskRating,
+                'notes' => $c->notes,
+                'createdAt' => $c->createdAt,
+                'guarantors' => $guarantorsByClient[$c->id] ?? [],
+            ];
+        });
     }
 
     /**
