@@ -127,6 +127,60 @@ class ContractController extends Controller
             return $row;
         });
 
+        // 🚀 Hidratação dos credores (consignor) + contas bancárias em duas
+        // queries únicas auxiliares — mesma estratégia anti-N+1 dos blocos
+        // acima. Os contratos podem ter consignorId = NULL, então só
+        // buscamos os IDs distintos não-nulos.
+        $consignorIds = $rawContracts->pluck('consignorId')->filter()->unique()->values()->all();
+        $consignorsById = [];
+        if (!empty($consignorIds)) {
+            $consignorRows = DB::table('consignors')
+                ->whereIn('id', $consignorIds)
+                ->get();
+
+            $bankRows = DB::table('consignor_bank_accounts')
+                ->whereIn('consignorId', $consignorIds)
+                ->orderBy('id')
+                ->get();
+
+            $banksByConsignor = [];
+            foreach ($bankRows as $b) {
+                $banksByConsignor[$b->consignorId][] = [
+                    'id'            => (int) $b->id,
+                    'bankName'      => $b->bankName,
+                    'agency'        => $b->agency,
+                    'accountNumber' => $b->accountNumber,
+                    'accountType'   => $b->accountType,
+                    'pixKey'        => $b->pixKey,
+                ];
+            }
+
+            foreach ($consignorRows as $c) {
+                $consignorsById[$c->id] = [
+                    'id'           => (int) $c->id,
+                    'name'         => $c->name,
+                    'document'     => $c->document,
+                    'phone'        => $c->phone,
+                    'email'        => $c->email,
+                    'street'       => $c->street,
+                    'number'       => $c->number,
+                    'neighborhood' => $c->neighborhood,
+                    'zipCode'      => $c->zipCode,
+                    'complement'   => $c->complement,
+                    'city'         => $c->city,
+                    'state'        => $c->state,
+                    'bankAccounts' => $banksByConsignor[$c->id] ?? [],
+                ];
+            }
+        }
+
+        $rawContracts->transform(function ($row) use ($consignorsById) {
+            $row->consignor = ($row->consignorId && isset($consignorsById[$row->consignorId]))
+                ? $consignorsById[$row->consignorId]
+                : null;
+            return $row;
+        });
+
         $contractTypes = DB::table('contract_types')->orderBy('name', 'asc')->get();
 
         // 🚀 CRÍTICO: Carrega a tabela de clientes trazendo:
@@ -159,6 +213,9 @@ class ContractController extends Controller
             'code'             => 'required|string',
             'clientId'         => 'required',
             'contract_type_id' => 'required',
+            // 🚀 Credor (Consignor) — vínculo opcional 1:N. Validamos a
+            // existência no banco; null/vazio é aceito (contrato sem credor).
+            'consignorId'      => 'nullable|integer|exists:consignors,id',
             'contractPdfs'     => 'nullable|array',
             'contractPdfs.*'   => 'file|mimes:pdf|max:20480',
             // 🚀 Vínculos pessoa↔contrato. Cada array é independente; ambos
@@ -171,7 +228,9 @@ class ContractController extends Controller
             // 🚀 Bens em garantia (veículos / imóveis)
             'assets'           => 'nullable|array',
         ];
-        $messages = [];
+        $messages = [
+            'consignorId.exists' => 'O credor selecionado não existe ou foi removido.',
+        ];
 
         // Anexa regras condicionais para CADA bem do array, com prefixo
         // "assets.{i}" — Rule::requiredIf reage ao assetType de cada um.
@@ -231,6 +290,9 @@ class ContractController extends Controller
             'code'             => 'required|string',
             'clientId'         => 'required',
             'contract_type_id' => 'required',
+            // 🚀 Credor — mesmo tratamento do store: opcional, mas se vier
+            // precisa apontar para um registro válido em consignors.
+            'consignorId'      => 'nullable|integer|exists:consignors,id',
             'contractPdfs'     => 'nullable|array',
             'guarantor_ids'    => 'nullable|array',
             'guarantor_ids.*'  => 'integer|exists:guarantors,id',
@@ -238,7 +300,9 @@ class ContractController extends Controller
             'codebtor_ids.*'   => 'integer|exists:guarantors,id',
             'assets'           => 'nullable|array',
         ];
-        $messages = [];
+        $messages = [
+            'consignorId.exists' => 'O credor selecionado não existe ou foi removido.',
+        ];
 
         foreach ($assets as $i => $asset) {
             $rules    = array_merge($rules,    StoreContractAssetRequest::rulesFor($asset['assetType'] ?? null, "assets.{$i}"));
@@ -527,8 +591,16 @@ class ContractController extends Controller
 
     private function buildContractPayload(Request $request, array $extras = [], bool $isUpdate = false): array
     {
+        // 🚀 Credor (Consignor) — coluna nullable. String vazia vinda do
+        // FormData é tratada como NULL (ex.: usuário desvinculou o credor).
+        $rawConsignorId = $request->input('consignorId');
+        $consignorId = ($rawConsignorId === null || $rawConsignorId === '' || $rawConsignorId === '0')
+            ? null
+            : (int) $rawConsignorId;
+
         $payload = [
             'clientId'                         => $request->input('clientId'),
+            'consignorId'                      => $consignorId,
             'code'                             => $request->input('code'),
             'contractName'                     => $request->input('contractName'),
             'creditor'                         => $request->input('creditor'),

@@ -4,7 +4,7 @@ import {
   CreditCard, QrCode, UserCheck, Scale, Paperclip,
   CircleDollarSign, Percent, Shield, BookOpen,
   UserPlus, Users, Sparkles, Building2, User as UserIcon,
-  Car, Home,
+  Car, Home, Landmark, Mail, Phone, IdCard,
 } from "lucide-react";
 import { Head, router } from "@inertiajs/react";
 import { toast } from "sonner";
@@ -67,7 +67,7 @@ type PenaltyBaseType = "installment" | "debt" | "contract";
 type PenaltyScope = "per_installment" | "contract_once";
 
 const emptyForm = {
-  clientId: 0, code: "", contractName: "", creditor: "UnyPay® S.A.",
+  clientId: 0, consignorId: 0, code: "", contractName: "", creditor: "UnyPay® S.A.",
   contract_type_id: "", 
   contractType: "Mútuo/Confissão de dívida", contractDate: new Date().toISOString().slice(0, 10),
   status: "Ativo" as ContractStatus,
@@ -88,13 +88,58 @@ const emptyForm = {
 };
 
 const TABS = [
-  { key: "basico",     label: "Dados Básicos",         icon: FileText },
-  { key: "financeiro", label: "Valores e Bancos",      icon: CircleDollarSign },
-  { key: "taxas",      label: "Taxas e Encargos",      icon: Percent },
-  { key: "fiadores",   label: "Fiador / Codevedor",   icon: UserCheck },
-  { key: "garantias",  label: "Garantias",             icon: Shield },
-  { key: "regras",     label: "Regras Contratuais",    icon: BookOpen },
+  { key: "basico",      label: "Dados Básicos",         icon: FileText },
+  { key: "credor",      label: "Credor",                icon: Landmark },
+  { key: "financeiro",  label: "Valores e Bancos",      icon: CircleDollarSign },
+  { key: "taxas",       label: "Taxas e Encargos",      icon: Percent },
+  { key: "fiadores",    label: "Fiador / Codevedor",    icon: UserCheck },
+  { key: "garantias",   label: "Garantias",             icon: Shield },
+  { key: "regras",      label: "Regras Contratuais",    icon: BookOpen },
 ];
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * 🚀 Tipos da aba "Consignante".
+ *
+ * ConsignorLite reflete o que o endpoint /api/consignors devolve no autocomplete
+ * (campos suficientes para identificar e exibir read-only). ConsignorBankAccountLite
+ * é o item da relação 1:N hidratada junto na response.
+ *
+ * O formato bate exatamente com o que o ContractController@index agora hidrata
+ * em c.consignor (via duas queries auxiliares anti-N+1).
+ * ──────────────────────────────────────────────────────────────────────── */
+
+interface ConsignorBankAccountLite {
+  id: number;
+  bankName: string;
+  agency: string | null;
+  accountNumber: string | null;
+  accountType: "corrente" | "poupanca";
+  pixKey: string | null;
+}
+
+interface ConsignorLite {
+  id: number;
+  name: string;
+  document: string | null;
+  phone: string | null;
+  email: string | null;
+  bankAccounts: ConsignorBankAccountLite[];
+}
+
+/** Formata CPF/CNPJ a partir dos dígitos persistidos para o input read-only. */
+const formatConsignorDocument = (doc: string | null | undefined): string => {
+  const digits = (doc ?? "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 14) return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+  if (digits.length === 11) return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
+  return digits;
+};
+
+/** Label amigável para o tipo de conta. */
+const ACCOUNT_TYPE_LABEL: Record<string, string> = {
+  corrente: "Corrente",
+  poupanca: "Poupança",
+};
 
 /**
  * Item de fiador associado ao contrato em edição.
@@ -322,6 +367,21 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     target: VinculoPessoaType;
   }>({ open: false, mode: "create", target: "FIADOR" });
 
+  // 🚀 Estados da aba "Credor" — vínculo 1:N (contract.consignorId).
+  //
+  // consignorList    → catálogo completo de credores (carregado UMA vez ao
+  //                    montar o componente). Alimenta o <select> da aba.
+  // selectedConsignor→ objeto completo (nome, doc, contas bancárias) usado
+  //                    SOMENTE para exibição read-only abaixo do select.
+  //                    Fonte: lookup em consignorList OU c.consignor (edit).
+  //
+  // O que persiste é APENAS form.consignorId. selectedConsignor é cache
+  // de UI: ao mudar o <select>, fazemos lookup em consignorList; ao abrir
+  // contrato existente, hidratamos a partir de c.consignor (que o
+  // ContractController@index já entrega completo).
+  const [selectedConsignor, setSelectedConsignor] = useState<ConsignorLite | null>(null);
+  const [consignorList,     setConsignorList]     = useState<ConsignorLite[]>([]);
+
   // 🚀 Estados da seção "Bens em Garantia" (aba Garantias) — também em memória
   // até o submit do contrato. Ao salvar, viram JSON dentro do FormData; o
   // backend faz diff manual contra contract_assets preservando ids/createdAt.
@@ -521,6 +581,9 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     setQuickModalState({ open: false, mode: "create", target: "FIADOR" });
     setSelectedAssets([]);
     setAssetModalState({ open: false, mode: "create" });
+    // 🚀 Limpa o cache da aba "Credor". O catálogo (consignorList) é mantido
+    // porque foi carregado no mount e serve para todos os modais subsequentes.
+    setSelectedConsignor(null);
   };
 
   const handleOpenCreate = () => {
@@ -533,6 +596,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     setEditingId(c.id);
     setForm({
       clientId: Number(c.clientId ?? 0),
+      consignorId: Number(c.consignorId ?? 0),
       code: c.code ?? "",
       contractName: c.contractName ?? "",
       creditor: c.creditor ?? "UnyPay® S.A.",
@@ -618,6 +682,24 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     // ContractController@index hidrata. O id preservado aqui é fundamental
     // para o backend fazer UPDATE em vez de DELETE+INSERT (estratégia
     // diff manual definida na Etapa 2).
+    // 🚀 Hidrata a aba "Credor" — c.consignor já vem completo do backend
+    // (ContractController@index agrupa o credor + bankAccounts em uma response
+    // única). Se o contrato não tem credor (consignorId = NULL), c.consignor
+    // virá null e o estado fica vazio.
+    if (c.consignor && typeof c.consignor === "object") {
+      const cs = c.consignor;
+      setSelectedConsignor({
+        id: Number(cs.id),
+        name: cs.name ?? "",
+        document: cs.document ?? null,
+        phone: cs.phone ?? null,
+        email: cs.email ?? null,
+        bankAccounts: Array.isArray(cs.bankAccounts) ? cs.bankAccounts : [],
+      });
+    } else {
+      setSelectedConsignor(null);
+    }
+
     const incomingAssets = Array.isArray(c.assets) ? c.assets : [];
     setSelectedAssets(
       incomingAssets.map((a: any): ContractAssetItem => ({
@@ -804,6 +886,57 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     return finalIds;
   };
 
+  /* ──────────────────────────────────────────────────────────────────────
+   * 🚀 Helpers da aba "Credor" — select simples + seleção + limpeza.
+   *
+   * Estratégia de estado:
+   *   - form.consignorId   → ID que persiste no contrato (canônico).
+   *   - selectedConsignor  → objeto completo para render read-only (cache UI).
+   *   - consignorList      → catálogo carregado UMA vez para alimentar o select.
+   *
+   * Trocamos o autocomplete (request por keystroke) por um <select> nativo
+   * com a lista inteira em memória — performance muito melhor para listas
+   * de tamanho moderado, e UX mais previsível.
+   * ────────────────────────────────────────────────────────────────────── */
+
+  // Carrega o catálogo completo de credores UMA vez quando o componente monta.
+  // per_page=999 é suficiente para o uso típico; quando o universo crescer
+  // muito, trocamos por endpoint dedicado de lookup leve (id+name+document).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await api.get("/api/consignors", {
+          params: { per_page: 999 },
+        });
+        if (cancelled) return;
+        const rows: ConsignorLite[] = (data?.data ?? []).map((c: any) => ({
+          id: Number(c.id),
+          name: c.name ?? "",
+          document: c.document ?? null,
+          phone: c.phone ?? null,
+          email: c.email ?? null,
+          bankAccounts: Array.isArray(c.bankAccounts) ? c.bankAccounts : [],
+        }));
+        setConsignorList(rows);
+      } catch (err) {
+        console.error("[consignor list]", err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleSelectConsignor = (id: number) => {
+    if (!id) {
+      setSelectedConsignor(null);
+      setForm((p) => ({ ...p, consignorId: 0 }));
+      return;
+    }
+    const found = consignorList.find((c) => c.id === id) ?? null;
+    setSelectedConsignor(found);
+    setForm((p) => ({ ...p, consignorId: id }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.clientId) { toast.error("Selecione o cliente vinculado."); return; }
@@ -917,7 +1050,37 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       case "client": return <div style={{ maxWidth: col.width - 14, fontWeight: 700, fontSize: 11, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.client_name ?? item.clientName ?? "—"}</div>;
       case "contractType": return <span style={{ fontSize: 10, padding: "2px 6px", background: "#f3f4f6", borderRadius: 4, fontWeight: 500, color: "#4b5563" }}>{contract.contract_type_name ?? contract.contractType ?? "Mútuo"}</span>;
       case "contractName": return <span style={{ fontSize: 11, color: "#374151" }}>{contract.contractName}</span>;
-      case "creditor": return <span style={{ fontSize: 10, color: "#6b7280" }}>{contract.creditor}</span>;
+      case "creditor": {
+        // 🚀 Coluna "Credor" passou a refletir o vínculo formal Consignor
+        // (relacionamento Contract::consignor) em vez do campo texto legado
+        // contract.creditor. O texto antigo continua salvo no banco para
+        // compatibilidade com Pagamentos/Lançamentos, mas aqui exibimos
+        // o nome do credor cadastrado em /credores.
+        const consignorName = contract.consignor?.name as string | undefined;
+        if (!consignorName) {
+          return <span style={{ fontSize: 10, color: "#cbd5e1", fontStyle: "italic" }}>— sem credor —</span>;
+        }
+        return (
+          <span
+            title={consignorName}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              fontSize: 10,
+              color: "#1e293b",
+              fontWeight: 600,
+              maxWidth: col.width - 14,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            <Landmark size={10} style={{ color: "#2563eb", flexShrink: 0 }} />
+            {consignorName}
+          </span>
+        );
+      }
       case "principal": return <span style={{ ...tdNum, fontWeight: 700, fontSize: 11 }}>{fmt(contract.principalAmount)}</span>;
       case "financed": return <span style={{ ...tdNum, fontSize: 11, color: "#6b7280" }}>{fmt(contract.financedTotal)}</span>;
       case "installments": return <span style={{ color: "#6b7280" }}>{contract.installmentCount}×</span>;
@@ -1263,7 +1426,6 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                       <div><label className="sigx-label">CÓDIGO INTERNO *</label><input className="sigx-input" value={form.code} onChange={n("code")} required /></div>
                       <div><label className="sigx-label">DATA DE EMISSÃO</label><input type="date" className="sigx-input" value={form.contractDate} onChange={n("contractDate")} /></div>
                       <div style={{ gridColumn: "span 2" }}><label className="sigx-label">NOME OU OBJETO DO CONTRATO *</label><input className="sigx-input" value={form.contractName} onChange={n("contractName")} required /></div>
-                      <div><label className="sigx-label">CREDOR DA DÍVIDA</label><input className="sigx-input" value={form.creditor} onChange={n("creditor")} /></div>
                       <div>
                         <label className="sigx-label">TIPO ESTRUTURAL *</label>
                         <select className="sigx-input" required value={form.contract_type_id} onChange={e => setForm(p => ({ ...p, contract_type_id: e.target.value }))}>
@@ -1271,8 +1433,8 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                           {contractTypes.map((type: any) => <option key={type.id} value={type.id}>{type.name}</option>)}
                         </select>
                       </div>
-                      
-                      <div style={{ gridColumn: "span 2" }}>
+
+                      <div>
                         <label className="sigx-label">STATUS OPERACIONAL DO CONTRATO *</label>
                         <select className="sigx-input" value={form.status} onChange={n("status")} required>
                           <option value="Ativo">Ativo / Regular</option>
@@ -1419,7 +1581,153 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                     </div>
                   )}
 
-                  {/* TAB 2: FINANCEIRO */}
+                  {/* ─────────────── TAB 2: CREDOR ─────────────── */}
+                  {activeTab === "credor" && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                      {/* Banner informativo no padrão das outras abas */}
+                      <div
+                        className="keep-case"
+                        style={{
+                          padding: "10px 12px",
+                          background: "linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%)",
+                          border: "1px solid #e0e7ff",
+                          borderRadius: 8,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                        }}
+                      >
+                        <div style={{ width: 32, height: 32, borderRadius: 8, background: "#2563eb", color: "white", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <Landmark size={15} />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <strong style={{ fontSize: 12, color: "#1e2139", display: "block" }}>Credor deste contrato</strong>
+                          <span style={{ fontSize: 10.5, color: "#64748b" }}>
+                            Escolha um credor cadastrado em "Credores". Os dados gerais e contas bancárias serão exibidos abaixo apenas para conferência.
+                          </span>
+                        </div>
+                        {selectedConsignor && (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: "#065f46", background: "#ecfdf5", padding: "3px 8px", borderRadius: 6, border: "1px solid #a7f3d0" }}>
+                            ✓ VINCULADO
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Select nativo — performance superior ao autocomplete */}
+                      <div>
+                        <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>
+                          CREDOR{" "}
+                          <span style={{ fontWeight: 400, color: "#94a3b8" }}>
+                            ({consignorList.length} disponíve{consignorList.length === 1 ? "l" : "is"})
+                          </span>
+                        </label>
+                        <select
+                          className="sigx-input"
+                          value={String(form.consignorId || "")}
+                          onChange={(e) => handleSelectConsignor(Number(e.target.value))}
+                        >
+                          <option value="">— Sem credor —</option>
+                          {consignorList.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                              {c.document ? ` — ${formatConsignorDocument(c.document)}` : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Dados Gerais — read-only */}
+                      {selectedConsignor && (
+                        <>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#475569", fontSize: 11, fontWeight: 700, textTransform: "uppercase", marginTop: 4 }}>
+                            <IdCard size={13} /> Dados Gerais do Credor
+                          </div>
+
+                          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 2fr", gap: 12 }}>
+                            <div>
+                              <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>NOME / RAZÃO SOCIAL</label>
+                              <input className="sigx-input" disabled readOnly value={selectedConsignor.name} />
+                            </div>
+                            <div>
+                              <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>CNPJ / CPF</label>
+                              <input className="sigx-input mono" disabled readOnly value={formatConsignorDocument(selectedConsignor.document) || "—"} />
+                            </div>
+                            <div>
+                              <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>TELEFONE</label>
+                              <input className="sigx-input" disabled readOnly value={selectedConsignor.phone ?? "—"} />
+                            </div>
+                            <div>
+                              <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>E-MAIL</label>
+                              <input className="sigx-input" disabled readOnly value={selectedConsignor.email ?? "—"} />
+                            </div>
+                          </div>
+
+                          {/* Contas Bancárias — read-only, padrão visual da aba "Valores e Bancos" */}
+                          <div style={{ borderTop: "1px dashed #cbd5e1", paddingTop: 14 }}>
+                            <label className="sigx-label" style={{ display: "flex", alignItems: "center", gap: 4, fontWeight: 700, color: "#1e293b" }}>
+                              <CreditCard size={13} /> CONTAS BANCÁRIAS DO CREDOR ({selectedConsignor.bankAccounts.length})
+                            </label>
+                            <span style={{ fontSize: 11, color: "#64748b", marginBottom: 10, display: "block" }}>
+                              Lista somente leitura. Para alterar essas informações, edite o cadastro do credor em "Credores".
+                            </span>
+
+                            {selectedConsignor.bankAccounts.length === 0 ? (
+                              <div style={{ padding: 12, background: "#fff7ed", border: "1px solid #ffedd5", borderRadius: 6, fontSize: 11, color: "#c2410c" }}>
+                                Este credor não possui nenhuma conta bancária cadastrada na sua ficha.
+                              </div>
+                            ) : (
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                                {selectedConsignor.bankAccounts.map((acc) => (
+                                  <div
+                                    key={acc.id}
+                                    style={{
+                                      padding: 10,
+                                      borderRadius: 6,
+                                      border: "1px solid #cbd5e1",
+                                      background: "white",
+                                    }}
+                                  >
+                                    <div style={{ fontWeight: 700, fontSize: 12, color: "#0f172a" }}>
+                                      {acc.bankName || "Banco não informado"}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: "#475569", marginTop: 2 }}>
+                                      Ag: {acc.agency || "—"} | Conta: {acc.accountNumber || "—"} ({ACCOUNT_TYPE_LABEL[acc.accountType] ?? acc.accountType})
+                                    </div>
+                                    {acc.pixKey && (
+                                      <div style={{ fontSize: 10, color: "#0d9488", display: "flex", alignItems: "center", gap: 4, marginTop: 4, background: "#f0fdf4", padding: "1px 4px", borderRadius: 3, width: "fit-content" }}>
+                                        <QrCode size={10} /> PIX: {acc.pixKey}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
+
+                      {/* Estado vazio quando ainda não há credor selecionado */}
+                      {!selectedConsignor && (
+                        <div
+                          style={{
+                            border: "1px dashed #cbd5e1",
+                            borderRadius: 8,
+                            padding: 28,
+                            background: "#f8fafc",
+                            textAlign: "center",
+                            color: "#94a3b8",
+                          }}
+                        >
+                          <Landmark size={26} style={{ opacity: 0.3, margin: "0 auto 6px", display: "block" }} />
+                          <span style={{ fontSize: 11.5 }}>
+                            Nenhum credor vinculado. Use o campo de busca acima para selecionar um.
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB 3: FINANCEIRO */}
                   {activeTab === "financeiro" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 14 }}>

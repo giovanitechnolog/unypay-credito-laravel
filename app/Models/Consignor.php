@@ -45,4 +45,16 @@ class Consignor extends Model
     {
         return $this->hasMany(ConsignorBankAccount::class, 'consignorId');
     }
+
+    /**
+     * Contratos em que este credor está vinculado (1:N).
+     *
+     * A relação contrária (Contract::consignor) usa nullOnDelete: se este
+     * credor for apagado, os contratos sobrevivem com consignorId = NULL —
+     * por isso não há onDelete cascade aqui.
+     */
+    public function contracts(): HasMany
+    {
+        return $this->hasMany(Contract::class, 'consignorId');
+    }
 }

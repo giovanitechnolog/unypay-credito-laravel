@@ -14,7 +14,7 @@ class Contract extends Model
     public const ROLE_CODEVEDOR = 'CODEVEDOR';
 
     protected $fillable = [
-        'clientId', 'code', 'contractName', 'creditor', 'contractType', 'contractDate',
+        'clientId', 'consignorId', 'code', 'contractName', 'creditor', 'contractType', 'contractDate',
         'status', 'validated', 'principalAmount', 'financedTotal', 'tacAmount', 'iofAmount',
         'installmentCount', 'installmentAmount', 'firstDueDate', 'monthlyInterestRate',
         'moraRateMonthly', 'penaltyRate', 'penaltyBaseType', 'penaltyScope', 'correctionIndex',
@@ -37,6 +37,19 @@ class Contract extends Model
     public function client(): BelongsTo
     {
         return $this->belongsTo(Client::class, 'clientId');
+    }
+
+    /**
+     * Credor (Consignor) vinculado ao contrato — 1:N (um credor pode aparecer
+     * em vários contratos; cada contrato tem no máximo um credor).
+     *
+     * Nullable: contratos podem existir sem credor associado. Use
+     * `with('consignor.bankAccounts')` para carregar tudo de uma vez quando
+     * for renderizar a aba "Consignante" no modal de edição.
+     */
+    public function consignor(): BelongsTo
+    {
+        return $this->belongsTo(Consignor::class, 'consignorId');
     }
 
     // Um contrato tem muitas parcelas
