@@ -10,6 +10,7 @@ use App\Models\ContractAsset;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Maatwebsite\Excel\Facades\Excel;
@@ -134,8 +135,18 @@ class ContractController extends Controller
 
         // 🚀 Hidratação das testemunhas (1:N — contract_witnesses) em uma
         // única query auxiliar, mesma estratégia usada com bens em garantia.
+        //
+        // ⚠️  Defensivo: a tabela é criada pelas migrations
+        //     2026_06_05_150000_create_contract_witnesses_table e
+        //     2026_06_05_160000_add_ci_to_contract_witnesses_table.
+        //     Se o operador estiver rodando o app antes de aplicá-las (ex.: ambiente recém-clonado
+        //     ou após reset do BD), evitamos a 500 e retornamos lista vazia. Assim que `php artisan
+        //     migrate` for executado, a tela volta a popular as testemunhas normalmente.
         $witnessesByContract = [];
-        if (!empty($contractIds)) {
+        $witnessesTableExists = Schema::hasTable('contract_witnesses');
+        $witnessesHasCi = $witnessesTableExists && Schema::hasColumn('contract_witnesses', 'ci');
+
+        if ($witnessesTableExists && !empty($contractIds)) {
             $witnessRows = DB::table('contract_witnesses')
                 ->whereIn('contractId', $contractIds)
                 ->orderBy('id')
@@ -146,7 +157,7 @@ class ContractController extends Controller
                     'id'   => (int) $w->id,
                     'name' => $w->name,
                     'cpf'  => $w->cpf,
-                    'ci'   => $w->ci,
+                    'ci'   => $witnessesHasCi ? ($w->ci ?? null) : null,
                 ];
             }
         }

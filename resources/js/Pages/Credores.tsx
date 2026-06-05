@@ -460,7 +460,31 @@ export default function CredoresPage() {
     <UnyPayLayout>
       <Head title="Gerenciamento de Credores" />
 
-      <div style={{ padding: "12px 20px 16px 20px", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", gap: 12 }}>
+      <style>{`
+        /* —— Caixa alta visual da tela inteira (incluindo modal) —— */
+        .credores-page,
+        .credores-page input,
+        .credores-page select,
+        .credores-page textarea,
+        .credores-page button,
+        .credores-page option,
+        .credores-page label,
+        .credores-page h1, .credores-page h2, .credores-page h3,
+        .credores-page p, .credores-page span, .credores-page strong,
+        .credores-page td, .credores-page th { text-transform: uppercase; }
+
+        .credores-page input.mono,
+        .credores-page input[type="email"],
+        .credores-page input[type="password"],
+        .credores-page input[type="date"],
+        .credores-page input[type="number"] { text-transform: none; }
+        .credores-page input::placeholder,
+        .credores-page textarea::placeholder { text-transform: none; }
+        .credores-page .keep-case,
+        .credores-page .keep-case * { text-transform: none !important; }
+      `}</style>
+
+      <div className="credores-page" style={{ padding: "12px 20px 16px 20px", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", gap: 12 }}>
         {/* Topo */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#111827" }}>Gerenciamento de Credores</h1>
