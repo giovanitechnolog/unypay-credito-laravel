@@ -224,6 +224,28 @@ const parseAreaForBackend = (raw: string): number | null => {
  *   - totalArea vira float (parseAreaForBackend lida com vírgula/ponto);
  *   - localId nunca é enviado (é interno do React).
  */
+/**
+ * Testemunha vinculada ao contrato (1:N — tabela contract_witnesses).
+ * O backend faz delete-and-recreate no update; o `id` só serve para
+ * hidratação/edição no front (não é enviado no payload).
+ */
+interface ContractWitness {
+  id?: number;
+  name: string;
+  cpf: string;
+}
+
+/** Item em memória na aba "Regras Contratuais" — inclui chave estável do React. */
+type ContractWitnessItem = ContractWitness & {
+  localId: string;
+};
+
+const serializeWitnessesForBackend = (witnesses: ContractWitnessItem[]) =>
+  witnesses.map((w) => ({
+    name: w.name.trim(),
+    cpf: onlyDigits(w.cpf),
+  }));
+
 const serializeAssetsForBackend = (assets: ContractAssetItem[]) =>
   assets.map((a) => ({
     ...(a.id && a.id > 0 ? { id: a.id } : {}),
@@ -386,6 +408,10 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   // até o submit do contrato. Ao salvar, viram JSON dentro do FormData; o
   // backend faz diff manual contra contract_assets preservando ids/createdAt.
   const [selectedAssets, setSelectedAssets] = useState<ContractAssetItem[]>([]);
+  // 🚀 Testemunhas (aba "Regras Contratuais") — em memória até o submit.
+  // Vão como JSON no FormData; o backend faz create (store) ou
+  // delete-and-recreate (update) dentro de transação.
+  const [selectedWitnesses, setSelectedWitnesses] = useState<ContractWitnessItem[]>([]);
   const [assetModalState, setAssetModalState] = useState<{
     open: boolean;
     mode: AssetModalMode;
@@ -580,6 +606,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     setSearchModalOpen(false);
     setQuickModalState({ open: false, mode: "create", target: "FIADOR" });
     setSelectedAssets([]);
+    setSelectedWitnesses([]);
     setAssetModalState({ open: false, mode: "create" });
     // 🚀 Limpa o cache da aba "Credor". O catálogo (consignorList) é mantido
     // porque foi carregado no mount e serve para todos os modais subsequentes.
@@ -724,6 +751,17 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       }))
     );
 
+    // 🚀 Popula as testemunhas a partir de c.witnesses (hidratação do index).
+    const incomingWitnesses = Array.isArray(c.witnesses) ? c.witnesses : [];
+    setSelectedWitnesses(
+      incomingWitnesses.map((w: ContractWitness): ContractWitnessItem => ({
+        localId: newLocalId(),
+        id: w.id,
+        name: w.name ?? "",
+        cpf: w.cpf ? maskCPF(w.cpf) : "",
+      }))
+    );
+
     setActiveTab("basico");
     setOpen(true);
   };
@@ -811,6 +849,10 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     // carrega PDFs (multipart). O ContractController decodifica em
     // `extractAssets` antes de validar e aplicar o diff manual.
     fd.append("assets", JSON.stringify(serializeAssetsForBackend(selectedAssets)));
+
+    // 🚀 Testemunhas (1:N — tabela contract_witnesses).
+    // Mesmo padrão de assets: JSON string no FormData.
+    fd.append("witnesses", JSON.stringify(serializeWitnessesForBackend(selectedWitnesses)));
 
     return fd;
   };
@@ -1612,6 +1654,67 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                           </span>
                         )}
                       </div>
+
+                      {/* 🚀 Dica de migração — exibe o valor legado do campo
+                          contracts.creditor (texto livre) APENAS em modo edição.
+                          Ajuda o usuário a localizar no dropdown abaixo qual
+                          credor cadastrado corresponde ao texto antigo. Some
+                          quando o usuário já vincula um credor (selectedConsignor)
+                          ou quando se trata de um contrato novo. */}
+                      {editingId && form.creditor && !selectedConsignor && (
+                        <div
+                          style={{
+                            padding: "10px 12px",
+                            background: "#fffbeb",
+                            border: "1px solid #fde68a",
+                            borderRadius: 8,
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: 10,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 28,
+                              height: 28,
+                              borderRadius: 6,
+                              background: "#f59e0b",
+                              color: "white",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                              fontWeight: 700,
+                              fontSize: 14,
+                            }}
+                          >
+                            !
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <strong style={{ fontSize: 11, color: "#92400e", display: "block", marginBottom: 2 }}>
+                              Credor cadastrado anteriormente (campo legado):
+                            </strong>
+                            <span
+                              style={{
+                                display: "inline-block",
+                                fontSize: 12,
+                                fontWeight: 700,
+                                color: "#0f172a",
+                                background: "white",
+                                padding: "3px 10px",
+                                borderRadius: 4,
+                                border: "1px solid #fde68a",
+                                fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+                              }}
+                            >
+                              {form.creditor}
+                            </span>
+                            <div style={{ fontSize: 10.5, color: "#a16207", marginTop: 4, lineHeight: 1.4 }}>
+                              Selecione o credor correspondente no dropdown abaixo para vincular formalmente.
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Select nativo — performance superior ao autocomplete */}
                       <div>
@@ -2419,37 +2522,6 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                         Bens (veículos e imóveis) são gravados junto com o contrato em uma única transação.
                         Ao remover um bem desta lista, ele será excluído do contrato no próximo salvamento.
                       </div>
-
-                      {/* 🚀 Confissão de Dívida */}
-                      <label
-                        style={{
-                          display: "flex",
-                          alignItems: "flex-start",
-                          gap: 10,
-                          padding: 12,
-                          borderRadius: 8,
-                          border: `1px solid ${form.confessionOfDebt ? "#bae6fd" : "#e2e8f0"}`,
-                          background: form.confessionOfDebt ? "#f0f9ff" : "#f8fafc",
-                          cursor: "pointer",
-                          transition: "all 0.1s",
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={!!form.confessionOfDebt}
-                          onChange={e => setForm(p => ({ ...p, confessionOfDebt: e.target.checked }))}
-                          style={{ marginTop: 2, width: 16, height: 16, accentColor: "#2563eb", cursor: "pointer" }}
-                        />
-                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", display: "flex", alignItems: "center", gap: 6 }}>
-                            <Scale size={12} style={{ color: "#0369a1" }} /> CONFISSÃO DE DÍVIDA
-                          </span>
-                          <span style={{ fontSize: 10, color: "#64748b", lineHeight: 1.4 }}>
-                            Marque para registrar que este instrumento é uma confissão de dívida formal,
-                            firmada pelo devedor reconhecendo expressamente a obrigação de pagamento.
-                          </span>
-                        </div>
-                      </label>
                     </div>
                   )}
 
@@ -2469,6 +2541,121 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                         />
                         <span style={{ fontSize: 10, color: "#94a3b8" }}>
                           Define o município jurídico responsável pela resolução de litígios e execução judicial deste ativo.
+                        </span>
+                      </div>
+
+                      {/* 🚀 TESTEMUNHAS — 1:N simples (nome + CPF) */}
+                      <div
+                        style={{
+                          border: "1px solid #e5e7eb",
+                          borderRadius: 8,
+                          padding: 14,
+                          background: "white",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 12,
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                          <label className="sigx-label" style={{ margin: 0, display: "flex", alignItems: "center", gap: 4 }}>
+                            <Users size={12} style={{ color: "#0d9488" }} /> TESTEMUNHAS
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedWitnesses((prev) => [
+                                ...prev,
+                                { localId: newLocalId(), name: "", cpf: "" },
+                              ])
+                            }
+                            className="btn-primary"
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              padding: "7px 14px",
+                              fontSize: 11,
+                            }}
+                          >
+                            <Plus size={12} /> Adicionar Testemunha
+                          </button>
+                        </div>
+
+                        {selectedWitnesses.length === 0 ? (
+                          <div
+                            style={{
+                              padding: "18px 12px",
+                              textAlign: "center",
+                              fontSize: 11,
+                              color: "#94a3b8",
+                              background: "#f8fafc",
+                              borderRadius: 6,
+                              border: "1px dashed #e2e8f0",
+                            }}
+                          >
+                            Nenhuma testemunha cadastrada. Clique em &quot;Adicionar Testemunha&quot; para incluir.
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            {selectedWitnesses.map((w, idx) => (
+                              <div
+                                key={w.localId}
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: "1fr minmax(160px, 220px) 36px",
+                                  gap: 8,
+                                  alignItems: "end",
+                                }}
+                              >
+                                <div>
+                                  <label className="sigx-label">NOME</label>
+                                  <input
+                                    className="sigx-input"
+                                    value={w.name}
+                                    onChange={(e) =>
+                                      setSelectedWitnesses((prev) =>
+                                        prev.map((item, i) =>
+                                          i === idx ? { ...item, name: e.target.value } : item
+                                        )
+                                      )
+                                    }
+                                    placeholder="Nome completo da testemunha"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="sigx-label">CPF</label>
+                                  <input
+                                    className="sigx-input"
+                                    value={w.cpf}
+                                    onChange={(e) =>
+                                      setSelectedWitnesses((prev) =>
+                                        prev.map((item, i) =>
+                                          i === idx ? { ...item, cpf: maskCPF(e.target.value) } : item
+                                        )
+                                      )
+                                    }
+                                    placeholder="000.000.000-00"
+                                    inputMode="numeric"
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn-icon"
+                                  title="Remover testemunha"
+                                  style={{ color: "#dc2626", marginBottom: 2 }}
+                                  onClick={() =>
+                                    setSelectedWitnesses((prev) => prev.filter((_, i) => i !== idx))
+                                  }
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <span style={{ fontSize: 10, color: "#94a3b8", lineHeight: 1.5 }}>
+                          Testemunhas são gravadas junto com o contrato. Ao remover uma linha, ela será excluída no próximo salvamento.
                         </span>
                       </div>
 
