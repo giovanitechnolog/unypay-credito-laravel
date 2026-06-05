@@ -1613,6 +1613,67 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                         )}
                       </div>
 
+                      {/* 🚀 Dica de migração — exibe o valor legado do campo
+                          contracts.creditor (texto livre) APENAS em modo edição.
+                          Ajuda o usuário a localizar no dropdown abaixo qual
+                          credor cadastrado corresponde ao texto antigo. Some
+                          quando o usuário já vincula um credor (selectedConsignor)
+                          ou quando se trata de um contrato novo. */}
+                      {editingId && form.creditor && !selectedConsignor && (
+                        <div
+                          style={{
+                            padding: "10px 12px",
+                            background: "#fffbeb",
+                            border: "1px solid #fde68a",
+                            borderRadius: 8,
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: 10,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 28,
+                              height: 28,
+                              borderRadius: 6,
+                              background: "#f59e0b",
+                              color: "white",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                              fontWeight: 700,
+                              fontSize: 14,
+                            }}
+                          >
+                            !
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <strong style={{ fontSize: 11, color: "#92400e", display: "block", marginBottom: 2 }}>
+                              Credor cadastrado anteriormente (campo legado):
+                            </strong>
+                            <span
+                              style={{
+                                display: "inline-block",
+                                fontSize: 12,
+                                fontWeight: 700,
+                                color: "#0f172a",
+                                background: "white",
+                                padding: "3px 10px",
+                                borderRadius: 4,
+                                border: "1px solid #fde68a",
+                                fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+                              }}
+                            >
+                              {form.creditor}
+                            </span>
+                            <div style={{ fontSize: 10.5, color: "#a16207", marginTop: 4, lineHeight: 1.4 }}>
+                              Selecione o credor correspondente no dropdown abaixo para vincular formalmente.
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Select nativo — performance superior ao autocomplete */}
                       <div>
                         <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>
@@ -2419,37 +2480,6 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                         Bens (veículos e imóveis) são gravados junto com o contrato em uma única transação.
                         Ao remover um bem desta lista, ele será excluído do contrato no próximo salvamento.
                       </div>
-
-                      {/* 🚀 Confissão de Dívida */}
-                      <label
-                        style={{
-                          display: "flex",
-                          alignItems: "flex-start",
-                          gap: 10,
-                          padding: 12,
-                          borderRadius: 8,
-                          border: `1px solid ${form.confessionOfDebt ? "#bae6fd" : "#e2e8f0"}`,
-                          background: form.confessionOfDebt ? "#f0f9ff" : "#f8fafc",
-                          cursor: "pointer",
-                          transition: "all 0.1s",
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={!!form.confessionOfDebt}
-                          onChange={e => setForm(p => ({ ...p, confessionOfDebt: e.target.checked }))}
-                          style={{ marginTop: 2, width: 16, height: 16, accentColor: "#2563eb", cursor: "pointer" }}
-                        />
-                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", display: "flex", alignItems: "center", gap: 6 }}>
-                            <Scale size={12} style={{ color: "#0369a1" }} /> CONFISSÃO DE DÍVIDA
-                          </span>
-                          <span style={{ fontSize: 10, color: "#64748b", lineHeight: 1.4 }}>
-                            Marque para registrar que este instrumento é uma confissão de dívida formal,
-                            firmada pelo devedor reconhecendo expressamente a obrigação de pagamento.
-                          </span>
-                        </div>
-                      </label>
                     </div>
                   )}
 
