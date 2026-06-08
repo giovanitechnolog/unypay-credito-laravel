@@ -15,6 +15,7 @@ import {
   personTypeFromDocument,
   validateCPF,
 } from "../lib/documentValidation";
+import { maskPhone } from "../lib/masks";
 
 /* ────────────────────────────────────────────────────────────────────────────
  * 🚀 Interfaces TypeScript (Consignor + ConsignorBankAccount).
@@ -158,11 +159,6 @@ const PAGE_SIZES = [20, 50, 100];
 /* ────────────────────────────────────────────────────────────────────────────
  *  Máscaras e helpers de formatação
  * ──────────────────────────────────────────────────────────────────────── */
-
-const maskPhone = (v: string) => v.replace(/\D/g, "")
-  .replace(/^(\d{2})(\d)/, "($1) $2")
-  .replace(/(\d{5})(\d)/, "$1-$2")
-  .slice(0, 15);
 
 const maskCEP = (v: string) => v.replace(/\D/g, "")
   .replace(/^(\d{5})(\d)/, "$1-$2")
