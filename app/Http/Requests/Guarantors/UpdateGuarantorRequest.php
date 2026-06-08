@@ -42,6 +42,8 @@ class UpdateGuarantorRequest extends FormRequest
         return [
             'personType'        => ['required', 'in:PF,PJ'],
             'name'              => ['required', 'string', 'max:255'],
+            'email'             => ['nullable', 'email', 'max:255'],
+            'phone'             => ['nullable', 'string', 'max:20'],
 
             'cpf'               => [
                 'required_if:personType,PF', 'nullable', 'string', 'size:11',
