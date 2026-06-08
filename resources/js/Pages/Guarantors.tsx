@@ -43,6 +43,8 @@ interface Guarantor {
   city: string | null;
   state: string | null;
   zipCode: string | null;
+  email: string | null;
+  phone: string | null;
   clients?: ClientLite[];
   clients_count?: number;
   /** Vínculos como FIADOR em contratos (pivot contract_guarantor com role='FIADOR'). */
@@ -95,9 +97,16 @@ const maskCEP = (v: string) => {
   return d.replace(/(\d{5})(\d)/, "$1-$2");
 };
 
+const maskPhone = (v: string) => v.replace(/\D/g, "")
+  .replace(/^(\d{2})(\d)/, "($1) $2")
+  .replace(/(\d{5})(\d)/, "$1-$2")
+  .slice(0, 15);
+
 interface FormState {
   personType: PersonType;
   name: string;
+  email: string;
+  phone: string;
   // PF
   nationality: string;
   maritalStatus: string;
@@ -122,6 +131,8 @@ interface FormState {
 const EMPTY_FORM: FormState = {
   personType: "PF",
   name: "",
+  email: "",
+  phone: "",
   nationality: "Brasileiro",
   maritalStatus: "",
   cpf: "",
@@ -264,6 +275,8 @@ export default function GuarantorsPage() {
     setFormData({
       personType: g.personType ?? "PF",
       name: g.name ?? "",
+      email: g.email ?? "",
+      phone: g.phone ? maskPhone(g.phone) : "",
       nationality: g.nationality ?? "Brasileiro",
       maritalStatus: g.maritalStatus ?? "",
       cpf: g.cpf ? maskCPF(g.cpf) : "",
@@ -365,6 +378,8 @@ export default function GuarantorsPage() {
         neighborhood: data.bairro || prev.neighborhood,
         city: data.municipio || prev.city,
         state: data.uf ? String(data.uf).toUpperCase() : prev.state,
+        email: data.email || prev.email,
+        phone: data.telefone ? maskPhone(String(data.telefone)) : prev.phone,
       }));
 
       toast.success("Dados da Receita Federal preenchidos automaticamente.");
@@ -463,6 +478,8 @@ export default function GuarantorsPage() {
     const basePayload = {
       personType: formData.personType,
       name: formData.name,
+      email: formData.email.trim() || null,
+      phone: formData.phone || null,
       street: formData.street,
       number: formData.number,
       complement: formData.complement,
@@ -930,22 +947,19 @@ export default function GuarantorsPage() {
                         </div>
                       </div>
 
-                      <div>
-                        <label className="sigx-label">
-                          {formData.personType === "PJ" ? "RAZÃO SOCIAL *" : "NOME COMPLETO *"}
-                        </label>
-                        <input
-                          type="text"
-                          className="sigx-input"
-                          value={formData.name}
-                          onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
-                          required
-                        />
-                      </div>
-
                       {/* ── Campos de Pessoa Física ────────────────────── */}
                       {formData.personType === "PF" && (
                         <>
+                          <div>
+                            <label className="sigx-label">NOME COMPLETO *</label>
+                            <input
+                              type="text"
+                              className="sigx-input"
+                              value={formData.name}
+                              onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
+                              required
+                            />
+                          </div>
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                             <div>
                               <label className="sigx-label">NACIONALIDADE *</label>
@@ -1005,22 +1019,36 @@ export default function GuarantorsPage() {
                               />
                             </div>
                           </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                            <div>
+                              <label className="sigx-label">TELEFONE / WHATSAPP</label>
+                              <input
+                                type="text"
+                                className="sigx-input"
+                                value={formData.phone}
+                                onChange={e => setFormData(p => ({ ...p, phone: maskPhone(e.target.value) }))}
+                                disabled={cnpjLoading}
+                                placeholder="(00) 00000-0000"
+                              />
+                            </div>
+                            <div>
+                              <label className="sigx-label">E-MAIL</label>
+                              <input
+                                type="email"
+                                className="sigx-input"
+                                value={formData.email}
+                                onChange={e => setFormData(p => ({ ...p, email: e.target.value }))}
+                                disabled={cnpjLoading}
+                                placeholder="email@exemplo.com"
+                              />
+                            </div>
+                          </div>
                         </>
                       )}
 
                       {/* ── Campos de Pessoa Jurídica ──────────────────── */}
                       {formData.personType === "PJ" && (
                         <>
-                          <div>
-                            <label className="sigx-label">NOME FANTASIA *</label>
-                            <input
-                              type="text"
-                              className="sigx-input"
-                              value={formData.tradeName}
-                              onChange={e => setFormData(p => ({ ...p, tradeName: e.target.value }))}
-                              required
-                            />
-                          </div>
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                             <div>
                               <label className="sigx-label">CNPJ *</label>
@@ -1063,6 +1091,53 @@ export default function GuarantorsPage() {
                                 placeholder='Número ou "ISENTO"'
                                 value={formData.stateRegistration}
                                 onChange={e => setFormData(p => ({ ...p, stateRegistration: e.target.value }))}
+                                disabled={cnpjLoading}
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="sigx-label">RAZÃO SOCIAL *</label>
+                            <input
+                              type="text"
+                              className="sigx-input"
+                              value={formData.name}
+                              onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
+                              disabled={cnpjLoading}
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="sigx-label">NOME FANTASIA *</label>
+                            <input
+                              type="text"
+                              className="sigx-input"
+                              value={formData.tradeName}
+                              onChange={e => setFormData(p => ({ ...p, tradeName: e.target.value }))}
+                              disabled={cnpjLoading}
+                              required
+                            />
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                            <div>
+                              <label className="sigx-label">TELEFONE / WHATSAPP</label>
+                              <input
+                                type="text"
+                                className="sigx-input"
+                                value={formData.phone}
+                                onChange={e => setFormData(p => ({ ...p, phone: maskPhone(e.target.value) }))}
+                                disabled={cnpjLoading}
+                                placeholder="(00) 00000-0000"
+                              />
+                            </div>
+                            <div>
+                              <label className="sigx-label">E-MAIL</label>
+                              <input
+                                type="email"
+                                className="sigx-input"
+                                value={formData.email}
+                                onChange={e => setFormData(p => ({ ...p, email: e.target.value }))}
+                                disabled={cnpjLoading}
+                                placeholder="email@exemplo.com"
                               />
                             </div>
                           </div>
