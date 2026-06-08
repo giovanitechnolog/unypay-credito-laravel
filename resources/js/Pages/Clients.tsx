@@ -29,6 +29,7 @@ import {
   personTypeFromDocument,
   validateCPF,
 } from "../lib/documentValidation";
+import { maskPhone } from "../lib/masks";
 
 const RISK_COLORS: Record<string, { bg: string; color: string }> = {
   A: { bg: "oklch(92% .08 145)", color: "oklch(35% .15 145)" },
@@ -102,7 +103,6 @@ function buildNotes(form: FormType): string {
 const maskCEP = (v: string) => v.replace(/\D/g, "").replace(/^(\d{5})(\d)/, "$1-$2").slice(0, 9);
 const maskCPF = (v: string) => v.replace(/\D/g, "").replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d{1,2})$/, "$1-$2").slice(0, 14);
 const maskCNPJ = (v: string) => v.replace(/\D/g, "").replace(/^(\d{2})(\d)/, "$1.$2").replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3").replace(/\.(\d{3})(\d)/, ".$1/$2").replace(/(\d{4})(\d)/, "$1-$2").slice(0, 18);
-const maskPhone = (v: string) => v.replace(/\D/g, "").replace(/^(\d{2})(\d)/, "($1) $2").replace(/(\d{5})(\d)/, "$1-$2").slice(0, 15);
 
 // 🚀 Vínculo apresentado na aba "Fiadores / Codevedores" do modal — agora
 // é uma listagem somente-leitura derivada dos CONTRATOS do cliente. Cada
@@ -252,7 +252,7 @@ export default function Clients({ clients, filters }: any) {
       const extra = parseNotes(client.notes);
       setForm({
         name: client.name ?? "", document: client.document ?? "",
-        email: client.email ?? "", phone: client.phone ?? "",
+        email: client.email ?? "", phone: client.phone ? maskPhone(String(client.phone)) : "",
         address: client.address ?? "", city: client.city ?? "",
         state: client.state ?? "", zipCode: client.zipCode ?? "",
         personType: client.personType ?? "PF", riskRating: client.riskRating ?? "A",
@@ -536,7 +536,7 @@ export default function Clients({ clients, filters }: any) {
         );
       case "profession": return <span style={{ fontSize: 10, color: "#6b7280" }}>{extra.profissao || "—"}</span>;
       case "email": return <span style={{ fontSize: 10, color: "#6b7280" }}>{client.email || "—"}</span>;
-      case "phone": return <span style={{ fontSize: 10, color: "#6b7280" }}>{client.phone || "—"}</span>;
+      case "phone": return <span style={{ fontSize: 10, color: "#6b7280" }}>{client.phone ? maskPhone(String(client.phone)) : "—"}</span>;
       case "cityState": return <span style={{ fontSize: 10, color: "#6b7280" }}>{client.city ? `${client.city}${client.state ? `/${client.state}` : ""}` : "—"}</span>;
       case "rating":
         return (

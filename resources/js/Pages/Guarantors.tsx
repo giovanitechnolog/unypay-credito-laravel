@@ -16,6 +16,7 @@ import {
   onlyDigits,
   validateCPF,
 } from "../lib/documentValidation";
+import { maskPhone } from "../lib/masks";
 
 interface ClientLite {
   id: number;
@@ -96,11 +97,6 @@ const maskCEP = (v: string) => {
   if (d.length > 8) d = d.substring(0, 8);
   return d.replace(/(\d{5})(\d)/, "$1-$2");
 };
-
-const maskPhone = (v: string) => v.replace(/\D/g, "")
-  .replace(/^(\d{2})(\d)/, "($1) $2")
-  .replace(/(\d{5})(\d)/, "$1-$2")
-  .slice(0, 15);
 
 interface FormState {
   personType: PersonType;
@@ -248,6 +244,16 @@ export default function GuarantorsPage() {
     if (formOpen) fetchClientsCatalog(clientSearch);
   }, [formOpen, clientSearch, fetchClientsCatalog]);
 
+  // Reaplica a máscara dinâmica ao abrir o modal — corrige telefones fixos salvos com formatação antiga.
+  useEffect(() => {
+    if (!formOpen) return;
+    setFormData((prev) => {
+      if (!prev.phone) return prev;
+      const normalized = maskPhone(String(prev.phone));
+      return normalized === prev.phone ? prev : { ...prev, phone: normalized };
+    });
+  }, [formOpen, selected?.id]);
+
   const counters = useMemo(() => ({
     total: guarantors.length,
     pf: guarantors.filter(g => g.personType === "PF").length,
@@ -276,7 +282,7 @@ export default function GuarantorsPage() {
       personType: g.personType ?? "PF",
       name: g.name ?? "",
       email: g.email ?? "",
-      phone: g.phone ? maskPhone(g.phone) : "",
+      phone: g.phone ? maskPhone(String(g.phone)) : "",
       nationality: g.nationality ?? "Brasileiro",
       maritalStatus: g.maritalStatus ?? "",
       cpf: g.cpf ? maskCPF(g.cpf) : "",
