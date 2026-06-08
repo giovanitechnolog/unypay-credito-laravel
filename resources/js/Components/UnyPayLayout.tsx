@@ -4,20 +4,22 @@ import {
   LayoutDashboard, List, Users, FileText, Calculator,
   TrendingUp, ClipboardList, LogOut, Menu, Bell,
   ChevronDown, Shield, CreditCard, ChevronRight, History,
-  UserCog, Handshake, Landmark
+  UserCog, Handshake, Landmark, Sparkles, LayoutGrid,
 } from "lucide-react";
 
 const NAV_SECTIONS = [
   {
     label: "CRÉDITO",
     items: [
-      { href: "/",            label: "Dashboard",      icon: LayoutDashboard }, // Ajustado para a raiz do Laravel
-      { href: "/lancamentos", label: "Lançamentos",     icon: List },
-      { href: "/clients",     label: "Clientes",        icon: Users },
-      { href: "/credores",    label: "Credores",        icon: Landmark },
-      { href: "/fiadores",    label: "Fiador / Codevedor", icon: Handshake },
-      { href: "/contracts",   label: "Contratos",       icon: FileText },
-      { href: "/pagamentos",  label: "Pagamentos",      icon: CreditCard },
+      { href: "/",               label: "Dashboard",           icon: LayoutDashboard },
+      { href: "/contract-panel", label: "Painel de Contratos", icon: LayoutGrid },
+      { href: "/lancamentos",    label: "Lançamentos",         icon: List },
+      { href: "/clients",        label: "Clientes",            icon: Users },
+      { href: "/credores",       label: "Credores",            icon: Landmark },
+      { href: "/fiadores",       label: "Fiador / Codevedor",  icon: Handshake },
+      { href: "/contracts",      label: "Contratos",           icon: FileText },
+      { href: "/ai-ingestion",   label: "Ingestão com IA",     icon: Sparkles },
+      { href: "/pagamentos",     label: "Pagamentos",          icon: CreditCard },
     ],
   },
   {
@@ -46,6 +48,8 @@ const NAV_SECTIONS = [
 
 function getPageTitle(url: string) {
   if (url === "/" || url === "/dashboard") return "Dashboard";
+  if (url === "/contract-panel") return "Painel de Contratos";
+  if (url === "/ai-ingestion") return "Ingestão com IA";
   if (url === "/lancamentos") return "Lançamentos";
   if (url === "/clients") return "Clientes";
   if (url.startsWith("/clients/")) return "Detalhe do Cliente";
@@ -66,6 +70,8 @@ function getPageTitle(url: string) {
 function getBreadcrumb(url: string) {
   const base = { label: "UnyPay® Crédito", href: "/" };
   if (url === "/" || url === "/dashboard") return [base, { label: "Dashboard" }];
+  if (url === "/contract-panel") return [base, { label: "Painel de Contratos" }];
+  if (url === "/ai-ingestion") return [base, { label: "Ingestão com IA" }];
   if (url === "/lancamentos") return [base, { label: "Lançamentos" }];
   if (url === "/clients") return [base, { label: "Clientes" }];
   if (url.startsWith("/clients/")) return [base, { label: "Clientes", href: "/clients" }, { label: "Detalhe" }];
@@ -105,11 +111,13 @@ export default function UnyPayLayout({ children }: { children: React.ReactNode }
   const pathname = url.split("?")[0];
   const isFullWidth = [
     "/",
+    "/contract-panel",
     "/lancamentos",
     "/pagamentos",
     "/contracts",
     "/clients",
     "/credores",
+    "/fiadores",
     "/simulacoes",
   ].includes(pathname);
 
