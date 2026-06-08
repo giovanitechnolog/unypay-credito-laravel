@@ -37,6 +37,8 @@ class StoreGuarantorRequest extends FormRequest
 
             // Nome (PF: nome completo / PJ: razão social) — sempre obrigatório
             'name'              => ['required', 'string', 'max:255'],
+            'email'             => ['nullable', 'email', 'max:255'],
+            'phone'             => ['nullable', 'string', 'max:20'],
 
             // ── Campos exclusivos de Pessoa Física ─────────────────────────
             'cpf'               => ['required_if:personType,PF', 'nullable', 'string', 'size:11', 'unique:guarantors,cpf'],

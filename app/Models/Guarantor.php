@@ -11,6 +11,8 @@ class Guarantor extends Model
 
     protected $fillable = [
         'name',
+        'email',
+        'phone',
         'personType',
         'nationality',
         'maritalStatus',

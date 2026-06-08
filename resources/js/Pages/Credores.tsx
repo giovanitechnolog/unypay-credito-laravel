@@ -1,14 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Head } from "@inertiajs/react";
 import {
   Plus, Search, X, Edit2, Trash2, Users, Building2, User,
-  IdCard, MapPin, Landmark, CreditCard, RefreshCw, Mail, Phone, Download,
+  IdCard, MapPin, Landmark, CreditCard, RefreshCw, Mail, Phone, Download, Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
 import ConfirmDialog from "../Components/ConfirmDialog";
 import { api, extractFirstError } from "../lib/api";
 import { downloadExcelWithState } from "../lib/exportHelper";
+import {
+  maskDocument,
+  onlyDigits,
+  personTypeFromDocument,
+  validateCPF,
+} from "../lib/documentValidation";
 
 /* ────────────────────────────────────────────────────────────────────────────
  * 🚀 Interfaces TypeScript (Consignor + ConsignorBankAccount).
@@ -153,30 +159,6 @@ const PAGE_SIZES = [20, 50, 100];
  *  Máscaras e helpers de formatação
  * ──────────────────────────────────────────────────────────────────────── */
 
-const onlyDigits = (v: string | null | undefined) => (v ?? "").replace(/\D/g, "");
-
-const maskCPF = (v: string) => {
-  const d = v.replace(/\D/g, "").slice(0, 11);
-  return d
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
-};
-
-const maskCNPJ = (v: string) => {
-  const d = v.replace(/\D/g, "").slice(0, 14);
-  return d
-    .replace(/^(\d{2})(\d)/, "$1.$2")
-    .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
-    .replace(/\.(\d{3})(\d)/, ".$1/$2")
-    .replace(/(\d{4})(\d{1,2})$/, "$1-$2");
-};
-
-const maskDocument = (v: string) => {
-  const d = v.replace(/\D/g, "");
-  return d.length > 11 ? maskCNPJ(v) : maskCPF(v);
-};
-
 const maskPhone = (v: string) => v.replace(/\D/g, "")
   .replace(/^(\d{2})(\d)/, "($1) $2")
   .replace(/(\d{5})(\d)/, "$1-$2")
@@ -193,9 +175,6 @@ const formatDocumentForGrid = (doc: string | null | undefined): string => {
   if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
   return d;
 };
-
-const personTypeFromDocument = (doc: string | null | undefined): "PF" | "PJ" =>
-  onlyDigits(doc).length > 11 ? "PJ" : "PF";
 
 /* ────────────────────────────────────────────────────────────────────────────
  *  Estado do formulário (modal)
@@ -272,6 +251,9 @@ export default function CredoresPage() {
   const [editing, setEditing] = useState<Consignor | null>(null);
   const [formData, setFormData] = useState<FormState>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
+  const [documentError, setDocumentError] = useState("");
+  const [cnpjLoading, setCnpjLoading] = useState(false);
+  const lastFetchedCnpjRef = useRef("");
   // Controla qual dropdown de bancos está aberto (igual ao Clients).
   const [focusedBankIdx, setFocusedBankIdx] = useState<number | null>(null);
 
@@ -313,6 +295,9 @@ export default function CredoresPage() {
   const openCreateModal = () => {
     setEditing(null);
     setFormData(EMPTY_FORM);
+    setDocumentError("");
+    setCnpjLoading(false);
+    lastFetchedCnpjRef.current = "";
     setActiveTab("dados");
     setFormOpen(true);
   };
@@ -345,6 +330,9 @@ export default function CredoresPage() {
           pixKey: b.pixKey ?? "",
         })),
       });
+      setDocumentError("");
+      setCnpjLoading(false);
+      lastFetchedCnpjRef.current = onlyDigits(c.document ?? "");
       setActiveTab("dados");
       setFormOpen(true);
     } catch (err) {
@@ -369,6 +357,80 @@ export default function CredoresPage() {
     }));
 
   /* ── CEP via ViaCEP ───────────────────────────────────────────────── */
+  const validateDocumentField = (documentValue: string): string => {
+    const digits = onlyDigits(documentValue);
+    if (!digits) return "";
+
+    if (digits.length <= 11) {
+      if (digits.length === 11 && !validateCPF(digits)) {
+        return "CPF inválido. Verifique os dígitos informados.";
+      }
+      return "";
+    }
+
+    if (digits.length < 14) {
+      return "CNPJ incompleto. Informe os 14 dígitos.";
+    }
+
+    return "";
+  };
+
+  const fetchCnpjData = async (digits: string) => {
+    if (digits.length !== 14 || lastFetchedCnpjRef.current === digits) return;
+
+    setCnpjLoading(true);
+    try {
+      const { data } = await api.get(`/api/cnpj/${digits}`);
+      lastFetchedCnpjRef.current = digits;
+
+      setFormData(prev => ({
+        ...prev,
+        name: data.nome || prev.name,
+        zipCode: data.cep ? maskCEP(String(data.cep)) : prev.zipCode,
+        street: data.logradouro || prev.street,
+        number: data.numero ? String(data.numero) : prev.number,
+        neighborhood: data.bairro || prev.neighborhood,
+        city: data.municipio || prev.city,
+        state: data.uf ? String(data.uf).toUpperCase() : prev.state,
+        email: data.email || prev.email,
+        phone: data.telefone ? maskPhone(String(data.telefone)) : prev.phone,
+      }));
+
+      toast.success("Dados da Receita Federal preenchidos automaticamente.");
+    } catch (err) {
+      lastFetchedCnpjRef.current = "";
+      toast.error(extractFirstError(err, "Não foi possível consultar o CNPJ."));
+    } finally {
+      setCnpjLoading(false);
+    }
+  };
+
+  const handleDocumentChange = (value: string) => {
+    const masked = maskDocument(value);
+    const digits = onlyDigits(masked);
+
+    setFormData(prev => ({ ...prev, document: masked }));
+    setDocumentError("");
+
+    if (digits.length !== 14) {
+      lastFetchedCnpjRef.current = "";
+    }
+
+    if (digits.length === 14) {
+      void fetchCnpjData(digits);
+    }
+  };
+
+  const handleDocumentBlur = () => {
+    const digits = onlyDigits(formData.document);
+    const error = validateDocumentField(formData.document);
+    setDocumentError(error);
+
+    if (!error && digits.length === 14) {
+      void fetchCnpjData(digits);
+    }
+  };
+
   const handleFetchCep = async (cep: string) => {
     const clean = onlyDigits(cep);
     if (clean.length !== 8) return;
@@ -392,6 +454,16 @@ export default function CredoresPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submitting) return;
+
+    const docError = validateDocumentField(formData.document);
+    if (docError) {
+      setDocumentError(docError);
+      setActiveTab("dados");
+      return;
+    }
+
+    if (cnpjLoading) return;
+
     setSubmitting(true);
 
     const payload = {
@@ -777,25 +849,47 @@ export default function CredoresPage() {
                       <div className="form-grid-3">
                         <div className="col-span-3">
                           <Label>NOME COMPLETO / RAZÃO SOCIAL *</Label>
-                          <input className="sigx-input" required value={formData.name} onChange={(e) => setFormData((p) => ({ ...p, name: e.target.value }))} placeholder="Nome completo ou razão social" />
+                          <input className="sigx-input" required value={formData.name} onChange={(e) => setFormData((p) => ({ ...p, name: e.target.value }))} disabled={cnpjLoading} placeholder="Nome completo ou razão social" />
                         </div>
 
                         <div>
-                          <Label>{personTypeFromDocument(formData.document) === "PJ" ? "CNPJ" : "CPF"}</Label>
-                          <input
-                            className="sigx-input mono"
-                            value={formData.document}
-                            placeholder="000.000.000-00 ou 00.000.000/0000-00"
-                            onChange={(e) => setFormData((p) => ({ ...p, document: maskDocument(e.target.value) }))}
-                          />
+                          <Label>CPF ou CNPJ</Label>
+                          <div style={{ position: "relative" }}>
+                            <input
+                              className="sigx-input mono"
+                              value={formData.document}
+                              placeholder="000.000.000-00 ou 00.000.000/0000-00"
+                              onChange={(e) => handleDocumentChange(e.target.value)}
+                              onBlur={handleDocumentBlur}
+                              disabled={cnpjLoading}
+                              style={documentError ? { borderColor: "#dc2626" } : undefined}
+                            />
+                            {cnpjLoading && (
+                              <Loader2
+                                size={14}
+                                className="animate-spin"
+                                style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: "#2563eb" }}
+                              />
+                            )}
+                          </div>
+                          {documentError && (
+                            <div style={{ color: "#dc2626", fontSize: 11, marginTop: 4, fontWeight: 500 }}>
+                              {documentError}
+                            </div>
+                          )}
+                          {cnpjLoading && !documentError && (
+                            <div style={{ color: "#2563eb", fontSize: 11, marginTop: 4, fontWeight: 500 }}>
+                              Consultando dados na Receita Federal...
+                            </div>
+                          )}
                         </div>
                         <div>
                           <Label>TELEFONE / WHATSAPP</Label>
-                          <input className="sigx-input" value={formData.phone} onChange={(e) => setFormData((p) => ({ ...p, phone: maskPhone(e.target.value) }))} placeholder="(00) 00000-0000" />
+                          <input className="sigx-input" value={formData.phone} onChange={(e) => setFormData((p) => ({ ...p, phone: maskPhone(e.target.value) }))} disabled={cnpjLoading} placeholder="(00) 00000-0000" />
                         </div>
                         <div>
                           <Label>E-MAIL</Label>
-                          <input type="email" className="sigx-input" value={formData.email} onChange={(e) => setFormData((p) => ({ ...p, email: e.target.value }))} placeholder="email@exemplo.com" />
+                          <input type="email" className="sigx-input" value={formData.email} onChange={(e) => setFormData((p) => ({ ...p, email: e.target.value }))} disabled={cnpjLoading} placeholder="email@exemplo.com" />
                         </div>
                       </div>
 
@@ -810,6 +904,7 @@ export default function CredoresPage() {
                           <input
                             className="sigx-input mono"
                             value={formData.zipCode}
+                            disabled={cnpjLoading}
                             onChange={(e) => {
                               const masked = maskCEP(e.target.value);
                               setFormData((p) => ({ ...p, zipCode: masked }));
@@ -820,25 +915,25 @@ export default function CredoresPage() {
                         </div>
                         <div className="col-span-2">
                           <Label>RUA / LOGRADOURO</Label>
-                          <input className="sigx-input" value={formData.street} onChange={(e) => setFormData((p) => ({ ...p, street: e.target.value }))} />
+                          <input className="sigx-input" value={formData.street} onChange={(e) => setFormData((p) => ({ ...p, street: e.target.value }))} disabled={cnpjLoading} />
                         </div>
 
                         <div>
                           <Label>NÚMERO</Label>
-                          <input className="sigx-input" value={formData.number} onChange={(e) => setFormData((p) => ({ ...p, number: e.target.value }))} />
+                          <input className="sigx-input" value={formData.number} onChange={(e) => setFormData((p) => ({ ...p, number: e.target.value }))} disabled={cnpjLoading} />
                         </div>
                         <div>
                           <Label>BAIRRO</Label>
-                          <input className="sigx-input" value={formData.neighborhood} onChange={(e) => setFormData((p) => ({ ...p, neighborhood: e.target.value }))} />
+                          <input className="sigx-input" value={formData.neighborhood} onChange={(e) => setFormData((p) => ({ ...p, neighborhood: e.target.value }))} disabled={cnpjLoading} />
                         </div>
                         <div>
                           <Label>COMPLEMENTO</Label>
-                          <input className="sigx-input" value={formData.complement} onChange={(e) => setFormData((p) => ({ ...p, complement: e.target.value }))} />
+                          <input className="sigx-input" value={formData.complement} onChange={(e) => setFormData((p) => ({ ...p, complement: e.target.value }))} disabled={cnpjLoading} />
                         </div>
 
                         <div className="col-span-2">
                           <Label>CIDADE</Label>
-                          <input className="sigx-input" value={formData.city} onChange={(e) => setFormData((p) => ({ ...p, city: e.target.value }))} />
+                          <input className="sigx-input" value={formData.city} onChange={(e) => setFormData((p) => ({ ...p, city: e.target.value }))} disabled={cnpjLoading} />
                         </div>
                         <div>
                           <Label>ESTADO (UF)</Label>
@@ -846,6 +941,7 @@ export default function CredoresPage() {
                             className="sigx-input"
                             value={formData.state}
                             onChange={(e) => setFormData((p) => ({ ...p, state: e.target.value }))}
+                            disabled={cnpjLoading}
                           >
                             <option value="">Selecione...</option>
                             {UF_OPTIONS.map((uf) => (
@@ -1018,7 +1114,7 @@ export default function CredoresPage() {
                   <button type="button" className="btn-secondary" onClick={() => setFormOpen(false)} disabled={submitting}>
                     Cancelar
                   </button>
-                  <button type="submit" className="btn-primary" disabled={submitting}>
+                  <button type="submit" className="btn-primary" disabled={submitting || cnpjLoading || !!documentError}>
                     {submitting
                       ? "Salvando..."
                       : editing ? "Atualizar Credor" : "Cadastrar Credor"}

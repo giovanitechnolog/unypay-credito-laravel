@@ -1,16 +1,21 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Head } from "@inertiajs/react";
 import {
   Plus, Search, RefreshCw, X, Edit2, Trash2,
   Handshake, IdCard, MapPin, Users as UsersIcon,
   ShieldAlert, CheckCircle2, UserPlus, User, Building2,
-  Scale, Download,
+  Scale, Download, Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
 import ConfirmDialog from "../Components/ConfirmDialog";
 import { api, extractFirstError } from "../lib/api";
 import { downloadExcelWithState } from "../lib/exportHelper";
+import {
+  maskDocument,
+  onlyDigits,
+  validateCPF,
+} from "../lib/documentValidation";
 
 interface ClientLite {
   id: number;
@@ -38,6 +43,8 @@ interface Guarantor {
   city: string | null;
   state: string | null;
   zipCode: string | null;
+  email: string | null;
+  phone: string | null;
   clients?: ClientLite[];
   clients_count?: number;
   /** Vínculos como FIADOR em contratos (pivot contract_guarantor com role='FIADOR'). */
@@ -90,11 +97,16 @@ const maskCEP = (v: string) => {
   return d.replace(/(\d{5})(\d)/, "$1-$2");
 };
 
-const onlyDigits = (v: string | null | undefined) => (v ?? "").replace(/\D/g, "");
+const maskPhone = (v: string) => v.replace(/\D/g, "")
+  .replace(/^(\d{2})(\d)/, "($1) $2")
+  .replace(/(\d{5})(\d)/, "$1-$2")
+  .slice(0, 15);
 
 interface FormState {
   personType: PersonType;
   name: string;
+  email: string;
+  phone: string;
   // PF
   nationality: string;
   maritalStatus: string;
@@ -119,6 +131,8 @@ interface FormState {
 const EMPTY_FORM: FormState = {
   personType: "PF",
   name: "",
+  email: "",
+  phone: "",
   nationality: "Brasileiro",
   maritalStatus: "",
   cpf: "",
@@ -155,6 +169,9 @@ export default function GuarantorsPage() {
 
   // Feedback do CEP (auto-preenchimento via ViaCEP).
   const [cepFeedback, setCepFeedback] = useState<string>("");
+  const [documentError, setDocumentError] = useState("");
+  const [cnpjLoading, setCnpjLoading] = useState(false);
+  const lastFetchedCnpjRef = useRef("");
 
   const handleCepChange = async (raw: string) => {
     const masked = maskCEP(raw);
@@ -247,6 +264,9 @@ export default function GuarantorsPage() {
     setActiveFormTab("pessoal");
     setClientSearch("");
     setCepFeedback("");
+    setDocumentError("");
+    setCnpjLoading(false);
+    lastFetchedCnpjRef.current = "";
     setFormOpen(true);
   };
 
@@ -255,6 +275,8 @@ export default function GuarantorsPage() {
     setFormData({
       personType: g.personType ?? "PF",
       name: g.name ?? "",
+      email: g.email ?? "",
+      phone: g.phone ? maskPhone(g.phone) : "",
       nationality: g.nationality ?? "Brasileiro",
       maritalStatus: g.maritalStatus ?? "",
       cpf: g.cpf ? maskCPF(g.cpf) : "",
@@ -274,6 +296,9 @@ export default function GuarantorsPage() {
     setActiveFormTab("pessoal");
     setClientSearch("");
     setCepFeedback("");
+    setDocumentError("");
+    setCnpjLoading(false);
+    lastFetchedCnpjRef.current = onlyDigits(g.cnpj ?? "");
     setFormOpen(true);
   };
 
@@ -282,6 +307,8 @@ export default function GuarantorsPage() {
    * Mantém endereço e nome (que servem aos dois).
    */
   const switchPersonType = (next: PersonType) => {
+    setDocumentError("");
+    lastFetchedCnpjRef.current = "";
     setFormData(prev => {
       if (prev.personType === next) return prev;
       if (next === "PJ") {
@@ -316,8 +343,99 @@ export default function GuarantorsPage() {
     }));
   };
 
+  const validateDocumentField = (): string => {
+    if (formData.personType === "PF") {
+      const digits = onlyDigits(formData.cpf);
+      if (!digits) return "";
+      if (digits.length === 11 && !validateCPF(digits)) {
+        return "CPF inválido. Verifique os dígitos informados.";
+      }
+      return "";
+    }
+
+    const digits = onlyDigits(formData.cnpj);
+    if (!digits) return "";
+    if (digits.length < 14) {
+      return "CNPJ incompleto. Informe os 14 dígitos.";
+    }
+    return "";
+  };
+
+  const fetchCnpjData = async (digits: string) => {
+    if (digits.length !== 14 || lastFetchedCnpjRef.current === digits) return;
+
+    setCnpjLoading(true);
+    try {
+      const { data } = await api.get(`/api/cnpj/${digits}`);
+      lastFetchedCnpjRef.current = digits;
+
+      setFormData(prev => ({
+        ...prev,
+        name: data.nome || prev.name,
+        zipCode: data.cep ? maskCEP(String(data.cep)) : prev.zipCode,
+        street: data.logradouro || prev.street,
+        number: data.numero ? String(data.numero) : prev.number,
+        neighborhood: data.bairro || prev.neighborhood,
+        city: data.municipio || prev.city,
+        state: data.uf ? String(data.uf).toUpperCase() : prev.state,
+        email: data.email || prev.email,
+        phone: data.telefone ? maskPhone(String(data.telefone)) : prev.phone,
+      }));
+
+      toast.success("Dados da Receita Federal preenchidos automaticamente.");
+    } catch (err) {
+      lastFetchedCnpjRef.current = "";
+      toast.error(extractFirstError(err, "Não foi possível consultar o CNPJ."));
+    } finally {
+      setCnpjLoading(false);
+    }
+  };
+
+  const handleDocumentChange = (value: string) => {
+    setDocumentError("");
+
+    if (formData.personType === "PF") {
+      const masked = maskDocument(onlyDigits(value).slice(0, 11));
+      setFormData(prev => ({ ...prev, cpf: masked }));
+      lastFetchedCnpjRef.current = "";
+      return;
+    }
+
+    const masked = maskDocument(value);
+    const digits = onlyDigits(masked);
+    setFormData(prev => ({ ...prev, cnpj: masked }));
+
+    if (digits.length !== 14) {
+      lastFetchedCnpjRef.current = "";
+    }
+    if (digits.length === 14) {
+      void fetchCnpjData(digits);
+    }
+  };
+
+  const handleDocumentBlur = () => {
+    const error = validateDocumentField();
+    setDocumentError(error);
+
+    if (formData.personType === "PJ") {
+      const digits = onlyDigits(formData.cnpj);
+      if (!error && digits.length === 14) {
+        void fetchCnpjData(digits);
+      }
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const docError = validateDocumentField();
+    if (docError) {
+      setDocumentError(docError);
+      setActiveFormTab("pessoal");
+      return;
+    }
+
+    if (cnpjLoading) return;
 
     const cpfDigits  = onlyDigits(formData.cpf);
     const cnpjDigits = onlyDigits(formData.cnpj);
@@ -332,7 +450,8 @@ export default function GuarantorsPage() {
       personalIssue =
         !formData.nationality.trim() ? "NACIONALIDADE" :
         !formData.maritalStatus      ? "ESTADO CIVIL" :
-        cpfDigits.length !== 11      ? "CPF (11 dígitos)" : null;
+        cpfDigits.length !== 11      ? "CPF (11 dígitos)" :
+        !validateCPF(cpfDigits)      ? "CPF inválido" : null;
     } else {
       personalIssue =
         cnpjDigits.length !== 14         ? "CNPJ (14 dígitos)" :
@@ -359,6 +478,8 @@ export default function GuarantorsPage() {
     const basePayload = {
       personType: formData.personType,
       name: formData.name,
+      email: formData.email.trim() || null,
+      phone: formData.phone || null,
       street: formData.street,
       number: formData.number,
       complement: formData.complement,
@@ -826,22 +947,19 @@ export default function GuarantorsPage() {
                         </div>
                       </div>
 
-                      <div>
-                        <label className="sigx-label">
-                          {formData.personType === "PJ" ? "RAZÃO SOCIAL *" : "NOME COMPLETO *"}
-                        </label>
-                        <input
-                          type="text"
-                          className="sigx-input"
-                          value={formData.name}
-                          onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
-                          required
-                        />
-                      </div>
-
                       {/* ── Campos de Pessoa Física ────────────────────── */}
                       {formData.personType === "PF" && (
                         <>
+                          <div>
+                            <label className="sigx-label">NOME COMPLETO *</label>
+                            <input
+                              type="text"
+                              className="sigx-input"
+                              value={formData.name}
+                              onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
+                              required
+                            />
+                          </div>
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                             <div>
                               <label className="sigx-label">NACIONALIDADE *</label>
@@ -871,15 +989,24 @@ export default function GuarantorsPage() {
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                             <div>
                               <label className="sigx-label">CPF *</label>
-                              <input
-                                type="text"
-                                className="sigx-input mono"
-                                placeholder="000.000.000-00"
-                                value={formData.cpf}
-                                onChange={e => setFormData(p => ({ ...p, cpf: maskCPF(e.target.value) }))}
-                                required
-                                minLength={14}
-                              />
+                              <div style={{ position: "relative" }}>
+                                <input
+                                  type="text"
+                                  className="sigx-input mono"
+                                  placeholder="000.000.000-00"
+                                  value={formData.cpf}
+                                  onChange={e => handleDocumentChange(e.target.value)}
+                                  onBlur={handleDocumentBlur}
+                                  disabled={cnpjLoading}
+                                  required
+                                  style={documentError ? { borderColor: "#dc2626" } : undefined}
+                                />
+                              </div>
+                              {documentError && (
+                                <div style={{ color: "#dc2626", fontSize: 11, marginTop: 4, fontWeight: 500 }}>
+                                  {documentError}
+                                </div>
+                              )}
                             </div>
                             <div>
                               <label className="sigx-label">RG</label>
@@ -892,34 +1019,69 @@ export default function GuarantorsPage() {
                               />
                             </div>
                           </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                            <div>
+                              <label className="sigx-label">TELEFONE / WHATSAPP</label>
+                              <input
+                                type="text"
+                                className="sigx-input"
+                                value={formData.phone}
+                                onChange={e => setFormData(p => ({ ...p, phone: maskPhone(e.target.value) }))}
+                                disabled={cnpjLoading}
+                                placeholder="(00) 00000-0000"
+                              />
+                            </div>
+                            <div>
+                              <label className="sigx-label">E-MAIL</label>
+                              <input
+                                type="email"
+                                className="sigx-input"
+                                value={formData.email}
+                                onChange={e => setFormData(p => ({ ...p, email: e.target.value }))}
+                                disabled={cnpjLoading}
+                                placeholder="email@exemplo.com"
+                              />
+                            </div>
+                          </div>
                         </>
                       )}
 
                       {/* ── Campos de Pessoa Jurídica ──────────────────── */}
                       {formData.personType === "PJ" && (
                         <>
-                          <div>
-                            <label className="sigx-label">NOME FANTASIA *</label>
-                            <input
-                              type="text"
-                              className="sigx-input"
-                              value={formData.tradeName}
-                              onChange={e => setFormData(p => ({ ...p, tradeName: e.target.value }))}
-                              required
-                            />
-                          </div>
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                             <div>
                               <label className="sigx-label">CNPJ *</label>
-                              <input
-                                type="text"
-                                className="sigx-input mono"
-                                placeholder="00.000.000/0000-00"
-                                value={formData.cnpj}
-                                onChange={e => setFormData(p => ({ ...p, cnpj: maskCNPJ(e.target.value) }))}
-                                required
-                                minLength={18}
-                              />
+                              <div style={{ position: "relative" }}>
+                                <input
+                                  type="text"
+                                  className="sigx-input mono"
+                                  placeholder="00.000.000/0000-00"
+                                  value={formData.cnpj}
+                                  onChange={e => handleDocumentChange(e.target.value)}
+                                  onBlur={handleDocumentBlur}
+                                  disabled={cnpjLoading}
+                                  required
+                                  style={documentError ? { borderColor: "#dc2626" } : undefined}
+                                />
+                                {cnpjLoading && (
+                                  <Loader2
+                                    size={14}
+                                    className="animate-spin"
+                                    style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: "#2563eb" }}
+                                  />
+                                )}
+                              </div>
+                              {documentError && (
+                                <div style={{ color: "#dc2626", fontSize: 11, marginTop: 4, fontWeight: 500 }}>
+                                  {documentError}
+                                </div>
+                              )}
+                              {cnpjLoading && !documentError && (
+                                <div style={{ color: "#2563eb", fontSize: 11, marginTop: 4, fontWeight: 500 }}>
+                                  Consultando dados na Receita Federal...
+                                </div>
+                              )}
                             </div>
                             <div>
                               <label className="sigx-label">INSCRIÇÃO ESTADUAL</label>
@@ -929,6 +1091,53 @@ export default function GuarantorsPage() {
                                 placeholder='Número ou "ISENTO"'
                                 value={formData.stateRegistration}
                                 onChange={e => setFormData(p => ({ ...p, stateRegistration: e.target.value }))}
+                                disabled={cnpjLoading}
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="sigx-label">RAZÃO SOCIAL *</label>
+                            <input
+                              type="text"
+                              className="sigx-input"
+                              value={formData.name}
+                              onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
+                              disabled={cnpjLoading}
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="sigx-label">NOME FANTASIA *</label>
+                            <input
+                              type="text"
+                              className="sigx-input"
+                              value={formData.tradeName}
+                              onChange={e => setFormData(p => ({ ...p, tradeName: e.target.value }))}
+                              disabled={cnpjLoading}
+                              required
+                            />
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                            <div>
+                              <label className="sigx-label">TELEFONE / WHATSAPP</label>
+                              <input
+                                type="text"
+                                className="sigx-input"
+                                value={formData.phone}
+                                onChange={e => setFormData(p => ({ ...p, phone: maskPhone(e.target.value) }))}
+                                disabled={cnpjLoading}
+                                placeholder="(00) 00000-0000"
+                              />
+                            </div>
+                            <div>
+                              <label className="sigx-label">E-MAIL</label>
+                              <input
+                                type="email"
+                                className="sigx-input"
+                                value={formData.email}
+                                onChange={e => setFormData(p => ({ ...p, email: e.target.value }))}
+                                disabled={cnpjLoading}
+                                placeholder="email@exemplo.com"
                               />
                             </div>
                           </div>
@@ -1182,7 +1391,7 @@ export default function GuarantorsPage() {
                   </span>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button type="button" className="btn-secondary" onClick={() => setFormOpen(false)}>Cancelar</button>
-                    <button type="submit" className="btn-primary" style={{ minWidth: 150, justifyContent: "center" }}>
+                    <button type="submit" className="btn-primary" style={{ minWidth: 150, justifyContent: "center" }} disabled={cnpjLoading || !!documentError}>
                       {selected ? "Atualizar Fiador" : "Salvar Fiador"}
                     </button>
                   </div>

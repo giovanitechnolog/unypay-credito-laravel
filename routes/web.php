@@ -16,6 +16,7 @@ use App\Http\Controllers\UserController;
 use App\Http\Controllers\ContractTypeController;
 use App\Http\Controllers\GuarantorController;
 use App\Http\Controllers\ConsignorController;
+use App\Http\Controllers\IntegrationController;
 use App\Models\UserColumnPreference; // 🚀 MODELO IMPORTADO PARA O UPSERT
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -61,6 +62,7 @@ Route::middleware('auth')->group(function () {
     // 🚀 JSON dedicado: fiadores vinculados ao cliente (alimenta "Fiadores Sugeridos"
     // do modal de Contratos). Declarado antes de /clients/{id} de propósito.
     Route::get   ('/api/clients/{id}/guarantors', [ClientController::class, 'guarantors'])->name('clients.guarantors');
+    Route::get   ('/api/cnpj/{cnpj}',             [IntegrationController::class, 'lookupCnpj'])->name('integrations.cnpj');
     Route::get   ('/clients/{id}', [ClientController::class, 'show'])->name('clients.show');
     Route::put   ('/clients/{id}', [ClientController::class, 'update'])->name('clients.update');
     Route::delete('/clients/{id}', [ClientController::class, 'destroy'])->name('clients.destroy');

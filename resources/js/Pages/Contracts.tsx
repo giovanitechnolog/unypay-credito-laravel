@@ -50,6 +50,18 @@ const fmtDate = (d?: string | null) => d ? new Date(d + "T00:00:00").toLocaleDat
 const fmtPct = (v: number | string) =>
   `${new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v) * 100)}%`;
 
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/** Gera o código interno de referência no formato DDMMAAAAHHmm (ex.: 080620261149). */
+const generateInternalCode = (date: Date = new Date()): string => {
+  const day = pad2(date.getDate());
+  const month = pad2(date.getMonth() + 1);
+  const year = String(date.getFullYear());
+  const hours = pad2(date.getHours());
+  const minutes = pad2(date.getMinutes());
+  return `${day}${month}${year}${hours}${minutes}`;
+};
+
 const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
   "Ativo":        { bg: "#d1fae5", color: "#065f46" },
   "Inadimplente": { bg: "#fee2e2", color: "#991b1b" },
@@ -657,6 +669,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
 
   const handleOpenCreate = () => {
     resetModal();
+    setForm({ ...emptyForm, code: generateInternalCode() });
     setOpen(true);
   };
 
