@@ -16,6 +16,7 @@ use App\Http\Controllers\UserController;
 use App\Http\Controllers\ContractTypeController;
 use App\Http\Controllers\GuarantorController;
 use App\Http\Controllers\AiIngestionController;
+use App\Http\Controllers\ContractPanelController;
 use App\Models\UserColumnPreference; // 🚀 MODELO IMPORTADO PARA O UPSERT
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -165,6 +166,10 @@ Route::middleware('auth')->group(function () {
         Route::get('/ai-ingestion', [AiIngestionController::class, 'index'])->name('ai-ingestion.page');
         Route::post('/api/ai-ingestion/process', [AiIngestionController::class, 'processPdf'])->name('ai-ingestion.process');
         Route::post('/api/ai-ingestion/save', [AiIngestionController::class, 'save'])->name('ai-ingestion.save');   
+    });
+
+    Route::middleware(['auth'])->group(function () {
+        Route::get('/contract-panel', [ContractPanelController::class, 'index'])->name('contract-panel.index');
     });
 
 

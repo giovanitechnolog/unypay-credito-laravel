@@ -4,7 +4,7 @@ import {
   LayoutDashboard, List, Users, FileText, Calculator,
   TrendingUp, ClipboardList, LogOut, Menu, Bell,
   ChevronDown, Shield, CreditCard, ChevronRight, History,
-  UserCog, Handshake, Sparkles
+  UserCog, Handshake, Sparkles,LayoutGrid
 } from "lucide-react";
 
 const NAV_SECTIONS = [
@@ -12,11 +12,13 @@ const NAV_SECTIONS = [
     label: "CRÉDITO",
     items: [
       { href: "/",            label: "Dashboard",      icon: LayoutDashboard }, // Ajustado para a raiz do Laravel
+      { href: "/contract-panel", label: "Painel de Contratos", icon: LayoutGrid },
       { href: "/lancamentos", label: "Lançamentos",     icon: List },
       { href: "/clients",     label: "Clientes",        icon: Users },
       { href: "/fiadores",    label: "Fiadores",        icon: Handshake },
       { href: "/contracts",   label: "Contratos",       icon: FileText },
       { href: "/ai-ingestion", label: "Ingestão com IA", icon: Sparkles },
+      
       { href: "/pagamentos",  label: "Pagamentos",      icon: CreditCard },
     ],
   },
