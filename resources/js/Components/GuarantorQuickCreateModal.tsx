@@ -31,9 +31,9 @@ interface Props {
 }
 
 const TITLES: Record<QuickCreateMode, string> = {
-  "create": "Novo Fiador / Codevedor",
-  "edit-new": "Editar Fiador / Codevedor",
-  "view": "Detalhes do Fiador / Codevedor",
+  "create": "Nova Pessoa",
+  "edit-new": "Editar Pessoa",
+  "view": "Detalhes da Pessoa",
 };
 
 const SUBTITLES: Record<QuickCreateMode, string> = {

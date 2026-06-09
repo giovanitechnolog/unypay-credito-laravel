@@ -186,7 +186,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {/* ── Toggle PF / PJ ─────────────────────────────────────── */}
       <div>
-        <label className="sigx-label">TIPO DE FIADOR *</label>
+        <label className="sigx-label">TIPO DE PESSOA *</label>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           {[
             { key: "PF" as const, label: "Pessoa Física",   icon: User,      color: "#059669", bg: "#ecfdf5" },

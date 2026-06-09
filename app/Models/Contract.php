@@ -10,8 +10,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Contract extends Model
 {
     /** Papéis aceitos na pivot contract_guarantor. Reflete o ENUM da migration. */
-    public const ROLE_FIADOR    = 'FIADOR';
-    public const ROLE_CODEVEDOR = 'CODEVEDOR';
+    public const ROLE_FIADOR     = 'FIADOR';
+    public const ROLE_CODEVEDOR  = 'CODEVEDOR';
+    public const ROLE_TESTEMUNHA = 'TESTEMUNHA';
 
     protected $fillable = [
         'clientId', 'consignorId', 'code', 'contractName', 'creditor', 'contractType', 'contractDate',
@@ -113,13 +114,26 @@ class Contract extends Model
     }
 
     /**
-     * Testemunhas do contrato (1:N — nome + CPF, sem cadastro mestre).
+     * Testemunhas vinculadas a este contrato (NxN — pivot contract_guarantor
+     * com role='TESTEMUNHA').
      *
-     * Estratégia de update no controller: delete + recreate dentro de transação
-     * (definido na Etapa 2 desta feature).
+     * 🔄 Antes era HasMany para `contract_witnesses` (nome+CPF inline).
+     * Após a unificação de "Pessoas", as testemunhas usam o MESMO cadastro
+     * mestre dos Fiadores/Codevedores (`guarantors`) — o que diferencia é
+     * apenas o `role` na pivot. Isso libera as mesmas affordances de UX
+     * (busca, sugestões por cliente, criação on-the-fly, evita duplicidade)
+     * que já existiam para os outros papéis.
      */
-    public function witnesses(): HasMany
+    public function witnesses(): BelongsToMany
     {
-        return $this->hasMany(ContractWitness::class, 'contractId');
+        return $this->belongsToMany(
+            Guarantor::class,
+            'contract_guarantor',
+            'contractId',
+            'guarantorId'
+        )
+            ->wherePivot('role', self::ROLE_TESTEMUNHA)
+            ->withPivot('role')
+            ->withTimestamps('createdAt', 'updatedAt');
     }
 }

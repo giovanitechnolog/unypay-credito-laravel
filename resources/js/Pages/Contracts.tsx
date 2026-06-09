@@ -105,7 +105,7 @@ const TABS = [
   { key: "credor",      label: "Credor",                icon: Landmark },
   { key: "financeiro",  label: "Valores e Bancos",      icon: CircleDollarSign },
   { key: "taxas",       label: "Taxas e Encargos",      icon: Percent },
-  { key: "fiadores",    label: "Fiador / Codevedor",    icon: UserCheck },
+  { key: "fiadores",    label: "Fiadores e Codevedores", icon: UserCheck },
   { key: "garantias",   label: "Garantias",             icon: Shield },
   { key: "regras",      label: "Regras Contratuais",    icon: BookOpen },
 ];
@@ -261,28 +261,12 @@ const parseAreaForBackend = (raw: string): number | null => {
  *   - localId nunca é enviado (é interno do React).
  */
 /**
- * Testemunha vinculada ao contrato (1:N — tabela contract_witnesses).
- * O backend faz delete-and-recreate no update; o `id` só serve para
- * hidratação/edição no front (não é enviado no payload).
+ * 🚀 Testemunhas passaram a usar o MESMO tipo `ContractGuarantor` que
+ * Fiadores e Codevedores — após a unificação de "Pessoas", elas saem
+ * do cadastro mestre `guarantors` e do pivot `contract_guarantor`
+ * (filtrado por role='TESTEMUNHA'). Isso ativa a mesma UX: busca,
+ * sugestões por cliente, criação on-the-fly e gravação atômica.
  */
-interface ContractWitness {
-  id?: number;
-  name: string;
-  cpf: string;
-  ci?: string;
-}
-
-/** Item em memória na aba "Regras Contratuais" — inclui chave estável do React. */
-type ContractWitnessItem = ContractWitness & {
-  localId: string;
-};
-
-const serializeWitnessesForBackend = (witnesses: ContractWitnessItem[]) =>
-  witnesses.map((w) => ({
-    name: w.name.trim(),
-    cpf: onlyDigits(w.cpf),
-    ci: w.ci?.trim() || null,
-  }));
 
 const serializeAssetsForBackend = (assets: ContractAssetItem[]) =>
   assets.map((a) => ({
@@ -409,13 +393,15 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   // Diálogos de confirmação (apenas exclusão — cancelar/reativar removidos)
   const [confirmDelete, setConfirmDelete] = useState<any | null>(null);
 
-  // 🚀 Estados da aba "Fiador / Codevedor" — gerenciados em memória até o submit.
-  // Mantemos LISTAS SEPARADAS por papel (FIADOR / CODEVEDOR), pois o backend
-  // sincroniza cada papel de forma independente na pivot contract_guarantor.
-  // O modal de busca/criação rápida é compartilhado e sabe em qual lista
-  // inserir através do estado `vinculoTabActive`.
+  // 🚀 Estados da aba "Fiador / Codevedor" e da seção "Testemunhas" da aba
+  // "Regras Contratuais" — gerenciados em memória até o submit. Mantemos
+  // LISTAS SEPARADAS por papel (FIADOR / CODEVEDOR / TESTEMUNHA) porque
+  // o backend sincroniza cada papel de forma independente na pivot
+  // contract_guarantor. O modal de busca/criação rápida é compartilhado
+  // e sabe em qual lista inserir através do estado `vinculoTabActive`.
   const [selectedGuarantors, setSelectedGuarantors] = useState<ContractGuarantor[]>([]);
   const [selectedCodebtors,  setSelectedCodebtors]  = useState<ContractGuarantor[]>([]);
+  const [selectedWitnesses,  setSelectedWitnesses]  = useState<ContractGuarantor[]>([]);
   const [suggestedGuarantors, setSuggestedGuarantors] = useState<GuarantorLite[]>([]);
   const [vinculoTabActive,  setVinculoTabActive]  = useState<VinculoPessoaType>("FIADOR");
   const [searchModalOpen, setSearchModalOpen] = useState(false);
@@ -447,10 +433,6 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   // até o submit do contrato. Ao salvar, viram JSON dentro do FormData; o
   // backend faz diff manual contra contract_assets preservando ids/createdAt.
   const [selectedAssets, setSelectedAssets] = useState<ContractAssetItem[]>([]);
-  // 🚀 Testemunhas (aba "Regras Contratuais") — em memória até o submit.
-  // Vão como JSON no FormData; o backend faz create (store) ou
-  // delete-and-recreate (update) dentro de transação.
-  const [selectedWitnesses, setSelectedWitnesses] = useState<ContractWitnessItem[]>([]);
   const [assetModalState, setAssetModalState] = useState<{
     open: boolean;
     mode: AssetModalMode;
@@ -508,14 +490,20 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       CODEVEDOR: selectedCodebtors
         .filter((g) => g.isFromDb && typeof g.id === "number")
         .map((g) => g.id as number),
+      TESTEMUNHA: selectedWitnesses
+        .filter((g) => g.isFromDb && typeof g.id === "number")
+        .map((g) => g.id as number),
     }),
-    [selectedGuarantors, selectedCodebtors]
+    [selectedGuarantors, selectedCodebtors, selectedWitnesses]
   );
 
   /** Helper único — escolhe o setter da lista correta baseado no papel. */
   const setterFor = useCallback(
-    (target: VinculoPessoaType) =>
-      target === "CODEVEDOR" ? setSelectedCodebtors : setSelectedGuarantors,
+    (target: VinculoPessoaType) => {
+      if (target === "CODEVEDOR")  return setSelectedCodebtors;
+      if (target === "TESTEMUNHA") return setSelectedWitnesses;
+      return setSelectedGuarantors;
+    },
     []
   );
 
@@ -655,12 +643,12 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     setActiveTab("basico");
     setSelectedGuarantors([]);
     setSelectedCodebtors([]);
+    setSelectedWitnesses([]);
     setSuggestedGuarantors([]);
     setVinculoTabActive("FIADOR");
     setSearchModalOpen(false);
     setQuickModalState({ open: false, mode: "create", target: "FIADOR" });
     setSelectedAssets([]);
-    setSelectedWitnesses([]);
     setAssetModalState({ open: false, mode: "create" });
     // 🚀 Limpa o cache da aba "Credor". O catálogo (consignorList) é mantido
     // porque foi carregado no mount e serve para todos os modais subsequentes.
@@ -799,15 +787,19 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       }))
     );
 
-    // 🚀 Popula as testemunhas a partir de c.witnesses (hidratação do index).
+    // 🚀 Popula as testemunhas a partir de c.witnesses (vêm como array com
+    // o mesmo formato de guarantors/codebtors, já que a pivot é a mesma).
+    // Compatível com payloads antigos: contratos com c.witnesses vazio ou
+    // ausente entram na tela sem testemunhas vinculadas.
     const incomingWitnesses = Array.isArray(c.witnesses) ? c.witnesses : [];
     setSelectedWitnesses(
-      incomingWitnesses.map((w: ContractWitness): ContractWitnessItem => ({
+      incomingWitnesses.map((g: any) => ({
         localId: newLocalId(),
-        id: w.id,
-        name: w.name ?? "",
-        cpf: w.cpf ? maskCPF(w.cpf) : "",
-        ci: w.ci ?? "",
+        id: g.id,
+        isFromDb: true,
+        name: g.name,
+        personType: g.personType,
+        document: g.document ?? null,
       }))
     );
 
@@ -856,14 +848,15 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   };
 
   /**
-   * Monta o FormData do contrato. Recebe as listas FINAIS de IDs (Fiadores e
-   * Codevedores), porque o handleSubmit já resolveu as criações on-the-fly
-   * antes de chegar aqui. Cada papel é enviado em uma chave própria para
-   * que o backend faça syncs independentes na pivot.
+   * Monta o FormData do contrato. Recebe as listas FINAIS de IDs (Fiadores,
+   * Codevedores e Testemunhas), porque o handleSubmit já resolveu as
+   * criações on-the-fly antes de chegar aqui. Cada papel é enviado em uma
+   * chave própria para que o backend faça syncs independentes na pivot.
    */
   const buildFormData = (
     finalGuarantorIds: number[],
-    finalCodebtorIds: number[]
+    finalCodebtorIds: number[],
+    finalWitnessIds: number[]
   ): FormData => {
     const fd = new FormData();
     Object.entries(form).forEach(([k, v]) => {
@@ -883,25 +876,25 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       if (existingPdfPaths.length === 0) fd.append("existingPdfPaths", "");
       if (existingPdfNames.length === 0) fd.append("existingPdfNames", "");
     }
-    // 🚀 Fiadores (role='FIADOR') e Codevedores (role='CODEVEDOR') na mesma
-    // pivot contract_guarantor. Sentinels (chave vazia) servem para sinalizar
-    // ao backend que a chave veio MESMO sendo lista vazia — assim ele faz o
-    // detach completo daquele papel sem afetar o outro.
+    // 🚀 Fiadores, Codevedores e Testemunhas — todos gravam na mesma pivot
+    // (contract_guarantor) diferenciados pela coluna `role`. Sentinels
+    // (chave vazia) sinalizam ao backend que aquele papel deve ser
+    // explicitamente sincronizado (mesmo com lista vazia → detach total),
+    // sem afetar os outros papéis.
     finalGuarantorIds.forEach((id) => fd.append("guarantor_ids[]", String(id)));
     if (finalGuarantorIds.length === 0) fd.append("guarantor_ids", "");
 
     finalCodebtorIds.forEach((id) => fd.append("codebtor_ids[]", String(id)));
     if (finalCodebtorIds.length === 0) fd.append("codebtor_ids", "");
 
+    finalWitnessIds.forEach((id) => fd.append("witness_ids[]", String(id)));
+    if (finalWitnessIds.length === 0) fd.append("witness_ids", "");
+
     // 🚀 Bens em garantia (1:N — tabela contract_assets).
     // Vai como JSON string dentro do FormData porque o request também
     // carrega PDFs (multipart). O ContractController decodifica em
     // `extractAssets` antes de validar e aplicar o diff manual.
     fd.append("assets", JSON.stringify(serializeAssetsForBackend(selectedAssets)));
-
-    // 🚀 Testemunhas (1:N — tabela contract_witnesses).
-    // Mesmo padrão de assets: JSON string no FormData.
-    fd.append("witnesses", JSON.stringify(serializeWitnessesForBackend(selectedWitnesses)));
 
     return fd;
   };
@@ -918,7 +911,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
    */
   const persistNewPersons = async (
     list: ContractGuarantor[],
-    label: "fiador" | "codevedor"
+    label: "fiador" | "codevedor" | "testemunha"
   ): Promise<number[]> => {
     const finalIds: number[] = [];
 
@@ -1029,21 +1022,23 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
 
     let finalGuarantorIds: number[] = [];
     let finalCodebtorIds: number[]  = [];
+    let finalWitnessIds: number[]   = [];
     try {
       // 1️⃣ Persiste pessoas marcadas como "Novo" em CADA papel antes de enviar
       // o contrato. Os IDs retornados (existentes + recém-criados) entram no
       // FormData para o backend sincronizar a pivot por papel.
       finalGuarantorIds = await persistNewPersons(selectedGuarantors, "fiador");
       finalCodebtorIds  = await persistNewPersons(selectedCodebtors,  "codevedor");
+      finalWitnessIds   = await persistNewPersons(selectedWitnesses,  "testemunha");
     } catch (err) {
       setSubmitting(false);
-      toast.error(extractFirstError(err, "Falha ao gravar fiador/codevedor novo(s) — verifique os dados."));
+      toast.error(extractFirstError(err, "Falha ao gravar pessoa(s) — verifique os dados."));
       return;
     }
 
     // 2️⃣ Salva o contrato com os IDs prontos
     const url = editingId ? `/contracts/${editingId}` : "/contracts";
-    const fd = buildFormData(finalGuarantorIds, finalCodebtorIds);
+    const fd = buildFormData(finalGuarantorIds, finalCodebtorIds, finalWitnessIds);
     if (editingId) fd.append("_method", "PUT");
 
     router.post(url, fd, {
@@ -2621,7 +2616,12 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                         </span>
                       </div>
 
-                      {/* 🚀 TESTEMUNHAS — 1:N simples (nome + CPF) */}
+                      {/* 🚀 TESTEMUNHAS — agora usam o cadastro mestre de Pessoas
+                          (mesma pivot contract_guarantor, role='TESTEMUNHA').
+                          Reusa o componente VinculoPessoaList com os mesmos
+                          callbacks dos Fiadores/Codevedores; o modal de
+                          busca/criação rápida é compartilhado e diferencia
+                          o papel pelo campo `target`. */}
                       <div
                         style={{
                           border: "1px solid #e5e7eb",
@@ -2637,118 +2637,41 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                           <label className="sigx-label" style={{ margin: 0, display: "flex", alignItems: "center", gap: 4 }}>
                             <Users size={12} style={{ color: "#0d9488" }} /> TESTEMUNHAS
                           </label>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setSelectedWitnesses((prev) => [
-                                ...prev,
-                                { localId: newLocalId(), name: "", cpf: "", ci: "" },
-                              ])
-                            }
-                            className="btn-primary"
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 6,
-                              padding: "7px 14px",
-                              fontSize: 11,
-                            }}
-                          >
-                            <Plus size={12} /> Adicionar Testemunha
-                          </button>
+                          <span style={{ fontSize: 10, color: "#64748b" }}>
+                            {selectedWitnesses.length} vinculada(s)
+                          </span>
                         </div>
 
-                        {selectedWitnesses.length === 0 ? (
-                          <div
-                            style={{
-                              padding: "18px 12px",
-                              textAlign: "center",
-                              fontSize: 11,
-                              color: "#94a3b8",
-                              background: "#f8fafc",
-                              borderRadius: 6,
-                              border: "1px dashed #e2e8f0",
-                            }}
-                          >
-                            Nenhuma testemunha cadastrada. Clique em &quot;Adicionar Testemunha&quot; para incluir.
-                          </div>
-                        ) : (
-                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                            {selectedWitnesses.map((w, idx) => (
-                              <div
-                                key={w.localId}
-                                style={{
-                                  display: "grid",
-                                  gridTemplateColumns: "1fr minmax(120px, 160px) minmax(160px, 220px) 36px",
-                                  gap: 8,
-                                  alignItems: "end",
-                                }}
-                              >
-                                <div>
-                                  <label className="sigx-label">NOME</label>
-                                  <input
-                                    className="sigx-input"
-                                    value={w.name}
-                                    onChange={(e) =>
-                                      setSelectedWitnesses((prev) =>
-                                        prev.map((item, i) =>
-                                          i === idx ? { ...item, name: e.target.value } : item
-                                        )
-                                      )
-                                    }
-                                    placeholder="Nome completo da testemunha"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="sigx-label">CI (RG)</label>
-                                  <input
-                                    className="sigx-input"
-                                    value={w.ci ?? ""}
-                                    onChange={(e) =>
-                                      setSelectedWitnesses((prev) =>
-                                        prev.map((item, i) =>
-                                          i === idx ? { ...item, ci: e.target.value } : item
-                                        )
-                                      )
-                                    }
-                                    placeholder="Ex: MG-8.421.530"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="sigx-label">CPF</label>
-                                  <input
-                                    className="sigx-input"
-                                    value={w.cpf}
-                                    onChange={(e) =>
-                                      setSelectedWitnesses((prev) =>
-                                        prev.map((item, i) =>
-                                          i === idx ? { ...item, cpf: maskCPF(e.target.value) } : item
-                                        )
-                                      )
-                                    }
-                                    placeholder="000.000.000-00"
-                                    inputMode="numeric"
-                                  />
-                                </div>
-                                <button
-                                  type="button"
-                                  className="btn-icon"
-                                  title="Remover testemunha"
-                                  style={{ color: "#dc2626", marginBottom: 2 }}
-                                  onClick={() =>
-                                    setSelectedWitnesses((prev) => prev.filter((_, i) => i !== idx))
-                                  }
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        <span style={{ fontSize: 10, color: "#94a3b8", lineHeight: 1.5 }}>
-                          Testemunhas são gravadas junto com o contrato. Ao remover uma linha, ela será excluída no próximo salvamento.
-                        </span>
+                        <VinculoPessoaList
+                          type="TESTEMUNHA"
+                          data={selectedWitnesses as VinculoPessoaItem[]}
+                          onRemove={(idx) =>
+                            setSelectedWitnesses((prev) => prev.filter((_, i) => i !== idx))
+                          }
+                          clientId={form.clientId || null}
+                          suggested={suggestedGuarantors}
+                          onAddSuggested={(g) => addPersonFromDb(g, "TESTEMUNHA")}
+                          onOpenCreate={() => {
+                            setVinculoTabActive("TESTEMUNHA");
+                            setQuickModalState({ open: true, mode: "create", target: "TESTEMUNHA" });
+                          }}
+                          onOpenSearch={() => {
+                            setVinculoTabActive("TESTEMUNHA");
+                            setSearchModalOpen(true);
+                          }}
+                          onOpenEditNew={(idx, item) => {
+                            setVinculoTabActive("TESTEMUNHA");
+                            setQuickModalState({
+                              open: true,
+                              mode: "edit-new",
+                              editIndex: idx,
+                              initialValue: item.formValues ?? EMPTY_GUARANTOR_FORM,
+                              target: "TESTEMUNHA",
+                            });
+                          }}
+                          onOpenView={(id) => openGuarantorViewModal(id, "TESTEMUNHA")}
+                          formatDocument={formatGuarantorDocument}
+                        />
                       </div>
 
                       <div>

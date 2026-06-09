@@ -77,18 +77,18 @@ class UpdateGuarantorRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'personType.required'           => 'Selecione se o fiador é Pessoa Física ou Jurídica.',
-            'name.required'                 => 'Informe o nome do fiador (ou Razão Social).',
+            'personType.required'           => 'Selecione se a pessoa é Pessoa Física ou Jurídica.',
+            'name.required'                 => 'Informe o nome da pessoa (ou Razão Social).',
 
-            'cpf.required_if'               => 'Informe o CPF do fiador.',
+            'cpf.required_if'               => 'Informe o CPF da pessoa.',
             'cpf.size'                      => 'O CPF deve conter 11 dígitos numéricos.',
-            'cpf.unique'                    => 'Já existe outro fiador cadastrado com este CPF.',
+            'cpf.unique'                    => 'Já existe outra pessoa cadastrada com este CPF.',
             'nationality.required_if'       => 'Informe a nacionalidade.',
             'maritalStatus.required_if'     => 'Informe o estado civil.',
 
             'cnpj.required_if'              => 'Informe o CNPJ da empresa.',
             'cnpj.size'                     => 'O CNPJ deve conter 14 dígitos numéricos.',
-            'cnpj.unique'                   => 'Já existe outro fiador cadastrado com este CNPJ.',
+            'cnpj.unique'                   => 'Já existe outra pessoa cadastrada com este CNPJ.',
             'tradeName.required_if'         => 'Informe o Nome Fantasia.',
 
             'state.size'                    => 'A UF deve ter 2 caracteres (ex: MG).',

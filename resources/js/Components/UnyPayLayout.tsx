@@ -16,7 +16,7 @@ const NAV_SECTIONS = [
       { href: "/lancamentos",    label: "Lançamentos",         icon: List },
       { href: "/clients",        label: "Clientes",            icon: Users },
       { href: "/credores",       label: "Credores",            icon: Landmark },
-      { href: "/fiadores",       label: "Fiador / Codevedor",  icon: Handshake },
+      { href: "/pessoas",        label: "Pessoas",             icon: Handshake },
       { href: "/contracts",      label: "Contratos",           icon: FileText },
       { href: "/ai-ingestion",   label: "Ingestão com IA",     icon: Sparkles },
       { href: "/pagamentos",     label: "Pagamentos",          icon: CreditCard },
@@ -54,7 +54,7 @@ function getPageTitle(url: string) {
   if (url === "/clients") return "Clientes";
   if (url.startsWith("/clients/")) return "Detalhe do Cliente";
   if (url === "/credores") return "Credores";
-  if (url === "/fiadores") return "Fiador / Codevedor";
+  if (url === "/pessoas" || url === "/fiadores") return "Pessoas";
   if (url.startsWith("/contracts/") && url.endsWith("/price")) return "Tabela Price";
   if (url.startsWith("/contracts/")) return "Detalhe do Contrato";
   if (url === "/contracts") return "Contratos";
@@ -76,7 +76,7 @@ function getBreadcrumb(url: string) {
   if (url === "/clients") return [base, { label: "Clientes" }];
   if (url.startsWith("/clients/")) return [base, { label: "Clientes", href: "/clients" }, { label: "Detalhe" }];
   if (url === "/credores") return [base, { label: "Credores" }];
-  if (url === "/fiadores") return [base, { label: "Fiador / Codevedor" }];
+  if (url === "/pessoas" || url === "/fiadores") return [base, { label: "Pessoas" }];
   if (url.startsWith("/contracts/") && url.endsWith("/price")) return [base, { label: "Contratos", href: "/contracts" }, { label: "Tabela Price" }];
   if (url.startsWith("/contracts/")) return [base, { label: "Contratos", href: "/contracts" }, { label: "Detalhe" }];
   if (url === "/contracts") return [base, { label: "Contratos" }];
@@ -117,6 +117,7 @@ export default function UnyPayLayout({ children }: { children: React.ReactNode }
     "/contracts",
     "/clients",
     "/credores",
+    "/pessoas",
     "/fiadores",
     "/simulacoes",
   ].includes(pathname);
