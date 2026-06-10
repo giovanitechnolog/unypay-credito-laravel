@@ -36,6 +36,7 @@ class GuarantorsExport implements FromCollection, WithHeadings
                 $clientes ?: '—',
                 (int) ($g->fiadores_count ?? 0),
                 (int) ($g->codevedores_count ?? 0),
+                (int) ($g->testemunhas_count ?? 0),
             ];
         });
     }
@@ -43,7 +44,7 @@ class GuarantorsExport implements FromCollection, WithHeadings
     public function headings(): array
     {
         return [
-            'Fiador',
+            'Pessoa',
             'Tipo',
             'Documento',
             'RG / IE',
@@ -55,6 +56,7 @@ class GuarantorsExport implements FromCollection, WithHeadings
             'Clientes Vinculados',
             'Vínculo Fiador',
             'Vínculo Codevedor',
+            'Vínculo Testemunha',
         ];
     }
 }

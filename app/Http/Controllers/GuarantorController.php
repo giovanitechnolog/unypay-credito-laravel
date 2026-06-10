@@ -28,7 +28,7 @@ class GuarantorController extends Controller
     {
         $rows = $this->buildGuarantorsForExport($request);
 
-        return Excel::download(new GuarantorsExport($rows), 'fiadores.xlsx');
+        return Excel::download(new GuarantorsExport($rows), 'pessoas.xlsx');
     }
 
     /**
@@ -45,8 +45,9 @@ class GuarantorController extends Controller
                 ->with(['clients:id,name'])
                 ->withCount('clients')
                 ->withCount([
-                    'contracts as fiadores_count'    => fn ($q) => $q->where('contract_guarantor.role', 'FIADOR'),
-                    'contracts as codevedores_count' => fn ($q) => $q->where('contract_guarantor.role', 'CODEVEDOR'),
+                    'contracts as fiadores_count'     => fn ($q) => $q->where('contract_guarantor.role', 'FIADOR'),
+                    'contracts as codevedores_count'  => fn ($q) => $q->where('contract_guarantor.role', 'CODEVEDOR'),
+                    'contracts as testemunhas_count' => fn ($q) => $q->where('contract_guarantor.role', 'TESTEMUNHA'),
                 ]),
             $search
         );
@@ -64,8 +65,9 @@ class GuarantorController extends Controller
             Guarantor::query()
                 ->with(['clients:id,name'])
                 ->withCount([
-                    'contracts as fiadores_count'    => fn ($q) => $q->where('contract_guarantor.role', 'FIADOR'),
-                    'contracts as codevedores_count' => fn ($q) => $q->where('contract_guarantor.role', 'CODEVEDOR'),
+                    'contracts as fiadores_count'     => fn ($q) => $q->where('contract_guarantor.role', 'FIADOR'),
+                    'contracts as codevedores_count'  => fn ($q) => $q->where('contract_guarantor.role', 'CODEVEDOR'),
+                    'contracts as testemunhas_count' => fn ($q) => $q->where('contract_guarantor.role', 'TESTEMUNHA'),
                 ]),
             $search
         )->orderBy('name')->get();
@@ -123,7 +125,7 @@ class GuarantorController extends Controller
         $guarantor->load(['clients:id,name'])->loadCount('clients');
 
         return response()->json([
-            'message'   => 'Fiador cadastrado com sucesso.',
+            'message'   => 'Pessoa cadastrada com sucesso.',
             'guarantor' => $guarantor,
         ], 201);
     }
@@ -148,7 +150,7 @@ class GuarantorController extends Controller
         $guarantor->load(['clients:id,name'])->loadCount('clients');
 
         return response()->json([
-            'message'   => 'Fiador atualizado com sucesso.',
+            'message'   => 'Pessoa atualizada com sucesso.',
             'guarantor' => $guarantor,
         ]);
     }
@@ -163,7 +165,7 @@ class GuarantorController extends Controller
         $guarantor->delete();
 
         return response()->json([
-            'message' => 'Fiador removido com sucesso.',
+            'message' => 'Pessoa removida com sucesso.',
         ]);
     }
 
