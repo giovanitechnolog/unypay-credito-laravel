@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { User, Building2, CheckCircle2 } from "lucide-react";
+import { User, Building2, CheckCircle2, Mail, Phone } from "lucide-react";
+import { maskPhone } from "../lib/masks";
 
 /**
  * Tipo de pessoa do fiador (PF ou PJ).
@@ -14,6 +15,9 @@ export type PersonType = "PF" | "PJ";
 export interface GuarantorFormValues {
   personType: PersonType;
   name: string;
+  // Contato — comuns a PF e PJ
+  email: string;
+  phone: string;
   // PF
   nationality: string;
   maritalStatus: string;
@@ -36,8 +40,13 @@ export interface GuarantorFormValues {
 export const EMPTY_GUARANTOR_FORM: GuarantorFormValues = {
   personType: "PF",
   name: "",
+  email: "",
+  phone: "",
   nationality: "Brasileiro",
-  maritalStatus: "",
+  // 🚀 Default explícito conforme regra de negócio: novas pessoas sem estado
+  // civil definido entram como "Não Informado" — bate com a opção do enum
+  // do <select> (case-sensitive) e satisfaz a validação `required` do modal.
+  maritalStatus: "Não Informado",
   cpf: "",
   rg: "",
   cnpj: "",
@@ -252,6 +261,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
           value={value.name}
           onChange={(e) => set("name", e.target.value)}
           required
+          maxLength={255}
           readOnly={readOnly}
           style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
         />
@@ -269,6 +279,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
                 value={value.nationality}
                 onChange={(e) => set("nationality", e.target.value)}
                 required
+                maxLength={80}
                 readOnly={readOnly}
                 style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
               />
@@ -313,6 +324,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
                 placeholder="MG-00.000.000"
                 value={value.rg}
                 onChange={(e) => set("rg", e.target.value)}
+                maxLength={20}
                 readOnly={readOnly}
                 style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
               />
@@ -332,6 +344,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
               value={value.tradeName}
               onChange={(e) => set("tradeName", e.target.value)}
               required
+              maxLength={255}
               readOnly={readOnly}
               style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
             />
@@ -359,6 +372,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
                 placeholder='Número ou "ISENTO"'
                 value={value.stateRegistration}
                 onChange={(e) => set("stateRegistration", e.target.value)}
+                maxLength={30}
                 readOnly={readOnly}
                 style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
               />
@@ -366,6 +380,40 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
           </div>
         </>
       )}
+
+      {/* ── Contato (comum a PF e PJ) ───────────────────────── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div>
+          <label className="sigx-label" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <Mail size={11} style={{ color: "#0d9488" }} /> E-MAIL
+          </label>
+          <input
+            type="email"
+            className="sigx-input"
+            placeholder="email@exemplo.com"
+            value={value.email}
+            onChange={(e) => set("email", e.target.value)}
+            maxLength={255}
+            readOnly={readOnly}
+            style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+          />
+        </div>
+        <div>
+          <label className="sigx-label" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <Phone size={11} style={{ color: "#0d9488" }} /> TELEFONE
+          </label>
+          <input
+            type="text"
+            className="sigx-input mono"
+            placeholder="(00) 00000-0000"
+            value={value.phone}
+            onChange={(e) => set("phone", maskPhone(e.target.value))}
+            maxLength={20}
+            readOnly={readOnly}
+            style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+          />
+        </div>
+      </div>
 
       {/* ── Endereço (comum aos dois tipos) ─────────────────── */}
       <div
@@ -404,6 +452,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
             className="sigx-input"
             value={value.street}
             onChange={(e) => set("street", e.target.value)}
+            maxLength={255}
             readOnly={readOnly}
             style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
           />
@@ -415,6 +464,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
             className="sigx-input"
             value={value.number}
             onChange={(e) => set("number", e.target.value)}
+            maxLength={20}
             readOnly={readOnly}
             style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
           />
@@ -426,6 +476,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
             className="sigx-input"
             value={value.neighborhood}
             onChange={(e) => set("neighborhood", e.target.value)}
+            maxLength={120}
             readOnly={readOnly}
             style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
           />
@@ -437,6 +488,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
             className="sigx-input"
             value={value.complement}
             onChange={(e) => set("complement", e.target.value)}
+            maxLength={255}
             readOnly={readOnly}
             style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
           />
@@ -451,6 +503,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
             className="sigx-input"
             value={value.city}
             onChange={(e) => set("city", e.target.value)}
+            maxLength={120}
             readOnly={readOnly}
             style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
           />

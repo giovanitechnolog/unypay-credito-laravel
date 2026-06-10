@@ -31,6 +31,7 @@ import {
   AssetFormValues,
   maskArea,
 } from "../Components/AssetFormFields";
+import { findGuarantorByDocument } from "../lib/documentValidation";
 import { api, extractFirstError } from "../lib/api";
 import { downloadExcelWithState } from "../lib/exportHelper";
 import { useColumnVisibility } from "../hooks/useColumnVisibility";
@@ -507,6 +508,17 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     []
   );
 
+  /** Análogo a `setterFor` mas devolve a lista atual — usado em assertions
+   *  síncronas (ex.: verificar duplicidade antes de inserir). */
+  const listForTarget = useCallback(
+    (target: VinculoPessoaType): ContractGuarantor[] => {
+      if (target === "CODEVEDOR")  return selectedCodebtors;
+      if (target === "TESTEMUNHA") return selectedWitnesses;
+      return selectedGuarantors;
+    },
+    [selectedGuarantors, selectedCodebtors, selectedWitnesses]
+  );
+
   /**
    * Adiciona uma pessoa do banco à lista correta (Fiadores OU Codevedores).
    * Usado tanto pelos chips "Sugeridos" quanto pelo modal de busca.
@@ -548,6 +560,8 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       const initialValue: Partial<GuarantorFormValues> = {
         personType: g.personType,
         name: g.name ?? "",
+        email: g.email ?? "",
+        phone: g.phone ?? "",
         nationality: g.nationality ?? "",
         maritalStatus: g.maritalStatus ?? "",
         cpf: g.cpf ? maskCPF(g.cpf) : "",
@@ -930,6 +944,8 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
       const basePayload = {
         personType: fv.personType,
         name: fv.name,
+        email: fv.email?.trim() ? fv.email.trim() : null,
+        phone: fv.phone ? onlyDigits(fv.phone) : null,
         street: fv.street,
         number: fv.number,
         complement: fv.complement,
@@ -2775,9 +2791,10 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
         mode={quickModalState.mode}
         initialValue={quickModalState.initialValue}
         onClose={() => setQuickModalState({ open: false, mode: "create", target: vinculoTabActive })}
-        onConfirm={(values) => {
+        onConfirm={async (values) => {
           const target = quickModalState.target;
           const setList = setterFor(target);
+          const docDigits = values.personType === "PJ" ? onlyDigits(values.cnpj) : onlyDigits(values.cpf);
 
           if (quickModalState.mode === "edit-new" && typeof quickModalState.editIndex === "number") {
             const idx = quickModalState.editIndex;
@@ -2788,26 +2805,59 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                       ...it,
                       name: values.name,
                       personType: values.personType,
-                      document: values.personType === "PJ" ? onlyDigits(values.cnpj) : onlyDigits(values.cpf),
+                      document: docDigits,
                       formValues: values,
                     }
                   : it
               )
             );
-          } else {
-            // Novo on-the-fly
-            setList((prev) => [
-              ...prev,
-              {
-                localId: newLocalId(),
-                isFromDb: false,
-                name: values.name,
-                personType: values.personType,
-                document: values.personType === "PJ" ? onlyDigits(values.cnpj) : onlyDigits(values.cpf),
-                formValues: values,
-              },
-            ]);
+            setQuickModalState({ open: false, mode: "create", target: vinculoTabActive });
+            return;
           }
+
+          // 🚀 Deduplicação on-the-fly — antes de inserir como "Novo",
+          // consulta o catálogo de Pessoas pelo documento. Se já existir,
+          // vinculamos diretamente como "Cadastrado" (isFromDb=true)
+          // evitando duplicatas no banco e respeitando o índice unique
+          // em `guarantors.cpf`/`cnpj`.
+          const existing = await findGuarantorByDocument(docDigits);
+          if (existing) {
+            // Evita duplicidade dentro do papel quando o operador adiciona
+            // alguém que já estava vinculado pelo modal de busca.
+            const currentList = listForTarget(target);
+            const alreadyLinked = currentList.some((it) => it.isFromDb && it.id === existing.id);
+            if (alreadyLinked) {
+              toast.info(`${existing.name} já está vinculado(a) a este contrato.`);
+            } else {
+              setList((prev) => [
+                ...prev,
+                {
+                  localId: newLocalId(),
+                  id: existing.id,
+                  isFromDb: true,
+                  name: existing.name,
+                  personType: existing.personType,
+                  document: existing.document,
+                },
+              ]);
+              toast.success(`Pessoa já cadastrada — vinculando ${existing.name} ao contrato.`);
+            }
+            setQuickModalState({ open: false, mode: "create", target: vinculoTabActive });
+            return;
+          }
+
+          // Documento não cadastrado: prossegue com fluxo de "Novo on-the-fly".
+          setList((prev) => [
+            ...prev,
+            {
+              localId: newLocalId(),
+              isFromDb: false,
+              name: values.name,
+              personType: values.personType,
+              document: docDigits,
+              formValues: values,
+            },
+          ]);
           setQuickModalState({ open: false, mode: "create", target: vinculoTabActive });
         }}
       />

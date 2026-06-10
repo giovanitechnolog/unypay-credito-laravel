@@ -220,6 +220,55 @@ class GuarantorController extends Controller
     }
 
     /**
+     * GET /api/guarantors/find-by-document?document=XXXXXXXXXXX
+     *
+     * Lookup EXATO por documento (apenas dígitos). Espelha o shape do
+     * /search (`GuarantorLite`) para que o front possa reusar o mesmo
+     * fluxo de "adicionar pessoa do banco" com o resultado.
+     *
+     * Comportamento:
+     *  - CPF: documento de 11 dígitos → procura em `guarantors.cpf`
+     *  - CNPJ: documento de 14 dígitos → procura em `guarantors.cnpj`
+     *  - Qualquer outro tamanho → 422 (documento inválido)
+     *  - Sem match → 200 com `{ "guarantor": null }`
+     *  - Match    → 200 com `{ "guarantor": { id, name, personType, document } }`
+     *
+     * Usado para deduplicação on-the-fly nas telas de Contratos e
+     * Ingestão IA: quando o operador (ou a IA) tenta criar uma pessoa
+     * com um CPF/CNPJ já cadastrado, o front automaticamente substitui
+     * a entrada "Nova" pela já existente no banco.
+     */
+    public function findByDocument(Request $request): JsonResponse
+    {
+        $digits = preg_replace('/\D/', '', (string) $request->input('document', ''));
+
+        if (!in_array(strlen($digits), [11, 14], true)) {
+            return response()->json([
+                'error' => 'Informe um CPF (11 dígitos) ou CNPJ (14 dígitos) válido.',
+            ], 422);
+        }
+
+        $isCpf = strlen($digits) === 11;
+        $match = Guarantor::query()
+            ->select(['id', 'name', 'personType', 'cpf', 'cnpj'])
+            ->where($isCpf ? 'cpf' : 'cnpj', $digits)
+            ->first();
+
+        if (!$match) {
+            return response()->json(['guarantor' => null]);
+        }
+
+        return response()->json([
+            'guarantor' => [
+                'id'         => $match->id,
+                'name'       => $match->name,
+                'personType' => $match->personType,
+                'document'   => $match->personType === 'PJ' ? $match->cnpj : $match->cpf,
+            ],
+        ]);
+    }
+
+    /**
      * GET /api/guarantors-clients-lookup — devolve clientes (id,name,document)
      * para alimentar o multi-select no formulário do modal.
      */

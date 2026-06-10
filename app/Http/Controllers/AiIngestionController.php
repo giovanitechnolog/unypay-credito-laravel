@@ -480,10 +480,27 @@ PROMPT;
      */
     private function upsertGuarantor(array $person, string $role): ?int
     {
-        $isWitness = $role === Contract::ROLE_TESTEMUNHA;
+        // 🚀 Fast-path: quando o frontend envia `id`, a pessoa já existe no
+        // cadastro (foi selecionada via GuarantorSearchModal). Validamos a
+        // existência e reusamos diretamente, sem buscar por documento.
+        // Isso espelha o comportamento da tela de Contratos, onde fiadores
+        // "isFromDb=true" entram no payload apenas como ID.
+        if (!empty($person['id']) && is_numeric($person['id'])) {
+            $existsId = DB::table('guarantors')->where('id', (int) $person['id'])->value('id');
+            if ($existsId) {
+                return (int) $existsId;
+            }
+        }
 
-        // Testemunhas vêm com schema enxuto — força PF e defaults legais.
-        $personType = $isWitness ? 'PF' : strtoupper((string)($person['personType'] ?? 'PF'));
+        // 🚀 Após a unificação de "Pessoas", testemunhas também podem ser PJ
+        // (espelha o comportamento da tela de Contratos, onde os três papéis
+        // usam o mesmo cadastro mestre). Respeitamos o `personType` enviado
+        // pelo front; quando ausente — caso do schema enxuto da IA, que só
+        // traz nome/documento/rg — caímos no default PF.
+        // O parâmetro `$role` continua disponível para uso futuro (auditoria,
+        // logs, regras específicas por papel), apesar de já não fazer
+        // bifurcação de defaults aqui.
+        $personType = strtoupper((string)($person['personType'] ?? 'PF'));
         if (!in_array($personType, ['PF', 'PJ'], true)) {
             $personType = 'PF';
         }
@@ -523,12 +540,18 @@ PROMPT;
 
         if ($personType === 'PF') {
             $payload['cpf']           = $docClean !== '' && strlen($docClean) === 11 ? $docClean : null;
-            $payload['nationality']   = $isWitness
-                ? 'Brasileiro'
-                : (!empty($person['nacionalidade']) ? $person['nacionalidade'] : 'Brasileiro');
-            $payload['maritalStatus'] = $isWitness
-                ? 'Não informado'
-                : (!empty($person['estado_civil']) ? $person['estado_civil'] : 'Não informado');
+            // 🚀 Como o cadastro de pessoas é unificado (mesma tabela `guarantors`
+            // para fiadores, codevedores e testemunhas), respeitamos os valores
+            // explicitamente informados pelo operador no modal. Quando ausentes,
+            // caímos em defaults sensatos — "Brasileiro" para nacionalidade,
+            // "Não informado" para estado civil — para satisfazer o NOT NULL/
+            // expectativa downstream do banco.
+            $payload['nationality']   = !empty($person['nacionalidade'])
+                ? $person['nacionalidade']
+                : (!empty($person['nationality']) ? $person['nationality'] : 'Brasileiro');
+            $payload['maritalStatus'] = !empty($person['estado_civil'])
+                ? $person['estado_civil']
+                : (!empty($person['maritalStatus']) ? $person['maritalStatus'] : 'Não informado');
         } else {
             $payload['cnpj']               = $docClean !== '' && strlen($docClean) === 14 ? $docClean : null;
             $payload['tradeName']          = $person['tradeName']           ?? null;
