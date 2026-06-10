@@ -3,17 +3,62 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Rules\Cpf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class UserController extends Controller
 {
     private const PHOTO_DIR = 'users/photos';
+
+    /**
+     * Limites de tamanho por campo, espelhando exatamente o schema da
+     * tabela `users` (migrations 0001 + add_cadastro_fields). Centralizados
+     * aqui para que controller, attributes() e mensagens fiquem em sincronia
+     * — e para tornar trivial a manutenção quando a coluna mudar.
+     */
+    private const LIMITS = [
+        'name'      => 255,   // text na DDL, mas regulamos UX em 255
+        'email'     => 320,   // string(320) — RFC 5321
+        'password'  => 255,   // limite de bcrypt usável
+        'cpf'       => 14,    // 000.000.000-00 → guardado sem máscara, 11 dígitos
+        'rg'        => 20,
+        'phone'     => 15,    // (00) 00000-0000 → guardado sem máscara, até 11 dígitos
+        'gender'    => 20,
+    ];
+
+    /**
+     * Nomes amigáveis em PT-BR para os :attribute das mensagens automáticas
+     * do validation.php. Compartilhado entre store() e update() para garantir
+     * consistência. Inclui também as chaves de confirmação (regra `confirmed`
+     * do Laravel espera `email_confirmation` / `password_confirmation`).
+     */
+    private function attributes(): array
+    {
+        return [
+            'name'                  => 'nome completo',
+            'email'                 => 'e-mail',
+            'email_confirmation'    => 'confirmação de e-mail',
+            'password'              => 'nova senha',
+            'password_confirmation' => 'confirmação da nova senha',
+            'current_password'      => 'senha atual',
+            'role'                  => 'nível de permissão',
+            'status'                => 'status operacional',
+            'photo'                 => 'foto',
+            'cpf'                   => 'CPF',
+            'rg'                    => 'RG',
+            'phone'                 => 'telefone',
+            'birthDate'             => 'data de nascimento',
+            'gender'                => 'gênero',
+        ];
+    }
 
     /**
      * Renderiza a página /usuarios via Inertia.
@@ -53,22 +98,32 @@ class UserController extends Controller
 
     /**
      * POST /api/users — cria um novo usuário administrativo.
+     *
+     * Camadas de segurança:
+     *   • email  → exige `email_confirmation` casando (regra `confirmed`).
+     *   • senha  → exige `password_confirmation` casando (regra `confirmed`).
+     *   • CPF    → valida algoritmo dos dois dígitos verificadores (Rule Cpf).
+     *   • limites → todos os max:N espelham o schema (self::LIMITS).
      */
     public function store(Request $request): JsonResponse
     {
-        $request->validate([
-            'name'      => 'required|string|max:255',
-            'email'     => 'required|email|unique:users,email',
-            'password'  => 'required|string|min:6',
-            'role'      => 'required|in:user,admin',
-            'status'    => 'required|in:Ativo,Inativo',
-            'photo'     => 'nullable|file|image|max:2048',
-            'cpf'       => 'nullable|string|max:14|unique:users,cpf',
-            'rg'        => 'nullable|string|max:20',
-            'phone'     => 'nullable|string|max:15',
-            'birthDate' => 'nullable|date',
-            'gender'    => 'nullable|string|max:20',
-        ]);
+        $rules = [
+            'name'                  => ['required', 'string', 'max:' . self::LIMITS['name']],
+            'email'                 => ['required', 'email', 'max:' . self::LIMITS['email'], 'confirmed', 'unique:users,email'],
+            'email_confirmation'    => ['required', 'email', 'max:' . self::LIMITS['email']],
+            'password'              => ['required', 'string', 'min:6', 'max:' . self::LIMITS['password'], 'confirmed'],
+            'password_confirmation' => ['required', 'string'],
+            'role'                  => ['required', Rule::in(['user', 'admin'])],
+            'status'                => ['required', Rule::in(['Ativo', 'Inativo'])],
+            'photo'                 => ['nullable', 'file', 'image', 'max:2048'],
+            'cpf'                   => ['nullable', 'string', 'max:' . self::LIMITS['cpf'], new Cpf(), 'unique:users,cpf'],
+            'rg'                    => ['nullable', 'string', 'max:' . self::LIMITS['rg']],
+            'phone'                 => ['nullable', 'string', 'max:' . self::LIMITS['phone']],
+            'birthDate'             => ['nullable', 'date'],
+            'gender'                => ['nullable', 'string', 'max:' . self::LIMITS['gender']],
+        ];
+
+        $request->validate($rules, $this->messages(), $this->attributes());
 
         $photoPath = null;
         if ($request->hasFile('photo')) {
@@ -82,7 +137,7 @@ class UserController extends Controller
             'created_by'   => Auth::id(),
             'name'         => $request->input('name'),
             'email'        => Str::lower($request->input('email')),
-            'password'     => $request->input('password'), 
+            'password'     => $request->input('password'),
             'photo'        => $photoPath,
             'role'         => $request->input('role', 'user'),
             'status'       => $request->input('status', 'Ativo'),
@@ -97,30 +152,78 @@ class UserController extends Controller
 
         return response()->json([
             'message' => 'Usuário criado com sucesso.',
-            'user'    => $user->append('photoUrl'), // 🚀 Injeta a URL virtual amigável na resposta imediata
+            'user'    => $user->append('photoUrl'),
         ], 201);
     }
 
     /**
      * PUT/POST /api/users/{id} — atualiza a ficha do operador.
+     *
+     * Camadas de segurança específicas da edição:
+     *   • email_confirmation só é exigida se o e-mail mudou em relação ao
+     *     valor atual do usuário (digitar tudo de novo seria UX ruim).
+     *   • password é totalmente OPCIONAL: se vazio, mantém a senha atual.
+     *     Quando o operador envia uma nova senha, exige:
+     *       - current_password (validada via Hash::check)
+     *       - password_confirmation casando com password
+     *     Se NENHUM dos três campos foi enviado, ignora todo o bloco.
      */
     public function update(Request $request, int $id): JsonResponse
     {
         $user = User::findOrFail($id);
 
-        $request->validate([
-            'name'      => 'required|string|max:255',
-            'email'     => 'required|email|unique:users,email,' . $user->id,
-            'password'  => 'nullable|string|min:6',
-            'role'      => 'required|in:user,admin',
-            'status'    => 'required|in:Ativo,Inativo',
-            'photo'     => 'nullable|file|image|max:2048',
-            'cpf'       => 'nullable|string|max:14|unique:users,cpf,' . $user->id,
-            'rg'        => 'nullable|string|max:20',
-            'phone'     => 'nullable|string|max:15',
-            'birthDate' => 'nullable|date',
-            'gender'    => 'nullable|string|max:20',
-        ]);
+        $emailChanged = Str::lower((string) $request->input('email'))
+            !== Str::lower((string) $user->email);
+
+        $changingPassword = $request->filled('password')
+            || $request->filled('password_confirmation')
+            || $request->filled('current_password');
+
+        $rules = [
+            'name'   => ['required', 'string', 'max:' . self::LIMITS['name']],
+            'email'  => [
+                'required',
+                'email',
+                'max:' . self::LIMITS['email'],
+                $emailChanged ? 'confirmed' : 'nullable',
+                Rule::unique('users', 'email')->ignore($user->id),
+            ],
+            'role'      => ['required', Rule::in(['user', 'admin'])],
+            'status'    => ['required', Rule::in(['Ativo', 'Inativo'])],
+            'photo'     => ['nullable', 'file', 'image', 'max:2048'],
+            'cpf'       => [
+                'nullable',
+                'string',
+                'max:' . self::LIMITS['cpf'],
+                new Cpf(),
+                Rule::unique('users', 'cpf')->ignore($user->id),
+            ],
+            'rg'        => ['nullable', 'string', 'max:' . self::LIMITS['rg']],
+            'phone'     => ['nullable', 'string', 'max:' . self::LIMITS['phone']],
+            'birthDate' => ['nullable', 'date'],
+            'gender'    => ['nullable', 'string', 'max:' . self::LIMITS['gender']],
+        ];
+
+        if ($emailChanged) {
+            $rules['email_confirmation'] = ['required', 'email', 'max:' . self::LIMITS['email']];
+        }
+
+        if ($changingPassword) {
+            $rules['current_password']      = ['required', 'string'];
+            $rules['password']               = ['required', 'string', 'min:6', 'max:' . self::LIMITS['password'], 'confirmed'];
+            $rules['password_confirmation']  = ['required', 'string'];
+        }
+
+        $request->validate($rules, $this->messages(), $this->attributes());
+
+        // Confere a senha atual ANTES de aplicar mudanças, para nunca trocar
+        // credenciais de alguém só porque a sessão dele estava aberta.
+        if ($changingPassword && ! Hash::check((string) $request->input('current_password'), (string) $user->password)) {
+            return response()->json([
+                'message' => 'A senha atual informada está incorreta.',
+                'errors'  => ['current_password' => ['A senha atual informada está incorreta.']],
+            ], 422);
+        }
 
         $cpf   = $request->input('cpf') ? preg_replace('/\D/', '', $request->input('cpf')) : null;
         $phone = $request->input('phone') ? preg_replace('/\D/', '', $request->input('phone')) : null;
@@ -137,7 +240,7 @@ class UserController extends Controller
             'gender'    => $request->input('gender'),
         ];
 
-        if ($request->filled('password')) {
+        if ($changingPassword) {
             $payload['password'] = $request->input('password');
         }
 
@@ -153,9 +256,32 @@ class UserController extends Controller
         $user->update($payload);
 
         return response()->json([
-            'message' => 'Usuário actualizado com sucesso.',
-            'user'    => $user->append('photoUrl'), // 🚀 Injeta a URL virtual amigável na resposta imediata
+            'message' => 'Usuário atualizado com sucesso.',
+            'user'    => $user->append('photoUrl'),
         ]);
+    }
+
+    /**
+     * Mensagens 100% PT-BR para as regras com nuance de domínio (regras
+     * básicas tipo `required`/`max` continuam vindo do
+     * `lang/pt_BR/validation.php` com :attribute amigável).
+     */
+    private function messages(): array
+    {
+        return [
+            'email.confirmed'                     => 'O e-mail e a confirmação de e-mail não conferem.',
+            'email.unique'                        => 'Este e-mail já está vinculado a outro operador.',
+            'email_confirmation.required'         => 'Confirme o e-mail digitando-o novamente.',
+            'password.confirmed'                  => 'A nova senha e a confirmação não conferem.',
+            'password_confirmation.required'      => 'Confirme a nova senha digitando-a novamente.',
+            'password.min'                        => 'A nova senha deve ter pelo menos :min caracteres.',
+            'current_password.required'           => 'Informe a senha atual para alterar a senha.',
+            'cpf.unique'                          => 'Este CPF já está vinculado a outro operador.',
+            'role.in'                             => 'Selecione um nível de permissão válido (Operador ou Diretor).',
+            'status.in'                           => 'Selecione um status válido (Ativo ou Inativo).',
+            'photo.image'                         => 'A foto deve ser uma imagem válida (JPG, PNG ou WEBP).',
+            'photo.max'                           => 'A foto não pode ultrapassar 2 MB.',
+        ];
     }
 
     /**

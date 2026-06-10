@@ -1,6 +1,48 @@
+import { api } from "./api";
+
 /** Remove tudo que não for dígito. */
 export const onlyDigits = (value: string | null | undefined): string =>
   (value ?? "").replace(/\D/g, "");
+
+/**
+ * Shape devolvido pelo endpoint /api/guarantors/find-by-document.
+ * Espelha o `GuarantorLite` usado pelo modal de busca, garantindo que o
+ * resultado da deduplicação possa ser plugado direto nos fluxos de
+ * "adicionar pessoa do banco" das telas de Contratos e Ingestão IA.
+ */
+export interface GuarantorMatch {
+  id: number;
+  name: string;
+  personType: "PF" | "PJ";
+  document: string | null;
+}
+
+/**
+ * Procura uma pessoa já cadastrada pelo documento exato (CPF ou CNPJ).
+ *
+ * - Retorna a pessoa quando há match.
+ * - Retorna `null` quando o documento é válido mas não existe ainda.
+ * - Retorna `null` (silencioso) em caso de erro de rede / 4xx — assim a
+ *   chamada nunca quebra o fluxo do operador (cai pra "criar como novo"
+ *   sem causar feedback negativo). Erros reais são logados no console.
+ */
+export async function findGuarantorByDocument(
+  document: string | null | undefined
+): Promise<GuarantorMatch | null> {
+  const digits = onlyDigits(document);
+  if (digits.length !== 11 && digits.length !== 14) return null;
+
+  try {
+    const { data } = await api.get<{ guarantor: GuarantorMatch | null }>(
+      "/api/guarantors/find-by-document",
+      { params: { document: digits } }
+    );
+    return data?.guarantor ?? null;
+  } catch (err) {
+    console.warn("[findGuarantorByDocument] lookup falhou", err);
+    return null;
+  }
+}
 
 /** Valida CPF pelo cálculo dos dígitos verificadores. */
 export function validateCPF(cpf: string): boolean {
