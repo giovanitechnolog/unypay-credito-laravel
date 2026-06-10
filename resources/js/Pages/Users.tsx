@@ -44,6 +44,61 @@ const maskPhone = (v: string) => {
   return v.replace(/(\d{2})(\d{4})(\d{4})/, "($1) $2-$3");
 };
 
+/**
+ * Limites de tamanho dos inputs, espelhando exatamente o schema da tabela
+ * `users` no banco. Compartilhado entre todos os <input maxLength={...} />
+ * da tela. Mudou no banco? Ajuste aqui (uma única fonte de verdade).
+ */
+const FIELD_MAX_LENGTH = {
+  name: 255,
+  email: 320,
+  password: 255,
+  cpf: 14,        // 000.000.000-00
+  rg: 20,
+  phone: 15,      // (00) 00000-0000
+  gender: 20,
+} as const;
+
+/**
+ * Validação de CPF — algoritmo oficial dos dois dígitos verificadores
+ * (Receita Federal). Aceita máscara ou só dígitos. Retorna true para CPF
+ * válido. CPFs com dígitos repetidos (ex.: 11111111111) são rejeitados.
+ *
+ * Mantemos esta validação no frontend ESPELHANDO `App\Rules\Cpf` no PHP,
+ * para feedback imediato ao operador. O backend também valida.
+ */
+const isValidCpf = (raw: string): boolean => {
+  const digits = (raw || "").replace(/\D/g, "");
+  if (digits.length !== 11) return false;
+  if (/^(\d)\1{10}$/.test(digits)) return false;
+  for (let t = 9; t < 11; t++) {
+    let sum = 0;
+    for (let i = 0; i < t; i++) {
+      sum += parseInt(digits[i], 10) * (t + 1 - i);
+    }
+    let rest = (sum * 10) % 11;
+    if (rest === 10) rest = 0;
+    if (rest !== parseInt(digits[t], 10)) return false;
+  }
+  return true;
+};
+
+/**
+ * Handlers que bloqueiam copiar/colar/cortar/arrastar nos campos
+ * sensíveis (confirmação de e-mail e senha). Garantem que o operador
+ * digite o valor de novo, manualmente, evitando colar um e-mail/senha
+ * errado(a) já presente no clipboard.
+ */
+const NO_PASTE_PROPS: React.InputHTMLAttributes<HTMLInputElement> = {
+  onPaste: (e) => e.preventDefault(),
+  onCopy:  (e) => e.preventDefault(),
+  onCut:   (e) => e.preventDefault(),
+  onDrop:  (e) => e.preventDefault(),
+  onDragOver: (e) => e.preventDefault(),
+  autoComplete: "off",
+  spellCheck: false,
+};
+
 export default function UsersPage() {
   const { auth } = usePage<any>().props;
   const currentUserId = auth?.user?.id ?? null;
@@ -57,13 +112,35 @@ export default function UsersPage() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [deleteModalUser, setDeleteModalUser] = useState<User | null>(null);
 
+  // 🚀 Estado do formulário expandido com os campos de SEGURANÇA:
+  //   • emailConfirmation: digitar o e-mail uma 2ª vez (paste/copy/cut bloqueados).
+  //   • currentPassword:    senha atual (necessária para alterar a senha em edição).
+  //   • password:           nova senha (opcional na edição).
+  //   • passwordConfirmation: confirma a nova senha (paste/copy/cut bloqueados).
+  // No payload são serializados como `email_confirmation`, `current_password` e
+  // `password_confirmation` (snake_case esperado pelo Laravel `confirmed`).
   const [formData, setFormData] = useState({
-    name: "", email: "", password: "", role: "user", status: "Ativo",
+    name: "", email: "", emailConfirmation: "",
+    currentPassword: "", password: "", passwordConfirmation: "",
+    role: "user", status: "Ativo",
     cpf: "", rg: "", phone: "", birthDate: "", gender: ""
   });
+  const [cpfError, setCpfError] = useState<string | null>(null);
+  // E-mail original do usuário em edição. Usado para detectar quando o
+  // operador alterou o e-mail e ativar/desativar a redigitação.
+  const [originalEmail, setOriginalEmail] = useState<string>("");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
+
+  // 🚀 Computeds — controlam visibilidade/obrigatoriedade dos campos
+  // sensíveis. Em edição, só exigimos redigitar o e-mail SE ele mudou,
+  // e só exigimos senha atual SE o operador começou a digitar uma nova.
+  const isEditing = !!selectedUser;
+  const emailChanged = isEditing && formData.email.trim().toLowerCase() !== originalEmail.toLowerCase();
+  const requireEmailConfirm = !isEditing || emailChanged;
+  const isChangingPassword =
+    !!formData.password || !!formData.passwordConfirmation || !!formData.currentPassword;
 
   const fetchUsers = useCallback(async (q = "") => {
     setLoading(true);
@@ -97,8 +174,12 @@ export default function UsersPage() {
 
   const openCreate = () => {
     setSelectedUser(null);
+    setOriginalEmail("");
+    setCpfError(null);
     setFormData({
-      name: "", email: "", password: "", role: "user", status: "Ativo",
+      name: "", email: "", emailConfirmation: "",
+      currentPassword: "", password: "", passwordConfirmation: "",
+      role: "user", status: "Ativo",
       cpf: "", rg: "", phone: "", birthDate: "", gender: ""
     });
     setPhotoFile(null);
@@ -109,10 +190,19 @@ export default function UsersPage() {
 
   const openEdit = (user: User) => {
     setSelectedUser(user);
+    setOriginalEmail(user.email ?? "");
+    setCpfError(null);
     setFormData({
       name: user.name,
       email: user.email,
+      // Em edição: pré-preenchemos a confirmação com o e-mail atual; o
+      // input fica desabilitado enquanto o e-mail não muda. Assim que o
+      // operador altera o e-mail, o efeito abaixo limpa esse campo e
+      // habilita a redigitação manual (sem paste).
+      emailConfirmation: user.email ?? "",
+      currentPassword: "",
       password: "",
+      passwordConfirmation: "",
       role: user.role,
       status: user.status ?? "Ativo",
       cpf: user.cpf ? maskCPF(user.cpf) : "",
@@ -126,6 +216,15 @@ export default function UsersPage() {
     setActiveFormTab("perfil");
     setFormOpen(true);
   };
+
+  // Quando o e-mail principal muda (em edição), limpamos a confirmação
+  // para forçar a redigitação manual. Em criação, deixa intocado.
+  useEffect(() => {
+    if (!isEditing) return;
+    if (emailChanged && formData.emailConfirmation === originalEmail) {
+      setFormData((p) => ({ ...p, emailConfirmation: "" }));
+    }
+  }, [isEditing, emailChanged, originalEmail, formData.emailConfirmation]);
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -156,10 +255,60 @@ export default function UsersPage() {
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // 🛡️ Validações cliente-side (espelham o backend) — feedback imediato
+    // ao operador, sem dispender uma round-trip ao servidor.
+    if (requireEmailConfirm && formData.email.trim().toLowerCase() !== formData.emailConfirmation.trim().toLowerCase()) {
+      toast.error("O e-mail e a confirmação de e-mail não conferem.");
+      return;
+    }
+    if (isChangingPassword || !isEditing) {
+      if (!isEditing && !formData.password) {
+        toast.error("Informe a nova senha.");
+        return;
+      }
+      if (formData.password !== formData.passwordConfirmation) {
+        toast.error("A nova senha e a confirmação não conferem.");
+        return;
+      }
+      if (isEditing && isChangingPassword && !formData.currentPassword) {
+        toast.error("Informe a senha atual para alterar a senha.");
+        return;
+      }
+    }
+    if (formData.cpf && !isValidCpf(formData.cpf)) {
+      setCpfError("O CPF informado é inválido.");
+      setActiveFormTab("pessoal");
+      toast.error("O CPF informado é inválido.");
+      return;
+    } else {
+      setCpfError(null);
+    }
+
+    // 🚀 Mapeamento camelCase → snake_case esperado pelas regras do Laravel
+    // (`confirmed`, `current_password`). Campos vazios não são enviados na
+    // edição quando não está alterando senha (mantém a senha atual no banco).
     const data = new FormData();
-    Object.entries(formData).forEach(([key, value]) => {
-      data.append(key, value);
-    });
+    data.append("name",  formData.name);
+    data.append("email", formData.email);
+    if (requireEmailConfirm) data.append("email_confirmation", formData.emailConfirmation);
+    data.append("role",   formData.role);
+    data.append("status", formData.status);
+    data.append("cpf",    formData.cpf);
+    data.append("rg",     formData.rg);
+    data.append("phone",  formData.phone);
+    data.append("birthDate", formData.birthDate);
+    data.append("gender", formData.gender);
+
+    if (!isEditing) {
+      data.append("password", formData.password);
+      data.append("password_confirmation", formData.passwordConfirmation);
+    } else if (isChangingPassword) {
+      data.append("current_password",       formData.currentPassword);
+      data.append("password",               formData.password);
+      data.append("password_confirmation",  formData.passwordConfirmation);
+    }
+
     if (photoFile) data.append("photo", photoFile);
 
     try {
@@ -568,18 +717,131 @@ export default function UsersPage() {
 
                       <div>
                         <label className="sigx-label">NOME COMPLETO *</label>
-                        <input type="text" className="sigx-input" value={formData.name} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} required />
+                        <input
+                          type="text"
+                          className="sigx-input"
+                          value={formData.name}
+                          onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
+                          maxLength={FIELD_MAX_LENGTH.name}
+                          required
+                        />
                       </div>
-                      <div>
-                        <label className="sigx-label">E-MAIL INSTITUCIONAL *</label>
-                        <input type="email" className="sigx-input" value={formData.email} onChange={e => setFormData(p => ({ ...p, email: e.target.value }))} required />
+
+                      {/* 🚀 E-MAIL + CONFIRMAÇÃO DE E-MAIL ─────────────────
+                          A confirmação BLOQUEIA copy/paste/cut/drop para
+                          forçar redigitação manual (evita colar um e-mail
+                          errado já presente no clipboard). Em edição, o
+                          campo de confirmação fica DESABILITADO enquanto
+                          o e-mail não é alterado em relação ao original. */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                        <div>
+                          <label className="sigx-label">E-MAIL *</label>
+                          <input
+                            type="email"
+                            className="sigx-input"
+                            value={formData.email}
+                            onChange={e => setFormData(p => ({ ...p, email: e.target.value }))}
+                            maxLength={FIELD_MAX_LENGTH.email}
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="sigx-label">
+                            CONFIRMAÇÃO DE E-MAIL {requireEmailConfirm && <span>*</span>}
+                          </label>
+                          <input
+                            type="email"
+                            className="sigx-input"
+                            value={formData.emailConfirmation}
+                            onChange={e => setFormData(p => ({ ...p, emailConfirmation: e.target.value }))}
+                            maxLength={FIELD_MAX_LENGTH.email}
+                            disabled={!requireEmailConfirm}
+                            required={requireEmailConfirm}
+                            placeholder={requireEmailConfirm ? "Digite o e-mail novamente" : ""}
+                            {...NO_PASTE_PROPS}
+                          />
+                          {requireEmailConfirm
+                            && formData.emailConfirmation
+                            && formData.emailConfirmation.trim().toLowerCase() !== formData.email.trim().toLowerCase() && (
+                            <span className="keep-case" style={{ display: "block", marginTop: 4, fontSize: 10.5, color: "#dc2626", fontWeight: 600 }}>
+                              Os e-mails não conferem.
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div>
-                        <label className="sigx-label">
-                          SENHA DE ACESSO {selectedUser && <span style={{ color: "#94a3b8", fontWeight: 500 }}>(deixe vazio para manter)</span>}
-                        </label>
-                        <input type="password" className="sigx-input" value={formData.password} onChange={e => setFormData(p => ({ ...p, password: e.target.value }))} required={!selectedUser} />
+
+                      {/* 🚀 BLOCO DE SENHA — paste/copy/cut bloqueados em
+                          TODOS os 3 campos de senha. Lógica:
+                            • CRIAÇÃO   → exibe Nova Senha + Confirmação (sem senha atual).
+                            • EDIÇÃO    → exibe os 3 campos sempre opcionais; só obrigam
+                              entre si quando o operador começa a digitar (isChangingPassword).
+                              Deixar TODOS vazios → mantém a senha existente. */}
+                      {selectedUser && (
+                        <div>
+                          <label className="sigx-label">
+                            SENHA ATUAL {isChangingPassword && <span>*</span>}
+                            <span className="keep-case" style={{ color: "#94a3b8", fontWeight: 500, fontSize: 10, marginLeft: 6 }}>
+                              (necessária apenas para alterar a senha)
+                            </span>
+                          </label>
+                          <input
+                            type="password"
+                            className="sigx-input"
+                            value={formData.currentPassword}
+                            onChange={e => setFormData(p => ({ ...p, currentPassword: e.target.value }))}
+                            maxLength={FIELD_MAX_LENGTH.password}
+                            required={isChangingPassword}
+                            autoComplete="current-password"
+                            spellCheck={false}
+                          />
+                        </div>
+                      )}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                        <div>
+                          <label className="sigx-label">
+                            {selectedUser ? "NOVA SENHA" : "SENHA DE ACESSO *"}
+                            {selectedUser && (
+                              <span className="keep-case" style={{ color: "#94a3b8", fontWeight: 500, fontSize: 10, marginLeft: 6 }}>
+                                (deixe vazio para manter)
+                              </span>
+                            )}
+                          </label>
+                          <input
+                            type="password"
+                            className="sigx-input"
+                            value={formData.password}
+                            onChange={e => setFormData(p => ({ ...p, password: e.target.value }))}
+                            maxLength={FIELD_MAX_LENGTH.password}
+                            minLength={6}
+                            required={!selectedUser || isChangingPassword}
+                            autoComplete="new-password"
+                            spellCheck={false}
+                          />
+                        </div>
+                        <div>
+                          <label className="sigx-label">
+                            {selectedUser ? "CONFIRMAÇÃO DA NOVA SENHA" : "CONFIRMAÇÃO DE SENHA"} {(!selectedUser || isChangingPassword) && <span>*</span>}
+                          </label>
+                          <input
+                            type="password"
+                            className="sigx-input"
+                            value={formData.passwordConfirmation}
+                            onChange={e => setFormData(p => ({ ...p, passwordConfirmation: e.target.value }))}
+                            maxLength={FIELD_MAX_LENGTH.password}
+                            minLength={6}
+                            required={!selectedUser || isChangingPassword}
+                            placeholder="Digite a senha novamente"
+                            {...NO_PASTE_PROPS}
+                          />
+                          {(formData.passwordConfirmation || formData.password)
+                            && formData.password !== formData.passwordConfirmation && (
+                            <span className="keep-case" style={{ display: "block", marginTop: 4, fontSize: 10.5, color: "#dc2626", fontWeight: 600 }}>
+                              As senhas não conferem.
+                            </span>
+                          )}
+                        </div>
                       </div>
+
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                         <div>
                           <label className="sigx-label">NÍVEL DE PERMISSÃO</label>
@@ -609,8 +871,27 @@ export default function UsersPage() {
                             className="sigx-input mono"
                             placeholder="000.000.000-00"
                             value={formData.cpf}
-                            onChange={e => setFormData(p => ({ ...p, cpf: maskCPF(e.target.value) }))}
+                            maxLength={FIELD_MAX_LENGTH.cpf}
+                            onChange={e => {
+                              const next = maskCPF(e.target.value);
+                              setFormData(p => ({ ...p, cpf: next }));
+                              setCpfError(null);
+                            }}
+                            onBlur={e => {
+                              const v = e.target.value;
+                              if (v && !isValidCpf(v)) {
+                                setCpfError("O CPF informado é inválido.");
+                              } else {
+                                setCpfError(null);
+                              }
+                            }}
+                            style={cpfError ? { borderColor: "#dc2626", boxShadow: "0 0 0 3px rgba(220,38,38,0.12)" } : undefined}
                           />
+                          {cpfError && (
+                            <span className="keep-case" style={{ display: "block", marginTop: 4, fontSize: 10.5, color: "#dc2626", fontWeight: 600 }}>
+                              {cpfError}
+                            </span>
+                          )}
                         </div>
                         <div>
                           <label className="sigx-label">IDENTIDADE (RG)</label>
@@ -618,6 +899,7 @@ export default function UsersPage() {
                             type="text"
                             className="sigx-input"
                             value={formData.rg}
+                            maxLength={FIELD_MAX_LENGTH.rg}
                             onChange={e => setFormData(p => ({ ...p, rg: e.target.value }))}
                           />
                         </div>
@@ -630,6 +912,7 @@ export default function UsersPage() {
                             className="sigx-input mono"
                             placeholder="(00) 00000-0000"
                             value={formData.phone}
+                            maxLength={FIELD_MAX_LENGTH.phone}
                             onChange={e => setFormData(p => ({ ...p, phone: maskPhone(e.target.value) }))}
                           />
                         </div>
@@ -645,7 +928,11 @@ export default function UsersPage() {
                       </div>
                       <div>
                         <label className="sigx-label">GÊNERO</label>
-                        <select className="sigx-input" value={formData.gender} onChange={e => setFormData(p => ({ ...p, gender: e.target.value }))}>
+                        <select
+                          className="sigx-input"
+                          value={formData.gender}
+                          onChange={e => setFormData(p => ({ ...p, gender: e.target.value }))}
+                        >
                           <option value="">Não Informar</option>
                           <option value="Masculino">Masculino</option>
                           <option value="Feminino">Feminino</option>

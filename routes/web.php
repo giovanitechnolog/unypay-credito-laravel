@@ -158,6 +158,7 @@ Route::middleware('auth')->group(function () {
     // 🚀 Autocomplete leve usado pelo modal de Contratos (declarado ANTES de /{guarantor}
     // para não cair no model binding como guarantor=search).
     Route::get   ('/api/guarantors/search',             [GuarantorController::class, 'search'])->name('guarantors.search');
+    Route::get   ('/api/guarantors/find-by-document',   [GuarantorController::class, 'findByDocument'])->name('guarantors.find-by-document');
     Route::post  ('/api/guarantors',                    [GuarantorController::class, 'store'])->name('guarantors.store');
     Route::get   ('/api/guarantors/{guarantor}',        [GuarantorController::class, 'show'])->name('guarantors.show');
     Route::put   ('/api/guarantors/{guarantor}',        [GuarantorController::class, 'update'])->name('guarantors.update');

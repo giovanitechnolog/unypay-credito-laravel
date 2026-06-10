@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Guarantors;
 
+use App\Rules\Cpf;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -28,6 +29,7 @@ class UpdateGuarantorRequest extends FormRequest
             'cnpj'       => $this->input('cnpj')    ? preg_replace('/\D/', '', (string) $this->input('cnpj'))    : null,
             'zipCode'    => $this->input('zipCode') ? preg_replace('/\D/', '', (string) $this->input('zipCode')) : null,
             'state'      => $this->input('state')   ? strtoupper((string) $this->input('state'))                 : null,
+            'phone'      => $this->input('phone')   ? preg_replace('/\D/', '', (string) $this->input('phone'))   : null,
         ]);
     }
 
@@ -43,10 +45,11 @@ class UpdateGuarantorRequest extends FormRequest
             'personType'        => ['required', 'in:PF,PJ'],
             'name'              => ['required', 'string', 'max:255'],
             'email'             => ['nullable', 'email', 'max:255'],
-            'phone'             => ['nullable', 'string', 'max:20'],
+            'phone'             => ['nullable', 'string', 'min:10', 'max:11'],
 
             'cpf'               => [
                 'required_if:personType,PF', 'nullable', 'string', 'size:11',
+                new Cpf(),
                 Rule::unique('guarantors', 'cpf')->ignore($guarantorId),
             ],
             'rg'                => ['nullable', 'string', 'max:20'],

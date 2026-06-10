@@ -1,12 +1,34 @@
 import { useState } from "react";
 import { Head } from "@inertiajs/react";
-import { 
+import {
   Upload, Sparkles, FileText, RefreshCw,
-  CircleDollarSign, Landmark, Percent, Shield, Car, Check, FileCheck, AlertCircle, Plus, Trash2,
-  Users, UserCheck, BookOpen, Home, X, Eye, Edit2, Scale, CreditCard, QrCode, MapPin
+  CircleDollarSign, Landmark, Percent, Shield, Car, Check, FileCheck, AlertCircle,
+  Users, UserCheck, BookOpen, Home, X, Scale, CreditCard, QrCode, MapPin,
+  Edit2, Eye, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
+import VinculoPessoaList, {
+  VinculoPessoaItem,
+  VinculoPessoaType,
+} from "../Components/VinculoPessoaList";
+import GuarantorQuickCreateModal, { QuickCreateMode } from "../Components/GuarantorQuickCreateModal";
+import GuarantorSearchModal, { GuarantorLite } from "../Components/GuarantorSearchModal";
+import AssetQuickCreateModal, { AssetModalMode } from "../Components/AssetQuickCreateModal";
+import {
+  GuarantorFormValues,
+  EMPTY_GUARANTOR_FORM,
+  maskCPF,
+  maskCNPJ,
+  maskCEP,
+  onlyDigits,
+} from "../Components/GuarantorFormFields";
+import {
+  AssetFormValues,
+  EMPTY_ASSET_FORM,
+  maskArea,
+} from "../Components/AssetFormFields";
+import { maskDocument, findGuarantorByDocument } from "../lib/documentValidation";
 import { api } from "../lib/api";
 
 interface ConsignorLite {
@@ -30,8 +52,41 @@ interface AiIngestionProps {
   consignors: ConsignorLite[];
 }
 
-type PersonRole = "fiadores" | "codevedores" | "testemunhas";
-type VinculoSubTab = "FIADOR" | "CODEVEDOR";
+/* ────────────────────────────────────────────────────────────────────────────
+ * 🚀 Tipos espelhados da tela de Contratos.
+ *
+ * Para garantir total paridade visual e comportamental com Contracts.tsx,
+ * usamos as MESMAS estruturas de dados e os MESMOS componentes
+ * (VinculoPessoaList / GuarantorQuickCreateModal / GuarantorSearchModal /
+ * AssetQuickCreateModal).
+ *
+ * `ContractGuarantor` representa um vínculo pessoa↔contrato em memória.
+ *   - isFromDb=true  → veio do banco (apenas remove permitido)
+ *   - isFromDb=false → adicionado on-the-fly via modal; é editável e
+ *                       será persistido quando a ingestão for confirmada.
+ *
+ * `ContractAssetItem` representa um bem em garantia em memória.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+type ContractGuarantor = {
+  localId: string;
+  id?: number;
+  isFromDb: boolean;
+  name: string;
+  personType: "PF" | "PJ";
+  document: string | null;
+  formValues?: GuarantorFormValues;
+};
+
+type ContractAssetItem = AssetFormValues & {
+  localId: string;
+  id?: number;
+};
+
+const newLocalId = () =>
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `g-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 /** Formata CPF/CNPJ a partir dos dígitos persistidos para exibir no select. */
 const formatConsignorDocument = (doc: string | null | undefined): string => {
@@ -89,49 +144,237 @@ const maskPercentInputParse = (raw: string): string => {
   return (parseInt(digits, 10) / 100).toFixed(2);
 };
 
-const EMPTY_PERSON = {
-  nome: "",
-  documento: "",
-  personType: "PF",
-  rg: "",
-  nacionalidade: "Brasileiro",
-  estado_civil: "Não informado",
-  tradeName: "",
-  email: "",
-  telefone: "",
-  cep: "",
-  rua: "",
-  numero: "",
-  complemento: "",
-  bairro: "",
-  cidade: "",
-  uf: "",
+/* ────────────────────────────────────────────────────────────────────────────
+ * 🚀 Conversores entre o formato "legado da IA" e o formato canônico da UI.
+ *
+ * A IA devolve pessoas como objetos com chaves em português
+ * (`nome`/`documento`/`rua`/...) e bens com `tipo` em vez de `assetType`.
+ * Para reusar exatamente os mesmos componentes da tela de Contratos,
+ * fazemos uma tradução bidirecional aqui.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+const personTypeFromDoc = (doc: string): "PF" | "PJ" =>
+  onlyDigits(doc).length > 11 ? "PJ" : "PF";
+
+/** AI → ContractGuarantor (com formValues pré-preenchidos). */
+const aiPersonToContractGuarantor = (p: any): ContractGuarantor => {
+  const rawDoc = String(p?.documento ?? "");
+  const personType: "PF" | "PJ" = p?.personType === "PJ"
+    ? "PJ"
+    : p?.personType === "PF"
+      ? "PF"
+      : personTypeFromDoc(rawDoc);
+
+  const formValues: GuarantorFormValues = {
+    ...EMPTY_GUARANTOR_FORM,
+    personType,
+    name: String(p?.nome ?? p?.name ?? ""),
+    email: String(p?.email ?? ""),
+    phone: String(p?.telefone ?? p?.phone ?? ""),
+    nationality: String(p?.nacionalidade ?? p?.nationality ?? (personType === "PF" ? "Brasileiro" : "")),
+    // 🚀 Default "Não Informado" quando a IA não extrai o estado civil
+    // (regra de negócio: nova pessoa sem estado civil entra como tal).
+    maritalStatus: String(p?.estado_civil ?? p?.maritalStatus ?? "") || "Não Informado",
+    cpf: personType === "PF" ? maskCPF(rawDoc) : "",
+    rg: String(p?.rg ?? ""),
+    cnpj: personType === "PJ" ? maskCNPJ(rawDoc) : "",
+    tradeName: String(p?.tradeName ?? ""),
+    stateRegistration: String(p?.stateRegistration ?? ""),
+    street: String(p?.rua ?? p?.street ?? ""),
+    number: String(p?.numero ?? p?.number ?? ""),
+    complement: String(p?.complemento ?? p?.complement ?? ""),
+    neighborhood: String(p?.bairro ?? p?.neighborhood ?? ""),
+    city: String(p?.cidade ?? p?.city ?? ""),
+    state: String(p?.uf ?? p?.state ?? "").toUpperCase(),
+    zipCode: maskCEP(String(p?.cep ?? p?.zipCode ?? "")),
+  };
+
+  return {
+    localId: newLocalId(),
+    isFromDb: false,
+    name: formValues.name,
+    personType,
+    document: personType === "PJ" ? onlyDigits(formValues.cnpj) : onlyDigits(formValues.cpf),
+    formValues,
+  };
 };
 
-const EMPTY_WITNESS = {
-  nome: "",
-  documento: "",
-  rg: "",
+/**
+ * Recebe um array de pessoas no formato cru da IA e devolve uma lista de
+ * `ContractGuarantor` já deduplicada contra o catálogo do banco.
+ *
+ * Para cada pessoa:
+ *  - Se o documento (CPF/CNPJ) já existe em `guarantors`, a entrada nasce
+ *    como `isFromDb=true` com o id correto — equivalente à pessoa ter
+ *    sido escolhida via `GuarantorSearchModal`.
+ *  - Caso contrário, mantém-se como "Novo" (formValues preenchidos),
+ *    para que o operador revise/complete antes do save.
+ *
+ * Dentro do mesmo array, duplicatas (mesmo documento aparecendo duas
+ * vezes na resposta da IA) são colapsadas para uma única entrada.
+ */
+const dedupeAiPersons = async (arr: any[]): Promise<ContractGuarantor[]> => {
+  if (!Array.isArray(arr) || arr.length === 0) return [];
+
+  const seenDbIds = new Set<number>();
+  const seenDocs  = new Set<string>();
+  const results: ContractGuarantor[] = [];
+
+  // Resolve em paralelo — uma chamada por pessoa, tipicamente <10 itens.
+  const matches = await Promise.all(
+    arr.map((p) => findGuarantorByDocument(String(p?.documento ?? "")))
+  );
+
+  for (let i = 0; i < arr.length; i++) {
+    const raw   = arr[i];
+    const match = matches[i];
+    const docKey = onlyDigits(String(raw?.documento ?? ""));
+
+    if (match) {
+      if (seenDbIds.has(match.id)) continue;
+      seenDbIds.add(match.id);
+      results.push({
+        localId: newLocalId(),
+        id: match.id,
+        isFromDb: true,
+        name: match.name,
+        personType: match.personType,
+        document: match.document,
+      });
+      continue;
+    }
+
+    // Mesmo doc aparecendo 2x na resposta da IA → mantém só a 1ª ocorrência.
+    if (docKey && seenDocs.has(docKey)) continue;
+    if (docKey) seenDocs.add(docKey);
+
+    results.push(aiPersonToContractGuarantor(raw));
+  }
+
+  return results;
 };
 
-const EMPTY_VEHICLE_ASSET = {
-  tipo: "vehicle",
-  brand: "",
-  model: "",
-  manufactureYear: "",
-  modelYear: "",
-  plate: "",
-  renavam: "",
-  chassis: "",
+/** ContractGuarantor → payload no formato esperado pelo AiIngestionController. */
+const contractGuarantorToAi = (g: ContractGuarantor) => {
+  // Pessoa já cadastrada — manda o id para que o backend pule a busca por
+  // documento e reaproveite o registro diretamente.
+  if (g.isFromDb && g.id) {
+    return {
+      id: g.id,
+      nome: g.name,
+      documento: g.document ?? "",
+      personType: g.personType,
+    };
+  }
+  const fv = g.formValues ?? EMPTY_GUARANTOR_FORM;
+  return {
+    personType: fv.personType,
+    nome: fv.name,
+    documento: fv.personType === "PJ" ? onlyDigits(fv.cnpj) : onlyDigits(fv.cpf),
+    rg: fv.rg || null,
+    nacionalidade: fv.nationality || null,
+    estado_civil: fv.maritalStatus || null,
+    tradeName: fv.tradeName || null,
+    stateRegistration: fv.stateRegistration || null,
+    email: fv.email?.trim() || null,
+    telefone: fv.phone ? onlyDigits(fv.phone) : null,
+    cep: fv.zipCode ? onlyDigits(fv.zipCode) : null,
+    rua: fv.street || null,
+    numero: fv.number || null,
+    complemento: fv.complement || null,
+    bairro: fv.neighborhood || null,
+    cidade: fv.city || null,
+    uf: fv.state ? fv.state.toUpperCase() : null,
+  };
 };
 
-const EMPTY_REAL_ESTATE_ASSET = {
-  tipo: "real_estate",
-  description: "",
-  location: "",
-  registryNumber: "",
-  totalArea: "",
-  boundaries: "",
+/** AI → ContractAssetItem (totalArea convertida à máscara monetária BR). */
+const aiAssetToContractAssetItem = (a: any): ContractAssetItem | null => {
+  const tipo = a?.tipo ?? a?.tipo_garantia ?? a?.assetType;
+  const assetType: "vehicle" | "real_estate" | null =
+    tipo === "vehicle" || tipo === "veiculo" ? "vehicle"
+      : tipo === "real_estate" || tipo === "imovel" ? "real_estate"
+        : null;
+  if (!assetType) return null;
+
+  const base: ContractAssetItem = {
+    ...EMPTY_ASSET_FORM,
+    localId: newLocalId(),
+    assetType,
+    brand: String(a?.brand ?? ""),
+    model: String(a?.model ?? ""),
+    manufactureYear: a?.manufactureYear != null && a.manufactureYear !== ""
+      ? String(a.manufactureYear)
+      : "",
+    modelYear: a?.modelYear != null && a.modelYear !== "" ? String(a.modelYear) : "",
+    plate: String(a?.plate ?? ""),
+    renavam: String(a?.renavam ?? ""),
+    chassis: String(a?.chassis ?? ""),
+    description: String(a?.description ?? a?.descricao_detalhada ?? ""),
+    location: String(a?.location ?? ""),
+    registryNumber: String(a?.registryNumber ?? ""),
+    totalArea: a?.totalArea != null && a.totalArea !== ""
+      ? maskArea(String(a.totalArea).replace(".", ","))
+      : "",
+    boundaries: String(a?.boundaries ?? ""),
+  };
+  return base;
+};
+
+/** ContractAssetItem → payload no formato esperado pelo AiIngestionController. */
+const contractAssetItemToAi = (a: ContractAssetItem) => {
+  const isVehicle = a.assetType === "vehicle";
+  const totalAreaNumeric = a.totalArea
+    ? Number(a.totalArea.replace(/\./g, "").replace(",", "."))
+    : null;
+  return {
+    tipo: a.assetType,
+    ...(isVehicle ? {
+      brand: a.brand || null,
+      model: a.model || null,
+      manufactureYear: a.manufactureYear ? Number(a.manufactureYear) : null,
+      modelYear: a.modelYear ? Number(a.modelYear) : null,
+      plate: a.plate || null,
+      renavam: a.renavam || null,
+      chassis: a.chassis || null,
+    } : {
+      description: a.description || null,
+      location: a.location || null,
+      registryNumber: a.registryNumber || null,
+      totalArea: isFinite(totalAreaNumeric ?? NaN) ? totalAreaNumeric : null,
+      boundaries: a.boundaries || null,
+    }),
+  };
+};
+
+const formatGuarantorDocument = (doc: string | null | undefined, type: "PF" | "PJ"): string => {
+  const digits = (doc ?? "").replace(/\D/g, "");
+  if (!digits) return "—";
+  if (type === "PJ" && digits.length === 14) {
+    return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+  }
+  if (type === "PF" && digits.length === 11) {
+    return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
+  }
+  return digits;
+};
+
+const formatAssetTitle = (a: ContractAssetItem): string => {
+  if (a.assetType === "vehicle") {
+    return [a.brand, a.model].filter(Boolean).join(" ").trim() || "Veículo sem identificação";
+  }
+  return a.description?.trim() || a.location?.trim() || "Imóvel sem descrição";
+};
+
+const formatAssetDetail = (a: ContractAssetItem): string => {
+  if (a.assetType === "vehicle") {
+    const years = [a.manufactureYear, a.modelYear].filter(Boolean).join("/");
+    return [a.plate ? `Placa ${a.plate}` : null, years || null].filter(Boolean).join(" · ") || "—";
+  }
+  return [
+    a.registryNumber ? `Mat. ${a.registryNumber}` : null,
+    a.totalArea ? `${a.totalArea} m²` : null,
+  ].filter(Boolean).join(" · ") || "—";
 };
 
 export default function AiIngestion({ contractTypes, existingClients, consignors = [] }: AiIngestionProps) {
@@ -143,11 +386,36 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeReviewTab, setActiveReviewTab] = useState("basico");
-  // Sub-abas internas da guia "Fiadores e Codevedores" — espelha o padrão da
-  // tela de Contratos (vinculoTabActive). Decide qual coleção é renderizada.
-  const [vinculoTabActive, setVinculoTabActive] = useState<VinculoSubTab>("FIADOR");
+  // 🚀 Sub-aba da guia "Fiadores e Codevedores". Quando o operador navega
+  // para a aba Regras, este estado vira "TESTEMUNHA" para que o modal
+  // compartilhado (criação/busca) saiba em qual lista inserir o resultado.
+  const [vinculoTabActive, setVinculoTabActive] = useState<VinculoPessoaType>("FIADOR");
   const [submitting, setSubmitting] = useState(false);
   const [extractedData, setExtractedData] = useState<any>(null);
+
+  // 🚀 Listas EM MEMÓRIA — espelham 1-para-1 o estado da tela de Contratos.
+  // Cada item carrega ou um ID do banco (isFromDb=true) ou um formValues
+  // completo para criação on-the-fly. A persistência acontece no submit.
+  const [selectedFiadores,    setSelectedFiadores]    = useState<ContractGuarantor[]>([]);
+  const [selectedCodevedores, setSelectedCodevedores] = useState<ContractGuarantor[]>([]);
+  const [selectedTestemunhas, setSelectedTestemunhas] = useState<ContractGuarantor[]>([]);
+  const [selectedAssets,      setSelectedAssets]      = useState<ContractAssetItem[]>([]);
+
+  // 🚀 Estado dos modais compartilhados (mesmos componentes da tela de Contratos).
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [quickModalState, setQuickModalState] = useState<{
+    open: boolean;
+    mode: QuickCreateMode;
+    editIndex?: number;
+    initialValue?: Partial<GuarantorFormValues>;
+    target: VinculoPessoaType;
+  }>({ open: false, mode: "create", target: "FIADOR" });
+  const [assetModalState, setAssetModalState] = useState<{
+    open: boolean;
+    mode: AssetModalMode;
+    editIndex?: number;
+    initialValue?: Partial<AssetFormValues>;
+  }>({ open: false, mode: "create" });
 
   // 🚀 Estado da aba "Credor" — espelha o padrão de `selectedConsignor` em
   // Contracts.tsx. Guarda o objeto completo para que o painel read-only
@@ -231,14 +499,15 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
       data.regras      = data.regras && typeof data.regras === "object" ? data.regras : {};
 
       // Compatibilidade com garantia antiga (objeto único) — converte para array
+      // O formato final é o mesmo aceito por `aiAssetToContractAssetItem`, que
+      // monta um `ContractAssetItem` a partir do shape { tipo, description, ... }.
       if (data.garantias && !Array.isArray(data.garantias)) {
         const tipo = data.garantias.tipo_garantia;
         if (tipo === "veiculo" || tipo === "imovel") {
           const novoTipo = tipo === "veiculo" ? "vehicle" : "real_estate";
           data.garantias = [{
-            ...(novoTipo === "vehicle" ? EMPTY_VEHICLE_ASSET : EMPTY_REAL_ESTATE_ASSET),
-            description: data.garantias.descricao_detalhada || "",
             tipo: novoTipo,
+            description: data.garantias.descricao_detalhada || "",
           }];
         } else {
           data.garantias = [];
@@ -266,7 +535,37 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
         }
       }
 
-      setExtractedData(data);
+      // 🚀 Promove as coleções da IA para o formato em memória usado por
+      // VinculoPessoaList / AssetQuickCreateModal — totalmente compatível
+      // com a UX da tela de Contratos.
+      const fiadoresIA    = Array.isArray(data?.fiadores)    ? data.fiadores    : [];
+      const codevIA       = Array.isArray(data?.codevedores) ? data.codevedores : [];
+      const testIA        = Array.isArray(data?.testemunhas) ? data.testemunhas : [];
+      const garantiasIA   = Array.isArray(data?.garantias)   ? data.garantias   : [];
+
+      // 🚀 Deduplicação automática no startup — para cada pessoa extraída
+      // pela IA, consultamos o catálogo pelo documento. Quando há match,
+      // a entrada nasce como "Cadastrado" (isFromDb=true) com o ID do
+      // banco; do contrário, fica como "Novo" para edição/criação.
+      // Roda em paralelo (uma chamada por pessoa) para minimizar latência.
+      const dedupedFiadores    = await dedupeAiPersons(fiadoresIA);
+      const dedupedCodevedores = await dedupeAiPersons(codevIA);
+      const dedupedTestemunhas = await dedupeAiPersons(testIA);
+
+      setSelectedFiadores(dedupedFiadores);
+      setSelectedCodevedores(dedupedCodevedores);
+      setSelectedTestemunhas(dedupedTestemunhas);
+      setSelectedAssets(garantiasIA.map(aiAssetToContractAssetItem).filter(Boolean) as ContractAssetItem[]);
+
+      // Mantém apenas o "esqueleto" no extractedData — os arrays de pessoas e
+      // garantias agora vivem em estado próprio (selectedFiadores etc.).
+      setExtractedData({
+        ...data,
+        fiadores: [],
+        codevedores: [],
+        testemunhas: [],
+        garantias: [],
+      });
       toast.success("Leitura estruturada concluída!");
     } catch (err: any) {
       toast.error(err.response?.data?.error || "Erro ao processar as cláusulas do PDF via IA.");
@@ -276,29 +575,63 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
   };
 
   const handleConfirmIngestion = async () => {
+    // ── Validação local (mesmo espírito do `handleSubmit` de Contracts) ──
+    for (const list of [selectedFiadores, selectedCodevedores, selectedTestemunhas]) {
+      for (const g of list) {
+        if (!g.name?.trim()) {
+          toast.error("Existe uma pessoa vinculada sem nome.");
+          return;
+        }
+        if (!g.isFromDb) {
+          const doc = g.personType === "PJ"
+            ? onlyDigits(g.formValues?.cnpj ?? "")
+            : onlyDigits(g.formValues?.cpf ?? "");
+          const need = g.personType === "PJ" ? 14 : 11;
+          if (doc.length !== need) {
+            toast.error(`Documento inválido para "${g.name}".`);
+            return;
+          }
+        }
+      }
+    }
+
     setSubmitting(true);
     try {
-      const payload = JSON.parse(JSON.stringify(extractedData));
+      const payload: any = JSON.parse(JSON.stringify(extractedData ?? {}));
+
+      // Normaliza CPF/CNPJ do cliente devedor para apenas dígitos antes de enviar.
+      if (payload?.dados_basicos?.documento) {
+        payload.dados_basicos.documento = onlyDigits(String(payload.dados_basicos.documento));
+      }
+      if (payload?.dados_basicos?.cep) {
+        payload.dados_basicos.cep = onlyDigits(String(payload.dados_basicos.cep));
+      }
+
       if (payload.taxas) {
-        payload.taxas.juros_mes = parseFloat(payload.taxas.juros_mes) / 100;
-        payload.taxas.mora_mes = parseFloat(payload.taxas.mora_mes) / 100;
+        payload.taxas.juros_mes    = parseFloat(payload.taxas.juros_mes)    / 100;
+        payload.taxas.mora_mes     = parseFloat(payload.taxas.mora_mes)     / 100;
         payload.taxas.multa_atraso = parseFloat(payload.taxas.multa_atraso) / 100;
       }
-      // O backend espera `consignor_id` no nível raiz (mesma convenção da
-      // tela de Contracts). Promovemos o ID do estado React (fonte da
-      // verdade do select) ou — como fallback — o que estiver embutido no
-      // bloco `dados_basicos` (caso o usuário tenha trocado a aba após
-      // selecionar e o estado tenha sido espelhado lá).
+
+      // Reescreve as coleções a partir do estado em memória (formato AI legado,
+      // 100% compatível com o que o AiIngestionController@save já aceita).
+      payload.fiadores    = selectedFiadores.map(contractGuarantorToAi);
+      payload.codevedores = selectedCodevedores.map(contractGuarantorToAi);
+      payload.testemunhas = selectedTestemunhas.map(contractGuarantorToAi);
+      payload.garantias   = selectedAssets.map(contractAssetItemToAi);
+
       const cid = selectedConsignor?.id ?? payload?.dados_basicos?.consignor_id;
-      if (cid) {
-        payload.consignor_id = Number(cid);
-      }
+      if (cid) payload.consignor_id = Number(cid);
 
       await api.post("/api/ai-ingestion/save", payload);
       toast.success("Ecosistema integrado gravado com sucesso!");
       setExtractedData(null);
       setFile(null);
       setSelectedConsignor(null);
+      setSelectedFiadores([]);
+      setSelectedCodevedores([]);
+      setSelectedTestemunhas([]);
+      setSelectedAssets([]);
     } catch (err: any) {
       const apiMessage =
         err?.response?.data?.error ||
@@ -322,58 +655,6 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
     }));
   };
 
-  // 🚀 Handlers genéricos para qualquer papel pessoal (fiador/codevedor/testemunha).
-  //    O front envia exatamente as mesmas chaves para o backend; o que muda é o nó
-  //    raiz no payload. Testemunhas usam um schema enxuto (só nome/documento/rg).
-  const handleAddPerson = (role: PersonRole) => {
-    setExtractedData((prev: any) => ({
-      ...prev,
-      [role]: [
-        ...(prev?.[role] || []),
-        role === "testemunhas" ? { ...EMPTY_WITNESS } : { ...EMPTY_PERSON },
-      ],
-    }));
-  };
-
-  const handleRemovePerson = (role: PersonRole, idxToRemove: number) => {
-    setExtractedData((prev: any) => ({
-      ...prev,
-      [role]: (prev?.[role] || []).filter((_: any, idx: number) => idx !== idxToRemove),
-    }));
-  };
-
-  const handleUpdatePersonField = (role: PersonRole, idx: number, field: string, value: any) => {
-    setExtractedData((prev: any) => {
-      const list = [...(prev?.[role] || [])];
-      list[idx] = { ...list[idx], [field]: value };
-      return { ...prev, [role]: list };
-    });
-  };
-
-  // 🚀 Handlers para a aba "Garantias" — cada item é um bem em contract_assets.
-  const handleAddAsset = (tipo: "vehicle" | "real_estate") => {
-    const template = tipo === "vehicle" ? EMPTY_VEHICLE_ASSET : EMPTY_REAL_ESTATE_ASSET;
-    setExtractedData((prev: any) => ({
-      ...prev,
-      garantias: [...(prev?.garantias || []), { ...template }],
-    }));
-  };
-
-  const handleRemoveAsset = (idxToRemove: number) => {
-    setExtractedData((prev: any) => ({
-      ...prev,
-      garantias: (prev?.garantias || []).filter((_: any, idx: number) => idx !== idxToRemove),
-    }));
-  };
-
-  const handleUpdateAssetField = (idx: number, field: string, value: any) => {
-    setExtractedData((prev: any) => {
-      const list = [...(prev?.garantias || [])];
-      list[idx] = { ...list[idx], [field]: value };
-      return { ...prev, garantias: list };
-    });
-  };
-
   const handleUpdateRule = (field: string, value: any) => {
     setExtractedData((prev: any) => ({
       ...prev,
@@ -381,36 +662,120 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
     }));
   };
 
+  /* ──────────────────────────────────────────────────────────────────────
+   * 🚀 Helpers dos modais — espelham 1-para-1 a tela de Contracts.tsx.
+   * ───────────────────────────────────────────────────────────────────── */
+
+  const setterForRole = (target: VinculoPessoaType) => {
+    if (target === "CODEVEDOR")  return setSelectedCodevedores;
+    if (target === "TESTEMUNHA") return setSelectedTestemunhas;
+    return setSelectedFiadores;
+  };
+
+  const listForRole = (target: VinculoPessoaType): ContractGuarantor[] => {
+    if (target === "CODEVEDOR")  return selectedCodevedores;
+    if (target === "TESTEMUNHA") return selectedTestemunhas;
+    return selectedFiadores;
+  };
+
+  const addPersonFromDb = (g: GuarantorLite, target: VinculoPessoaType) => {
+    setterForRole(target)((prev) => {
+      if (prev.some((it) => it.isFromDb && it.id === g.id)) return prev;
+      return [
+        ...prev,
+        {
+          localId: newLocalId(),
+          id: g.id,
+          isFromDb: true,
+          name: g.name,
+          personType: g.personType,
+          document: g.document,
+        },
+      ];
+    });
+  };
+
+  const selectedDbIdsByRole = {
+    FIADOR:     selectedFiadores.filter((g) => g.isFromDb && typeof g.id === "number").map((g) => g.id as number),
+    CODEVEDOR:  selectedCodevedores.filter((g) => g.isFromDb && typeof g.id === "number").map((g) => g.id as number),
+    TESTEMUNHA: selectedTestemunhas.filter((g) => g.isFromDb && typeof g.id === "number").map((g) => g.id as number),
+  };
+
+  const openGuarantorViewModal = async (guarantorId: number, target: VinculoPessoaType) => {
+    try {
+      const { data } = await api.get(`/api/guarantors/${guarantorId}`);
+      const g = data?.guarantor;
+      if (!g) { toast.error("Pessoa não encontrada."); return; }
+      const initialValue: Partial<GuarantorFormValues> = {
+        personType: g.personType,
+        name: g.name ?? "",
+        email: g.email ?? "",
+        phone: g.phone ?? "",
+        nationality: g.nationality ?? "",
+        maritalStatus: g.maritalStatus ?? "",
+        cpf: g.cpf ? maskCPF(g.cpf) : "",
+        rg: g.rg ?? "",
+        cnpj: g.cnpj ? maskCNPJ(g.cnpj) : "",
+        tradeName: g.tradeName ?? "",
+        stateRegistration: g.stateRegistration ?? "",
+        street: g.street ?? "",
+        number: g.number ?? "",
+        complement: g.complement ?? "",
+        neighborhood: g.neighborhood ?? "",
+        city: g.city ?? "",
+        state: g.state ?? "",
+        zipCode: g.zipCode ? maskCEP(g.zipCode) : "",
+      };
+      setQuickModalState({ open: true, mode: "view", initialValue, target });
+    } catch {
+      toast.error("Falha ao carregar dados da pessoa.");
+    }
+  };
+
   const isTabInvalid = (tabKey: string): boolean => {
     if (!extractedData) return false;
     switch (tabKey) {
       case "basico":
-        return !extractedData.dados_basicos?.cliente_devedor || !extractedData.dados_basicos?.documento || !extractedData.dados_basicos?.data_emissao || !extractedData.dados_basicos?.tipo;
+        return !extractedData.dados_basicos?.cliente_devedor
+            || !extractedData.dados_basicos?.documento
+            || !extractedData.dados_basicos?.data_emissao
+            || !extractedData.dados_basicos?.tipo;
       case "credor":
-        // Aceitar tanto consignor_id (vínculo formal) quanto credor_divida
-        // (texto livre extraído pela IA) — pelo menos um deles tem que estar
-        // presente para o contrato ter um credor identificado.
         return !extractedData.dados_basicos?.consignor_id
-            && !extractedData.dados_basicos?.credor_divida;
+            && !extractedData.dados_basicos?.credor_divida
+            && !selectedConsignor?.id;
       case "financeiro":
-        return !extractedData.valores?.valor_principal || !extractedData.valores?.numero_parcelas || !extractedData.valores?.valor_parcela || !extractedData.banco?.nome;
+        return !extractedData.valores?.valor_principal
+            || !extractedData.valores?.numero_parcelas
+            || !extractedData.valores?.valor_parcela
+            || !extractedData.banco?.nome;
       case "taxas":
-        return !extractedData.taxas?.juros_mes || !extractedData.taxas?.data_primeiro_vencimento;
+        return !extractedData.taxas?.juros_mes
+            || !extractedData.taxas?.data_primeiro_vencimento;
       case "fiadores":
-        // Fiadores E codevedores compartilham a mesma aba; basta um item inválido em qualquer das duas
-        return (extractedData.fiadores || []).some((f: any) => !f.nome || !f.documento)
-            || (extractedData.codevedores || []).some((f: any) => !f.nome || !f.documento);
+        // Itens inválidos = sem nome OU com documento de tamanho errado.
+        return [...selectedFiadores, ...selectedCodevedores].some((g) => {
+          if (!g.name?.trim()) return true;
+          if (g.isFromDb) return false;
+          const doc = g.personType === "PJ"
+            ? onlyDigits(g.formValues?.cnpj ?? "")
+            : onlyDigits(g.formValues?.cpf ?? "");
+          return doc.length !== (g.personType === "PJ" ? 14 : 11);
+        });
       case "garantias":
-        return (extractedData.garantias || []).some((g: any) => {
-          if (g.tipo === "vehicle")     return !g.brand || !g.model || !g.plate;
-          if (g.tipo === "real_estate") return !g.description;
-          return true;
+        return selectedAssets.some((a) => {
+          if (a.assetType === "vehicle") return !a.brand?.trim() || !a.model?.trim() || !a.plate?.trim();
+          return !a.location?.trim() || !a.registryNumber?.trim() || !a.totalArea?.trim();
         });
       case "regras":
-        // Aba opcional — só sinaliza erro quando alguma testemunha cadastrada
-        // estiver com nome ou documento em branco (mesma regra da tela de
-        // Contracts, onde testemunhas existem mas não são obrigatórias).
-        return (extractedData.testemunhas || []).some((f: any) => !f.nome || !f.documento);
+        return selectedTestemunhas.some((g) => {
+          if (!g.name?.trim()) return true;
+          if (g.isFromDb) return false;
+          const doc = g.personType === "PJ"
+            ? onlyDigits(g.formValues?.cnpj ?? "")
+            : onlyDigits(g.formValues?.cpf ?? "");
+          return doc.length !== (g.personType === "PJ" ? 14 : 11);
+        });
       default:
         return false;
     }
@@ -423,6 +788,48 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
       backgroundColor: isEmpty ? "#fef2f2" : "white",
       transition: "all 0.1s"
     };
+  };
+
+  /**
+   * Renderiza o painel "VinculoPessoaList" parametrizado para um papel
+   * específico (FIADOR/CODEVEDOR/TESTEMUNHA). Espelha 1-para-1 a UX da
+   * tela de Contratos — mesma tabela, mesmos botões e os mesmos modais
+   * compartilhados (busca/criação rápida).
+   */
+  const renderPersonPanel = (target: VinculoPessoaType) => {
+    const list = listForRole(target);
+    const setList = setterForRole(target);
+    return (
+      <VinculoPessoaList
+        type={target}
+        data={list as VinculoPessoaItem[]}
+        onRemove={(idx) => setList((prev) => prev.filter((_, i) => i !== idx))}
+        clientId={1 /* AI: cliente é resolvido no submit; placeholder ativa os botões */}
+        suggested={[]}
+        onAddSuggested={(g) => addPersonFromDb(g, target)}
+        onOpenCreate={() => {
+          setVinculoTabActive(target);
+          setQuickModalState({ open: true, mode: "create", target, initialValue: {} });
+        }}
+        onOpenSearch={() => {
+          setVinculoTabActive(target);
+          setSearchModalOpen(true);
+        }}
+        onOpenEditNew={(idx, item) => {
+          if (!item || item.isFromDb) return;
+          setVinculoTabActive(target);
+          setQuickModalState({
+            open: true,
+            mode: "edit-new",
+            editIndex: idx,
+            initialValue: item.formValues,
+            target,
+          });
+        }}
+        onOpenView={(id) => openGuarantorViewModal(id, target)}
+        formatDocument={formatGuarantorDocument}
+      />
+    );
   };
 
   return (
@@ -696,6 +1103,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                         style={getInputStyle(extractedData.dados_basicos?.cliente_devedor)}
                         value={extractedData.dados_basicos?.cliente_devedor || ""}
                         onChange={e => updateNested("dados_basicos", "cliente_devedor", e.target.value)}
+                        maxLength={255}
                       />
                     </div>
                     <div>
@@ -704,7 +1112,9 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                         className="sigx-input mono"
                         style={getInputStyle(extractedData.dados_basicos?.documento)}
                         value={extractedData.dados_basicos?.documento || ""}
-                        onChange={e => updateNested("dados_basicos", "documento", e.target.value)}
+                        onChange={e => updateNested("dados_basicos", "documento", maskDocument(e.target.value))}
+                        placeholder="000.000.000-00 ou 00.000.000/0000-00"
+                        maxLength={18}
                       />
                     </div>
                     <div>
@@ -712,7 +1122,9 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                       <input
                         className="sigx-input mono"
                         value={extractedData.dados_basicos?.cep || ""}
-                        onChange={e => updateNested("dados_basicos", "cep", e.target.value)}
+                        onChange={e => updateNested("dados_basicos", "cep", maskCEP(e.target.value))}
+                        placeholder="00000-000"
+                        maxLength={9}
                       />
                     </div>
                     <div style={{ gridColumn: "span 2" }}>
@@ -721,6 +1133,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                         className="sigx-input"
                         value={extractedData.dados_basicos?.endereco || ""}
                         onChange={e => updateNested("dados_basicos", "endereco", e.target.value)}
+                        maxLength={255}
                       />
                     </div>
                     <div>
@@ -729,6 +1142,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                         className="sigx-input mono"
                         value={extractedData.dados_basicos?.codigo_interno || ""}
                         onChange={e => updateNested("dados_basicos", "codigo_interno", e.target.value)}
+                        maxLength={50}
                       />
                     </div>
                     <div>
@@ -747,6 +1161,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                         className="sigx-input"
                         value={extractedData.dados_basicos?.objeto || (extractedData.dados_basicos?.cliente_devedor ? `CONTRATO INTEGRADOR IA - ${extractedData.dados_basicos.cliente_devedor}` : "")}
                         onChange={e => updateNested("dados_basicos", "objeto", e.target.value)}
+                        maxLength={255}
                       />
                     </div>
                     <div>
@@ -1187,15 +1602,13 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                   </div>
                 )}
 
-                {/* TAB 5: FIADORES + CODEVEDORES — sub-abas controladas localmente
-                    (mesmo padrão visual de Contracts.tsx — botões em pílula com
-                    contador, fundo escuro quando ativos). */}
+                {/* TAB 5: FIADORES + CODEVEDORES — sub-abas controladas
+                    localmente, exatamente como na tela de Contratos.
+                    Usa o mesmo VinculoPessoaList + modais compartilhados. */}
                 {activeReviewTab === "fiadores" && (() => {
                   const isFiador = vinculoTabActive === "FIADOR";
-                  const role: PersonRole = isFiador ? "fiadores" : "codevedores";
-                  const list = (extractedData?.[role] || []) as any[];
-                  const fiadoresCount = (extractedData?.fiadores || []).length;
-                  const codevedoresCount = (extractedData?.codevedores || []).length;
+                  const fiadoresCount    = selectedFiadores.length;
+                  const codevedoresCount = selectedCodevedores.length;
 
                   const subTabBase: React.CSSProperties = {
                     flex: 1,
@@ -1222,8 +1635,8 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                   return (
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                       <div style={{ display: "flex", gap: 0, borderRadius: 6, overflow: "hidden" }}>
-                      <button 
-                        type="button" 
+                        <button
+                          type="button"
                           onClick={() => setVinculoTabActive("FIADOR")}
                           style={{
                             ...subTabBase,
@@ -1252,206 +1665,29 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                           <span style={{ marginLeft: 4, fontSize: 10, background: !isFiador ? "rgba(255,255,255,0.22)" : "#e2e8f0", padding: "1px 7px", borderRadius: 10 }}>
                             {codevedoresCount}
                           </span>
-                      </button>
-                    </div>
-
-                      {/* Botão de adicionar — segue o padrão "Adicionar Garantia" da aba Garantias em Contracts */}
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button
-                          type="button"
-                          onClick={() => handleAddPerson(role)}
-                          className="btn-primary"
-                          style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", fontSize: 11 }}
-                        >
-                          <Plus size={12} /> Adicionar {isFiador ? "Fiador" : "Codevedor"}
                         </button>
                       </div>
 
-                      {/* Tabela compacta — mesma estilização da tabela de Garantias em Contracts.tsx */}
-                      <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden", background: "white" }}>
-                        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11 }}>
-                          <thead>
-                            <tr style={{ background: "#f1f5f9" }}>
-                              <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 80 }}>Tipo</th>
-                              <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>Nome</th>
-                              <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 180 }}>Documento</th>
-                              <th style={{ padding: "7px 10px", textAlign: "center", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 80 }}>Ações</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {list.length === 0 ? (
-                              <tr>
-                                <td colSpan={4} style={{ padding: 28, textAlign: "center", color: "#94a3b8" }}>
-                                  {isFiador ? <UserCheck size={24} style={{ opacity: 0.3, margin: "0 auto 6px", display: "block" }} /> : <Scale size={24} style={{ opacity: 0.3, margin: "0 auto 6px", display: "block" }} />}
-                                  <span style={{ fontSize: 11.5 }}>
-                                    Nenhum {isFiador ? "fiador" : "codevedor"} vinculado. Use o botão acima para adicionar.
-                                  </span>
-                                </td>
-                              </tr>
-                            ) : list.map((p: any, idx: number) => {
-                              const isPJ = p.personType === "PJ";
-                              return (
-                                <tr key={idx} style={{ background: idx % 2 === 1 ? "#fafafa" : "white" }}>
-                                  <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9" }}>
-                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 4, fontSize: 9, fontWeight: 700, background: isPJ ? "#fef3c7" : "#dbeafe", color: isPJ ? "#92400e" : "#1e40af" }}>
-                                      {isPJ ? "PJ" : "PF"}
-                                    </span>
-                                  </td>
-                                  <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", fontWeight: 600, color: "#0f172a" }}>
-                                    {p.nome || <span style={{ color: "#ef4444", fontWeight: 700 }}>(sem nome)</span>}
-                                  </td>
-                                  <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", color: "#475569", fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5 }}>
-                                    {p.documento || "—"}
-                                  </td>
-                                  <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", textAlign: "center" }}>
-                                    <button type="button" className="btn-icon" title="Remover" style={{ color: "#dc2626" }} onClick={() => handleRemovePerson(role, idx)}>
-                                      <Trash2 size={11} />
-                                    </button>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      {/* Cards de edição — um por item, com layout idêntico aos formulários de Contracts */}
-                      {list.map((p: any, idx: number) => (
-                        <div key={`edit-${idx}`} style={{ padding: 14, border: "1px solid #cbd5e1", borderRadius: 8, background: "#fafbfc" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, paddingBottom: 8, borderBottom: "1px dashed #e2e8f0" }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: "#475569", letterSpacing: "0.04em" }}>
-                              {isFiador ? "FIADOR" : "CODEVEDOR"} #{idx + 1} {p.nome ? `— ${p.nome}` : ""}
-                            </span>
-                            <button type="button" onClick={() => handleRemovePerson(role, idx)} className="btn-icon" style={{ color: "#dc2626" }} title="Remover do contrato">
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
-
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12, marginBottom: 10 }}>
-                            <div>
-                              <label className="sigx-label">TIPO DE PESSOA *</label>
-                              <select className="sigx-input" value={p.personType || "PF"} onChange={e => handleUpdatePersonField(role, idx, "personType", e.target.value)}>
-                                <option value="PF">Pessoa Física</option>
-                                <option value="PJ">Pessoa Jurídica</option>
-                              </select>
-                            </div>
-                            <div>
-                              <label className="sigx-label">{p.personType === "PJ" ? "RAZÃO SOCIAL *" : "NOME COMPLETO *"}</label>
-                              <input className="sigx-input" style={getInputStyle(p.nome)} value={p.nome || ""} onChange={e => handleUpdatePersonField(role, idx, "nome", e.target.value)} />
-                            </div>
-                          </div>
-
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 10 }}>
-                            <div>
-                              <label className="sigx-label">{p.personType === "PJ" ? "CNPJ *" : "CPF *"}</label>
-                              <input className="sigx-input mono" style={getInputStyle(p.documento)} value={p.documento || ""} onChange={e => handleUpdatePersonField(role, idx, "documento", e.target.value)} />
-                            </div>
-                            {p.personType === "PJ" ? (
-                              <div>
-                                <label className="sigx-label">NOME FANTASIA</label>
-                                <input className="sigx-input" value={p.tradeName || ""} onChange={e => handleUpdatePersonField(role, idx, "tradeName", e.target.value)} />
-                      </div>
-                    ) : (
-                              <div>
-                                <label className="sigx-label">RG</label>
-                                <input className="sigx-input mono" value={p.rg || ""} onChange={e => handleUpdatePersonField(role, idx, "rg", e.target.value)} />
-                              </div>
-                            )}
-                          </div>
-
-                          {p.personType !== "PJ" && (
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 10 }}>
-                              <div>
-                                <label className="sigx-label">NACIONALIDADE</label>
-                                <input className="sigx-input" value={p.nacionalidade || "Brasileiro"} onChange={e => handleUpdatePersonField(role, idx, "nacionalidade", e.target.value)} />
-                              </div>
-                              <div>
-                                <label className="sigx-label">ESTADO CIVIL</label>
-                                <select className="sigx-input" value={p.estado_civil || "Não informado"} onChange={e => handleUpdatePersonField(role, idx, "estado_civil", e.target.value)}>
-                                  <option value="Não informado">Não informado</option>
-                                  <option value="Solteiro(a)">Solteiro(a)</option>
-                                  <option value="Casado(a)">Casado(a)</option>
-                                  <option value="União Estável">União Estável</option>
-                                  <option value="Divorciado(a)">Divorciado(a)</option>
-                                  <option value="Viúvo(a)">Viúvo(a)</option>
-                                  <option value="Separado(a)">Separado(a)</option>
-                                </select>
-                              </div>
-                            </div>
-                          )}
-
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 10 }}>
-                            <div>
-                              <label className="sigx-label">EMAIL</label>
-                              <input type="email" className="sigx-input" value={p.email || ""} onChange={e => handleUpdatePersonField(role, idx, "email", e.target.value)} />
-                            </div>
-                            <div>
-                              <label className="sigx-label">TELEFONE</label>
-                              <input className="sigx-input mono" value={p.telefone || ""} onChange={e => handleUpdatePersonField(role, idx, "telefone", e.target.value)} />
-                            </div>
-                          </div>
-
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#475569", fontSize: 11, fontWeight: 700, textTransform: "uppercase", margin: "6px 0 4px" }}>
-                            <MapPin size={13} /> Endereço
-                          </div>
-
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
-                            <div>
-                              <label className="sigx-label">CEP</label>
-                              <input className="sigx-input mono" value={p.cep || ""} onChange={e => handleUpdatePersonField(role, idx, "cep", e.target.value)} />
-                            </div>
-                            <div style={{ gridColumn: "span 2" }}>
-                              <label className="sigx-label">RUA</label>
-                              <input className="sigx-input" value={p.rua || ""} onChange={e => handleUpdatePersonField(role, idx, "rua", e.target.value)} />
-                            </div>
-                            <div>
-                              <label className="sigx-label">NÚMERO</label>
-                              <input className="sigx-input" value={p.numero || ""} onChange={e => handleUpdatePersonField(role, idx, "numero", e.target.value)} />
-                            </div>
-                            <div>
-                              <label className="sigx-label">BAIRRO</label>
-                              <input className="sigx-input" value={p.bairro || ""} onChange={e => handleUpdatePersonField(role, idx, "bairro", e.target.value)} />
-                            </div>
-                            <div>
-                              <label className="sigx-label">COMPLEMENTO</label>
-                              <input className="sigx-input" value={p.complemento || ""} onChange={e => handleUpdatePersonField(role, idx, "complemento", e.target.value)} />
-                            </div>
-                            <div style={{ gridColumn: "span 2" }}>
-                              <label className="sigx-label">CIDADE</label>
-                              <input className="sigx-input" value={p.cidade || ""} onChange={e => handleUpdatePersonField(role, idx, "cidade", e.target.value)} />
-                            </div>
-                            <div>
-                              <label className="sigx-label">ESTADO (UF)</label>
-                              <input className="sigx-input mono" maxLength={2} value={p.uf || ""} onChange={e => handleUpdatePersonField(role, idx, "uf", e.target.value.toUpperCase())} />
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                      {isFiador
+                        ? renderPersonPanel("FIADOR")
+                        : renderPersonPanel("CODEVEDOR")}
                     </div>
                   );
                 })()}
 
 
-                {/* TAB 6: GARANTIAS — tabela compacta + cards de edição abaixo
+                {/* TAB 6: GARANTIAS — tabela compacta + AssetQuickCreateModal
                     (mesmo padrão visual da aba de Garantias em Contracts.tsx). */}
                 {activeReviewTab === "garantias" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                     <div style={{ display: "flex", gap: 8 }}>
-                            <button 
-                              type="button" 
-                        onClick={() => handleAddAsset("vehicle")}
+                      <button
+                        type="button"
+                        onClick={() => setAssetModalState({ open: true, mode: "create", initialValue: { assetType: "vehicle" } })}
                         className="btn-primary"
                         style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", fontSize: 11 }}
                       >
-                        <Car size={12} /> Adicionar Veículo
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleAddAsset("real_estate")}
-                        className="btn-secondary"
-                        style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", fontSize: 11, background: "#0d9488", color: "white", border: "none" }}
-                      >
-                        <Home size={12} /> Adicionar Imóvel
+                        <Shield size={12} /> Adicionar Garantia
                       </button>
                     </div>
 
@@ -1462,30 +1698,24 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                             <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 90 }}>Tipo</th>
                             <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>Identificação</th>
                             <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 220 }}>Detalhe</th>
-                            <th style={{ padding: "7px 10px", textAlign: "center", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 80 }}>Ações</th>
+                            <th style={{ padding: "7px 10px", textAlign: "center", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 110 }}>Ações</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {(extractedData.garantias || []).length === 0 ? (
+                          {selectedAssets.length === 0 ? (
                             <tr>
                               <td colSpan={4} style={{ padding: 28, textAlign: "center", color: "#94a3b8" }}>
                                 <Shield size={24} style={{ opacity: 0.3, margin: "0 auto 6px", display: "block" }} />
                                 <span style={{ fontSize: 11.5 }}>
-                                  Nenhum bem vinculado. Use os botões acima para adicionar.
+                                  Nenhum bem vinculado. Use o botão acima para adicionar.
                                 </span>
                               </td>
                             </tr>
-                          ) : (extractedData.garantias || []).map((a: any, idx: number) => {
-                            const isVehicle = a.tipo === "vehicle";
+                          ) : selectedAssets.map((a, idx) => {
+                            const isVehicle = a.assetType === "vehicle";
                             const Icon = isVehicle ? Car : Home;
-                            const title = isVehicle
-                              ? [a.brand, a.model].filter(Boolean).join(" ") || "(sem identificação)"
-                              : a.description || "(sem descrição)";
-                            const detail = isVehicle
-                              ? [a.plate, a.modelYear || a.manufactureYear].filter(Boolean).join(" · ")
-                              : [a.location, a.registryNumber].filter(Boolean).join(" · ");
                             return (
-                              <tr key={idx} style={{ background: idx % 2 === 1 ? "#fafafa" : "white" }}>
+                              <tr key={a.localId} style={{ background: idx % 2 === 1 ? "#fafafa" : "white" }}>
                                 <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9" }}>
                                   <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 4, fontSize: 9, fontWeight: 700, background: isVehicle ? "#ecfdf5" : "#eff6ff", color: isVehicle ? "#065f46" : "#1e40af" }}>
                                     <Icon size={10} />
@@ -1493,15 +1723,39 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                                   </span>
                                 </td>
                                 <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", fontWeight: 600, color: "#0f172a" }}>
-                                  {title}
+                                  {formatAssetTitle(a)}
                                 </td>
                                 <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", color: "#475569" }}>
-                                  {detail || "—"}
+                                  {formatAssetDetail(a)}
                                 </td>
                                 <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", textAlign: "center" }}>
-                                  <button type="button" className="btn-icon" title="Remover" style={{ color: "#dc2626" }} onClick={() => handleRemoveAsset(idx)}>
-                                    <Trash2 size={11} />
-                                  </button>
+                                  <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
+                                    <button
+                                      type="button"
+                                      className="btn-icon"
+                                      title="Visualizar dados"
+                                      onClick={() => setAssetModalState({ open: true, mode: "view", editIndex: idx, initialValue: a })}
+                                    >
+                                      <Eye size={11} style={{ color: "#2563eb" }} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn-icon"
+                                      title="Editar bem"
+                                      onClick={() => setAssetModalState({ open: true, mode: "edit", editIndex: idx, initialValue: a })}
+                                    >
+                                      <Edit2 size={11} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn-icon"
+                                      title="Remover do contrato"
+                                      style={{ color: "#dc2626" }}
+                                      onClick={() => setSelectedAssets((prev) => prev.filter((_, i) => i !== idx))}
+                                    >
+                                      <Trash2 size={11} />
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             );
@@ -1509,84 +1763,6 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                         </tbody>
                       </table>
                     </div>
-
-                    {/* Cards de edição (um por bem) */}
-                    {(extractedData.garantias || []).map((g: any, idx: number) => (
-                      <div key={`asset-${idx}`} style={{ padding: 14, border: "1px solid #cbd5e1", borderRadius: 8, background: "#fafbfc" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, paddingBottom: 8, borderBottom: "1px dashed #e2e8f0" }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, color: "#475569", letterSpacing: "0.04em" }}>
-                            {g.tipo === "vehicle" ? "VEÍCULO" : "IMÓVEL"} #{idx + 1}
-                          </span>
-                          <button type="button" onClick={() => handleRemoveAsset(idx)} className="btn-icon" style={{ color: "#dc2626" }} title="Remover bem">
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
-                          
-                        {g.tipo === "vehicle" ? (
-                          <>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 100px 100px", gap: 12, marginBottom: 10 }}>
-                            <div>
-                                <label className="sigx-label">MARCA *</label>
-                                <input className="sigx-input" style={getInputStyle(g.brand)} value={g.brand || ""} onChange={e => handleUpdateAssetField(idx, "brand", e.target.value)} />
-                            </div>
-                            <div>
-                                <label className="sigx-label">MODELO *</label>
-                                <input className="sigx-input" style={getInputStyle(g.model)} value={g.model || ""} onChange={e => handleUpdateAssetField(idx, "model", e.target.value)} />
-                            </div>
-                              <div>
-                                <label className="sigx-label">FABRICAÇÃO</label>
-                                <input type="number" className="sigx-input mono" value={g.manufactureYear || ""} onChange={e => handleUpdateAssetField(idx, "manufactureYear", e.target.value)} />
-                          </div>
-                              <div>
-                                <label className="sigx-label">ANO MODELO</label>
-                                <input type="number" className="sigx-input mono" value={g.modelYear || ""} onChange={e => handleUpdateAssetField(idx, "modelYear", e.target.value)} />
-                        </div>
-                            </div>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1.5fr", gap: 12 }}>
-                              <div>
-                                <label className="sigx-label">PLACA *</label>
-                                <input className="sigx-input mono" style={getInputStyle(g.plate)} value={g.plate || ""} onChange={e => handleUpdateAssetField(idx, "plate", e.target.value.toUpperCase())} />
-                              </div>
-                              <div>
-                                <label className="sigx-label">RENAVAM</label>
-                                <input className="sigx-input mono" value={g.renavam || ""} onChange={e => handleUpdateAssetField(idx, "renavam", e.target.value)} />
-                              </div>
-                              <div>
-                                <label className="sigx-label">CHASSI</label>
-                                <input className="sigx-input mono" value={g.chassis || ""} onChange={e => handleUpdateAssetField(idx, "chassis", e.target.value.toUpperCase())} />
-                              </div>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div style={{ marginBottom: 10 }}>
-                              <label className="sigx-label">DESCRIÇÃO DO IMÓVEL *</label>
-                              <input className="sigx-input" style={getInputStyle(g.description)} value={g.description || ""} onChange={e => handleUpdateAssetField(idx, "description", e.target.value)} />
-                            </div>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 10 }}>
-                              <div>
-                                <label className="sigx-label">LOCALIZAÇÃO / ENDEREÇO</label>
-                                <input className="sigx-input" value={g.location || ""} onChange={e => handleUpdateAssetField(idx, "location", e.target.value)} />
-                              </div>
-                              <div>
-                                <label className="sigx-label">MATRÍCULA / REGISTRO</label>
-                                <input className="sigx-input mono" value={g.registryNumber || ""} onChange={e => handleUpdateAssetField(idx, "registryNumber", e.target.value)} />
-                              </div>
-                            </div>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12 }}>
-                              <div>
-                                <label className="sigx-label">ÁREA TOTAL (m²)</label>
-                                <input className="sigx-input mono" value={g.totalArea || ""} onChange={e => handleUpdateAssetField(idx, "totalArea", e.target.value)} />
-                              </div>
-                              <div>
-                                <label className="sigx-label">CONFRONTAÇÕES</label>
-                                <input className="sigx-input" value={g.boundaries || ""} onChange={e => handleUpdateAssetField(idx, "boundaries", e.target.value)} />
-                              </div>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    ))}
 
                     <div className="keep-case" style={{ fontSize: 10.5, color: "#64748b", lineHeight: 1.5 }}>
                       Bens (veículos e imóveis) são gravados junto com o contrato em uma única transação.
@@ -1617,7 +1793,9 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                       </span>
                     </div>
 
-                    {/* TESTEMUNHAS — cartão branco igual ao da aba Regras em Contracts.tsx */}
+                    {/* 🚀 TESTEMUNHAS — usam o MESMO VinculoPessoaList e os
+                        MESMOS modais (criação rápida + busca no cadastro)
+                        que a tela de Contratos. */}
                     <div
                       style={{
                         border: "1px solid #e5e7eb",
@@ -1634,77 +1812,11 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                           <Users size={12} style={{ color: "#0d9488" }} /> TESTEMUNHAS
                         </label>
                         <span style={{ fontSize: 10, color: "#64748b" }}>
-                          {(extractedData.testemunhas || []).length} vinculada(s)
+                          {selectedTestemunhas.length} vinculada(s)
                         </span>
                       </div>
 
-                      <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden", background: "white" }}>
-                        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11 }}>
-                          <thead>
-                            <tr style={{ background: "#f1f5f9" }}>
-                              <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>Nome</th>
-                              <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 160 }}>CPF</th>
-                              <th style={{ padding: "7px 10px", textAlign: "left", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 140 }}>RG</th>
-                              <th style={{ padding: "7px 10px", textAlign: "center", fontSize: 9, fontWeight: 700, color: "#475569", textTransform: "uppercase", width: 80 }}>Ações</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(extractedData.testemunhas || []).length === 0 ? (
-                              <tr>
-                                <td colSpan={4} style={{ padding: 24, textAlign: "center", color: "#94a3b8" }}>
-                                  <Users size={20} style={{ opacity: 0.3, margin: "0 auto 4px", display: "block" }} />
-                                  <span style={{ fontSize: 11 }}>
-                                    Nenhuma testemunha vinculada. Use o botão abaixo para adicionar.
-                                  </span>
-                                </td>
-                              </tr>
-                            ) : (extractedData.testemunhas || []).map((t: any, idx: number) => (
-                              <tr key={idx} style={{ background: idx % 2 === 1 ? "#fafafa" : "white" }}>
-                                <td style={{ padding: "6px 10px", borderBottom: "1px solid #f1f5f9" }}>
-                                  <input
-                                    className="sigx-input"
-                                    style={{ ...getInputStyle(t.nome), padding: "4px 6px", fontSize: 11 }}
-                                    value={t.nome || ""}
-                                    onChange={e => handleUpdatePersonField("testemunhas", idx, "nome", e.target.value)}
-                                  />
-                                </td>
-                                <td style={{ padding: "6px 10px", borderBottom: "1px solid #f1f5f9" }}>
-                                  <input
-                                    className="sigx-input mono"
-                                    style={{ ...getInputStyle(t.documento), padding: "4px 6px", fontSize: 11 }}
-                                    value={t.documento || ""}
-                                    onChange={e => handleUpdatePersonField("testemunhas", idx, "documento", e.target.value)}
-                                  />
-                                </td>
-                                <td style={{ padding: "6px 10px", borderBottom: "1px solid #f1f5f9" }}>
-                                  <input
-                                    className="sigx-input mono"
-                                    style={{ padding: "4px 6px", fontSize: 11 }}
-                                    value={t.rg || ""}
-                                    onChange={e => handleUpdatePersonField("testemunhas", idx, "rg", e.target.value)}
-                                  />
-                                </td>
-                                <td style={{ padding: "6px 10px", borderBottom: "1px solid #f1f5f9", textAlign: "center" }}>
-                                  <button type="button" className="btn-icon" title="Remover" style={{ color: "#dc2626" }} onClick={() => handleRemovePerson("testemunhas", idx)}>
-                                    <Trash2 size={11} />
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      <div style={{ display: "flex" }}>
-                        <button
-                          type="button"
-                          onClick={() => handleAddPerson("testemunhas")}
-                          className="btn-primary"
-                          style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", fontSize: 11 }}
-                        >
-                          <Plus size={12} /> Adicionar Testemunha
-                        </button>
-                      </div>
+                      {renderPersonPanel("TESTEMUNHA")}
                     </div>
 
                     {/* OBSERVAÇÕES INTERNAS E HISTÓRICOS */}
@@ -1775,6 +1887,113 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
         </div>
 
       </div>
+
+      {/* ── SUB-MODAL: Criar/Editar pessoa on-the-fly (mesmo da tela de Contratos) ── */}
+      <GuarantorQuickCreateModal
+        open={quickModalState.open}
+        mode={quickModalState.mode}
+        initialValue={quickModalState.initialValue}
+        onClose={() => setQuickModalState({ open: false, mode: "create", target: vinculoTabActive })}
+        onConfirm={async (values) => {
+          const target = quickModalState.target;
+          const setList = setterForRole(target);
+          const docDigits = values.personType === "PJ" ? onlyDigits(values.cnpj) : onlyDigits(values.cpf);
+
+          if (quickModalState.mode === "edit-new" && typeof quickModalState.editIndex === "number") {
+            const idx = quickModalState.editIndex;
+            setList((prev) =>
+              prev.map((it, i) =>
+                i === idx
+                  ? {
+                      ...it,
+                      name: values.name,
+                      personType: values.personType,
+                      document: docDigits,
+                      formValues: values,
+                    }
+                  : it
+              )
+            );
+            setQuickModalState({ open: false, mode: "create", target: vinculoTabActive });
+            return;
+          }
+
+          // 🚀 Deduplicação on-the-fly — quando o operador "cria" alguém
+          // cujo documento já existe no catálogo de Pessoas, vinculamos
+          // a pessoa já cadastrada em vez de tentar criar duplicata
+          // (mesmo comportamento da tela de Contratos).
+          const existing = await findGuarantorByDocument(docDigits);
+          if (existing) {
+            const currentList = listForRole(target);
+            const alreadyLinked = currentList.some((it) => it.isFromDb && it.id === existing.id);
+            if (alreadyLinked) {
+              toast.info(`${existing.name} já está vinculado(a) a este contrato.`);
+            } else {
+              setList((prev) => [
+                ...prev,
+                {
+                  localId: newLocalId(),
+                  id: existing.id,
+                  isFromDb: true,
+                  name: existing.name,
+                  personType: existing.personType,
+                  document: existing.document,
+                },
+              ]);
+              toast.success(`Pessoa já cadastrada — vinculando ${existing.name} ao contrato.`);
+            }
+            setQuickModalState({ open: false, mode: "create", target: vinculoTabActive });
+            return;
+          }
+
+          // Documento não encontrado: insere como pessoa nova on-the-fly.
+          setList((prev) => [
+            ...prev,
+            {
+              localId: newLocalId(),
+              isFromDb: false,
+              name: values.name,
+              personType: values.personType,
+              document: docDigits,
+              formValues: values,
+            },
+          ]);
+          setQuickModalState({ open: false, mode: "create", target: vinculoTabActive });
+        }}
+      />
+
+      {/* ── SUB-MODAL: Buscar pessoa no cadastro (mesmo da tela de Contratos) ── */}
+      <GuarantorSearchModal
+        open={searchModalOpen}
+        excludeIds={selectedDbIdsByRole[vinculoTabActive]}
+        onClose={() => setSearchModalOpen(false)}
+        onPick={(picked) => {
+          picked.forEach((g) => addPersonFromDb(g, vinculoTabActive));
+          setSearchModalOpen(false);
+        }}
+      />
+
+      {/* ── SUB-MODAL: Bens em Garantia (mesmo da tela de Contratos) ── */}
+      <AssetQuickCreateModal
+        open={assetModalState.open}
+        mode={assetModalState.mode}
+        initialValue={assetModalState.initialValue}
+        onClose={() => setAssetModalState({ open: false, mode: "create" })}
+        onConfirm={(values) => {
+          if (
+            (assetModalState.mode === "edit" || assetModalState.mode === "view") &&
+            typeof assetModalState.editIndex === "number"
+          ) {
+            const idx = assetModalState.editIndex;
+            setSelectedAssets((prev) =>
+              prev.map((it, i) => (i === idx ? { ...it, ...values } : it))
+            );
+          } else {
+            setSelectedAssets((prev) => [...prev, { ...values, localId: newLocalId() }]);
+          }
+          setAssetModalState({ open: false, mode: "create" });
+        }}
+      />
     </UnyPayLayout>
   );
 }

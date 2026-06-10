@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Guarantors;
 
+use App\Rules\Cpf;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreGuarantorRequest extends FormRequest
@@ -27,6 +28,8 @@ class StoreGuarantorRequest extends FormRequest
             'cnpj'       => $this->input('cnpj')    ? preg_replace('/\D/', '', (string) $this->input('cnpj'))    : null,
             'zipCode'    => $this->input('zipCode') ? preg_replace('/\D/', '', (string) $this->input('zipCode')) : null,
             'state'      => $this->input('state')   ? strtoupper((string) $this->input('state'))                 : null,
+            // Normaliza telefone para apenas dígitos (preserva null quando vazio)
+            'phone'      => $this->input('phone')   ? preg_replace('/\D/', '', (string) $this->input('phone'))   : null,
         ]);
     }
 
@@ -38,10 +41,12 @@ class StoreGuarantorRequest extends FormRequest
             // Nome (PF: nome completo / PJ: razão social) — sempre obrigatório
             'name'              => ['required', 'string', 'max:255'],
             'email'             => ['nullable', 'email', 'max:255'],
-            'phone'             => ['nullable', 'string', 'max:20'],
+            // Telefone — após `prepareForValidation` chega apenas com dígitos.
+            // 10 dígitos = fixo (DDD + 8), 11 dígitos = celular (DDD + 9).
+            'phone'             => ['nullable', 'string', 'min:10', 'max:11'],
 
             // ── Campos exclusivos de Pessoa Física ─────────────────────────
-            'cpf'               => ['required_if:personType,PF', 'nullable', 'string', 'size:11', 'unique:guarantors,cpf'],
+            'cpf'               => ['required_if:personType,PF', 'nullable', 'string', 'size:11', new Cpf(), 'unique:guarantors,cpf'],
             'rg'                => ['nullable', 'string', 'max:20'],
             'nationality'       => ['required_if:personType,PF', 'nullable', 'string', 'max:80'],
             'maritalStatus'     => ['required_if:personType,PF', 'nullable', 'string', 'max:40'],
