@@ -143,16 +143,22 @@ Route::middleware('auth')->group(function () {
 
     /*
     |--------------------------------------------------------------------------
-    | CRUD de Fiadores (Guarantors)
+    | CRUD de Pessoas (cadastro mestre — Fiadores, Codevedores e Testemunhas)
+    |
+    | Mantemos /fiadores como alias retroativo (links externos, bookmarks etc.),
+    | mas o caminho canônico passou a ser /pessoas após a unificação do CRUD.
     |--------------------------------------------------------------------------
     */
-    Route::get('/fiadores',        [GuarantorController::class, 'page'])->name('guarantors.index');
-    Route::get('/fiadores/export', [GuarantorController::class, 'export'])->name('guarantors.export');
+    Route::get('/pessoas',         [GuarantorController::class, 'page'])->name('guarantors.index');
+    Route::get('/pessoas/export',  [GuarantorController::class, 'export'])->name('guarantors.export');
+    Route::get('/fiadores',        [GuarantorController::class, 'page']);
+    Route::get('/fiadores/export', [GuarantorController::class, 'export']);
 
     Route::get   ('/api/guarantors',                    [GuarantorController::class, 'index'])->name('guarantors.list');
     // 🚀 Autocomplete leve usado pelo modal de Contratos (declarado ANTES de /{guarantor}
     // para não cair no model binding como guarantor=search).
     Route::get   ('/api/guarantors/search',             [GuarantorController::class, 'search'])->name('guarantors.search');
+    Route::get   ('/api/guarantors/find-by-document',   [GuarantorController::class, 'findByDocument'])->name('guarantors.find-by-document');
     Route::post  ('/api/guarantors',                    [GuarantorController::class, 'store'])->name('guarantors.store');
     Route::get   ('/api/guarantors/{guarantor}',        [GuarantorController::class, 'show'])->name('guarantors.show');
     Route::put   ('/api/guarantors/{guarantor}',        [GuarantorController::class, 'update'])->name('guarantors.update');

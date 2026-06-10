@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Guarantors;
 
+use App\Rules\Cpf;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -28,6 +29,7 @@ class UpdateGuarantorRequest extends FormRequest
             'cnpj'       => $this->input('cnpj')    ? preg_replace('/\D/', '', (string) $this->input('cnpj'))    : null,
             'zipCode'    => $this->input('zipCode') ? preg_replace('/\D/', '', (string) $this->input('zipCode')) : null,
             'state'      => $this->input('state')   ? strtoupper((string) $this->input('state'))                 : null,
+            'phone'      => $this->input('phone')   ? preg_replace('/\D/', '', (string) $this->input('phone'))   : null,
         ]);
     }
 
@@ -43,10 +45,11 @@ class UpdateGuarantorRequest extends FormRequest
             'personType'        => ['required', 'in:PF,PJ'],
             'name'              => ['required', 'string', 'max:255'],
             'email'             => ['nullable', 'email', 'max:255'],
-            'phone'             => ['nullable', 'string', 'max:20'],
+            'phone'             => ['nullable', 'string', 'min:10', 'max:11'],
 
             'cpf'               => [
                 'required_if:personType,PF', 'nullable', 'string', 'size:11',
+                new Cpf(),
                 Rule::unique('guarantors', 'cpf')->ignore($guarantorId),
             ],
             'rg'                => ['nullable', 'string', 'max:20'],
@@ -77,18 +80,18 @@ class UpdateGuarantorRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'personType.required'           => 'Selecione se o fiador é Pessoa Física ou Jurídica.',
-            'name.required'                 => 'Informe o nome do fiador (ou Razão Social).',
+            'personType.required'           => 'Selecione se a pessoa é Pessoa Física ou Jurídica.',
+            'name.required'                 => 'Informe o nome da pessoa (ou Razão Social).',
 
-            'cpf.required_if'               => 'Informe o CPF do fiador.',
+            'cpf.required_if'               => 'Informe o CPF da pessoa.',
             'cpf.size'                      => 'O CPF deve conter 11 dígitos numéricos.',
-            'cpf.unique'                    => 'Já existe outro fiador cadastrado com este CPF.',
+            'cpf.unique'                    => 'Já existe outra pessoa cadastrada com este CPF.',
             'nationality.required_if'       => 'Informe a nacionalidade.',
             'maritalStatus.required_if'     => 'Informe o estado civil.',
 
             'cnpj.required_if'              => 'Informe o CNPJ da empresa.',
             'cnpj.size'                     => 'O CNPJ deve conter 14 dígitos numéricos.',
-            'cnpj.unique'                   => 'Já existe outro fiador cadastrado com este CNPJ.',
+            'cnpj.unique'                   => 'Já existe outra pessoa cadastrada com este CNPJ.',
             'tradeName.required_if'         => 'Informe o Nome Fantasia.',
 
             'state.size'                    => 'A UF deve ter 2 caracteres (ex: MG).',

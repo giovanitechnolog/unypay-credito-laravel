@@ -6,6 +6,7 @@ import GuarantorFormFields, {
   GuarantorFormValues,
   onlyDigits,
 } from "./GuarantorFormFields";
+import { validateCPF } from "../lib/documentValidation";
 
 /**
  * Sub-modal de fiador usado pelo modal de Contratos.
@@ -31,9 +32,9 @@ interface Props {
 }
 
 const TITLES: Record<QuickCreateMode, string> = {
-  "create": "Novo Fiador / Codevedor",
-  "edit-new": "Editar Fiador / Codevedor",
-  "view": "Detalhes do Fiador / Codevedor",
+  "create": "Nova Pessoa",
+  "edit-new": "Editar Pessoa",
+  "view": "Detalhes da Pessoa",
 };
 
 const SUBTITLES: Record<QuickCreateMode, string> = {
@@ -81,6 +82,11 @@ export default function GuarantorQuickCreateModal({
 
     if (form.personType === "PF") {
       if (onlyDigits(form.cpf).length !== 11) { toast.error("CPF inválido."); return; }
+      // 🚀 Valida algoritmo dos dois dígitos verificadores. Espelha
+      // `App\Rules\Cpf` no backend para feedback imediato — assim
+      // testemunhas/fiadores/codevedores criados pelo modal não passam
+      // com CPF sintaticamente correto porém matematicamente inválido.
+      if (!validateCPF(form.cpf)) { toast.error("O CPF informado é inválido."); return; }
       if (!form.nationality.trim()) { toast.error("Informe a nacionalidade."); return; }
       if (!form.maritalStatus) { toast.error("Selecione o estado civil."); return; }
     } else {

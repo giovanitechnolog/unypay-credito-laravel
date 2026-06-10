@@ -7,6 +7,7 @@ import {
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
 import ConfirmDialog from "../Components/ConfirmDialog";
+import PasswordInput from "../Components/PasswordInput";
 import { api, extractFirstError } from "../lib/api";
 
 interface User {
@@ -578,7 +579,13 @@ export default function UsersPage() {
                         <label className="sigx-label">
                           SENHA DE ACESSO {selectedUser && <span style={{ color: "#94a3b8", fontWeight: 500 }}>(deixe vazio para manter)</span>}
                         </label>
-                        <input type="password" className="sigx-input" value={formData.password} onChange={e => setFormData(p => ({ ...p, password: e.target.value }))} required={!selectedUser} />
+                        <PasswordInput
+                          className="sigx-input"
+                          value={formData.password}
+                          onChange={e => setFormData(p => ({ ...p, password: e.target.value }))}
+                          required={!selectedUser}
+                          autoComplete="new-password"
+                        />
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                         <div>

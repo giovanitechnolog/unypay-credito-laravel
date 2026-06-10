@@ -28,7 +28,7 @@ class GuarantorController extends Controller
     {
         $rows = $this->buildGuarantorsForExport($request);
 
-        return Excel::download(new GuarantorsExport($rows), 'fiadores.xlsx');
+        return Excel::download(new GuarantorsExport($rows), 'pessoas.xlsx');
     }
 
     /**
@@ -45,8 +45,9 @@ class GuarantorController extends Controller
                 ->with(['clients:id,name'])
                 ->withCount('clients')
                 ->withCount([
-                    'contracts as fiadores_count'    => fn ($q) => $q->where('contract_guarantor.role', 'FIADOR'),
-                    'contracts as codevedores_count' => fn ($q) => $q->where('contract_guarantor.role', 'CODEVEDOR'),
+                    'contracts as fiadores_count'     => fn ($q) => $q->where('contract_guarantor.role', 'FIADOR'),
+                    'contracts as codevedores_count'  => fn ($q) => $q->where('contract_guarantor.role', 'CODEVEDOR'),
+                    'contracts as testemunhas_count' => fn ($q) => $q->where('contract_guarantor.role', 'TESTEMUNHA'),
                 ]),
             $search
         );
@@ -64,8 +65,9 @@ class GuarantorController extends Controller
             Guarantor::query()
                 ->with(['clients:id,name'])
                 ->withCount([
-                    'contracts as fiadores_count'    => fn ($q) => $q->where('contract_guarantor.role', 'FIADOR'),
-                    'contracts as codevedores_count' => fn ($q) => $q->where('contract_guarantor.role', 'CODEVEDOR'),
+                    'contracts as fiadores_count'     => fn ($q) => $q->where('contract_guarantor.role', 'FIADOR'),
+                    'contracts as codevedores_count'  => fn ($q) => $q->where('contract_guarantor.role', 'CODEVEDOR'),
+                    'contracts as testemunhas_count' => fn ($q) => $q->where('contract_guarantor.role', 'TESTEMUNHA'),
                 ]),
             $search
         )->orderBy('name')->get();
@@ -123,7 +125,7 @@ class GuarantorController extends Controller
         $guarantor->load(['clients:id,name'])->loadCount('clients');
 
         return response()->json([
-            'message'   => 'Fiador cadastrado com sucesso.',
+            'message'   => 'Pessoa cadastrada com sucesso.',
             'guarantor' => $guarantor,
         ], 201);
     }
@@ -148,7 +150,7 @@ class GuarantorController extends Controller
         $guarantor->load(['clients:id,name'])->loadCount('clients');
 
         return response()->json([
-            'message'   => 'Fiador atualizado com sucesso.',
+            'message'   => 'Pessoa atualizada com sucesso.',
             'guarantor' => $guarantor,
         ]);
     }
@@ -163,7 +165,7 @@ class GuarantorController extends Controller
         $guarantor->delete();
 
         return response()->json([
-            'message' => 'Fiador removido com sucesso.',
+            'message' => 'Pessoa removida com sucesso.',
         ]);
     }
 
@@ -215,6 +217,55 @@ class GuarantorController extends Controller
         });
 
         return response()->json($guarantors);
+    }
+
+    /**
+     * GET /api/guarantors/find-by-document?document=XXXXXXXXXXX
+     *
+     * Lookup EXATO por documento (apenas dígitos). Espelha o shape do
+     * /search (`GuarantorLite`) para que o front possa reusar o mesmo
+     * fluxo de "adicionar pessoa do banco" com o resultado.
+     *
+     * Comportamento:
+     *  - CPF: documento de 11 dígitos → procura em `guarantors.cpf`
+     *  - CNPJ: documento de 14 dígitos → procura em `guarantors.cnpj`
+     *  - Qualquer outro tamanho → 422 (documento inválido)
+     *  - Sem match → 200 com `{ "guarantor": null }`
+     *  - Match    → 200 com `{ "guarantor": { id, name, personType, document } }`
+     *
+     * Usado para deduplicação on-the-fly nas telas de Contratos e
+     * Ingestão IA: quando o operador (ou a IA) tenta criar uma pessoa
+     * com um CPF/CNPJ já cadastrado, o front automaticamente substitui
+     * a entrada "Nova" pela já existente no banco.
+     */
+    public function findByDocument(Request $request): JsonResponse
+    {
+        $digits = preg_replace('/\D/', '', (string) $request->input('document', ''));
+
+        if (!in_array(strlen($digits), [11, 14], true)) {
+            return response()->json([
+                'error' => 'Informe um CPF (11 dígitos) ou CNPJ (14 dígitos) válido.',
+            ], 422);
+        }
+
+        $isCpf = strlen($digits) === 11;
+        $match = Guarantor::query()
+            ->select(['id', 'name', 'personType', 'cpf', 'cnpj'])
+            ->where($isCpf ? 'cpf' : 'cnpj', $digits)
+            ->first();
+
+        if (!$match) {
+            return response()->json(['guarantor' => null]);
+        }
+
+        return response()->json([
+            'guarantor' => [
+                'id'         => $match->id,
+                'name'       => $match->name,
+                'personType' => $match->personType,
+                'document'   => $match->personType === 'PJ' ? $match->cnpj : $match->cpf,
+            ],
+        ]);
     }
 
     /**
