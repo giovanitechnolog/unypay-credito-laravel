@@ -18,7 +18,7 @@ import { GuarantorFormValues } from "./GuarantorFormFields";
  * duplicação entre "Fiadores" e "Codevedores".
  */
 
-export type VinculoPessoaType = "FIADOR" | "CODEVEDOR";
+export type VinculoPessoaType = "FIADOR" | "CODEVEDOR" | "TESTEMUNHA";
 
 /** Item da lista — espelha a estrutura usada em Contracts.tsx (ContractGuarantor). */
 export type VinculoPessoaItem = {
@@ -91,6 +91,18 @@ const LABELS: Record<VinculoPessoaType, {
     removeTitle: "Remover do contrato",
     footerArticle: "Os",
     footerNoun: "Codevedores",
+  },
+  "TESTEMUNHA": {
+    singular: "Testemunha",
+    singularUC: "TESTEMUNHA",
+    plural: "Testemunhas",
+    pluralUC: "TESTEMUNHAS",
+    banner: "Pessoas Sugeridas para este cliente",
+    bannerHint: "— clique para adicionar como testemunha",
+    emptyText: "Nenhuma testemunha vinculada. Use os botões acima para adicionar.",
+    removeTitle: "Remover do contrato",
+    footerArticle: "As",
+    footerNoun: "Testemunhas",
   },
 };
 
@@ -334,7 +346,7 @@ export default function VinculoPessoaList({
         {labels.footerArticle} {labels.footerNoun.toLowerCase()} marcados como{" "}
         <strong style={{ color: "#92400e" }}>Novo</strong> serão cadastrados e
         vinculados ao cliente automaticamente quando você salvar o contrato. Os marcados como{" "}
-        <strong style={{ color: "#166534" }}>Cadastrado</strong> não podem ser editados aqui (edite-os na tela de Fiador / Codevedor).
+        <strong style={{ color: "#166534" }}>Cadastrado</strong> não podem ser editados aqui (edite-os na tela de Pessoas).
       </div>
     </div>
   );

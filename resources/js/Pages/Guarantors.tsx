@@ -52,6 +52,8 @@ interface Guarantor {
   fiadores_count?: number;
   /** Vínculos como CODEVEDOR em contratos (pivot contract_guarantor com role='CODEVEDOR'). */
   codevedores_count?: number;
+  /** Vínculos como TESTEMUNHA em contratos (pivot contract_guarantor com role='TESTEMUNHA'). */
+  testemunhas_count?: number;
 }
 
 interface PaginatedGuarantors {
@@ -209,7 +211,7 @@ export default function GuarantorsPage() {
       });
       setGuarantors(data.data);
     } catch (err) {
-      toast.error(extractFirstError(err, "Erro ao carregar fiadores."));
+      toast.error(extractFirstError(err, "Erro ao carregar pessoas."));
     } finally {
       setLoading(false);
     }
@@ -233,8 +235,8 @@ export default function GuarantorsPage() {
 
   const handleExportExcel = useCallback(() => {
     downloadExcelWithState(
-      "/fiadores/export",
-      "fiadores.xlsx",
+      "/pessoas/export",
+      "pessoas.xlsx",
       setExporting,
       { params: { search: search.trim() || undefined } },
     );
@@ -262,6 +264,7 @@ export default function GuarantorsPage() {
     // (Diferente de `clients_count`, que mede vínculo direto pessoa↔cliente.)
     fiadores: guarantors.filter(g => (g.fiadores_count ?? 0) > 0).length,
     codevedores: guarantors.filter(g => (g.codevedores_count ?? 0) > 0).length,
+    testemunhas: guarantors.filter(g => (g.testemunhas_count ?? 0) > 0).length,
   }), [guarantors]);
 
   const openCreate = () => {
@@ -523,15 +526,15 @@ export default function GuarantorsPage() {
     try {
       if (selected) {
         await api.put(`/api/guarantors/${selected.id}`, payload);
-        toast.success("Fiador atualizado com sucesso!");
+        toast.success("Pessoa atualizada com sucesso!");
       } else {
         await api.post("/api/guarantors", payload);
-        toast.success("Fiador cadastrado com sucesso!");
+        toast.success("Pessoa cadastrada com sucesso!");
       }
       setFormOpen(false);
       fetchGuarantors(search);
     } catch (err) {
-      toast.error(extractFirstError(err, "Falha ao gravar os dados do fiador."));
+      toast.error(extractFirstError(err, "Falha ao gravar os dados da pessoa."));
     }
   };
 
@@ -539,11 +542,11 @@ export default function GuarantorsPage() {
     if (!deleteModal) return;
     try {
       await api.delete(`/api/guarantors/${deleteModal.id}`);
-      toast.success("Fiador removido.");
+      toast.success("Pessoa removida.");
       setDeleteModal(null);
       fetchGuarantors(search);
     } catch (err) {
-      toast.error(extractFirstError(err, "Não foi possível remover o fiador."));
+      toast.error(extractFirstError(err, "Não foi possível remover a pessoa."));
     }
   };
 
@@ -562,7 +565,7 @@ export default function GuarantorsPage() {
 
   return (
     <UnyPayLayout>
-      <Head title="Gerenciamento de Fiador / Codevedor" />
+      <Head title="Gerenciamento de Pessoas" />
 
       <style>{`
         /* —— Caixa alta visual da tela inteira (incluindo modal) —— */
@@ -605,15 +608,15 @@ export default function GuarantorsPage() {
 
       <div className="guarantors-page" style={{ display: "flex", flexDirection: "column", gap: 16, padding: "4px 4px 24px 4px" }}>
         <div>
-          <h2 style={{ fontSize: 20, fontWeight: 700, color: "#1e293b", margin: 0 }}>Cadastro de Fiador / Codevedor</h2>
-          <p style={{ fontSize: 12, color: "#64748b", margin: "2px 0 0 0" }}>Gerencie as pessoas (Fiadores e Codevedores) institucionais e seus vínculos com clientes da carteira.</p>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: "#1e293b", margin: 0 }}>Cadastro de Pessoas</h2>
+          <p style={{ fontSize: 12, color: "#64748b", margin: "2px 0 0 0" }}>Cadastro mestre unificado das pessoas que atuam em contratos como Fiador, Codevedor ou Testemunha — incluindo seus vínculos com os clientes da carteira.</p>
         </div>
 
         {/* Cards de resumo */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
           <div style={{ background: "white", border: "1px solid #e2e8f0", padding: 14, borderRadius: 8, display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ padding: 8, background: "#f1f5f9", borderRadius: 6, color: "#475569" }}><Handshake size={18} /></div>
-            <div><span style={{ fontSize: 11, color: "#64748b", display: "block" }}>Total de Fiadores</span><strong style={{ fontSize: 18, color: "#0f172a" }}>{counters.total}</strong></div>
+            <div><span style={{ fontSize: 11, color: "#64748b", display: "block" }}>Total de Pessoas</span><strong style={{ fontSize: 18, color: "#0f172a" }}>{counters.total}</strong></div>
           </div>
           <div style={{ background: "white", border: "1px solid #e2e8f0", padding: 14, borderRadius: 8, display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ padding: 8, background: "#ecfdf5", borderRadius: 6, color: "#059669" }}><User size={18} /></div>
@@ -630,6 +633,10 @@ export default function GuarantorsPage() {
           <div style={{ background: "white", border: "1px solid #e2e8f0", padding: 14, borderRadius: 8, display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ padding: 8, background: "#fff7ed", borderRadius: 6, color: "#c2410c" }}><Scale size={18} /></div>
             <div><span style={{ fontSize: 11, color: "#64748b", display: "block" }}>Vínculos Codevedores</span><strong style={{ fontSize: 18, color: "#c2410c" }}>{counters.codevedores}</strong></div>
+          </div>
+          <div style={{ background: "white", border: "1px solid #e2e8f0", padding: 14, borderRadius: 8, display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ padding: 8, background: "#ecfeff", borderRadius: 6, color: "#0e7490" }}><UsersIcon size={18} /></div>
+            <div><span style={{ fontSize: 11, color: "#64748b", display: "block" }}>Vínculos Testemunhas</span><strong style={{ fontSize: 18, color: "#0e7490" }}>{counters.testemunhas}</strong></div>
           </div>
         </div>
 
@@ -651,7 +658,7 @@ export default function GuarantorsPage() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
               <button type="button" className="btn-primary" onClick={openCreate} style={{ padding: "6px 14px", fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
-                <Plus size={12} /> Novo Fiador / Codevedor
+                <Plus size={12} /> Nova Pessoa
               </button>
               <button
                 type="button"
@@ -669,20 +676,21 @@ export default function GuarantorsPage() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, textAlign: "left" }}>
               <thead>
                 <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                  <th style={{ padding: "10px 14px", color: "#475569", fontWeight: 600 }}>FIADOR</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontWeight: 600 }}>PESSOA</th>
                   <th style={{ padding: "10px 14px", color: "#475569", fontWeight: 600, textAlign: "center" }}>TIPO</th>
                   <th style={{ padding: "10px 14px", color: "#475569", fontWeight: 600 }}>DOCUMENTOS</th>
                   <th style={{ padding: "10px 14px", color: "#475569", fontWeight: 600 }}>LOCALIZAÇÃO</th>
                   <th style={{ padding: "10px 14px", color: "#475569", fontWeight: 600, textAlign: "center" }}>VÍNCULO FIADOR</th>
                   <th style={{ padding: "10px 14px", color: "#475569", fontWeight: 600, textAlign: "center" }}>VÍNCULO CODEVEDOR</th>
+                  <th style={{ padding: "10px 14px", color: "#475569", fontWeight: 600, textAlign: "center" }}>VÍNCULO TESTEMUNHA</th>
                   <th style={{ padding: "10px 14px", color: "#475569", fontWeight: 600, textAlign: "right" }}>AÇÕES</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={7} style={{ padding: 32, textAlign: "center", color: "#64748b" }}>Carregando fiadores...</td></tr>
+                  <tr><td colSpan={8} style={{ padding: 32, textAlign: "center", color: "#64748b" }}>Carregando pessoas...</td></tr>
                 ) : guarantors.length === 0 ? (
-                  <tr><td colSpan={7} style={{ padding: 32, textAlign: "center", color: "#94a3b8" }}>Nenhum fiador localizado.</td></tr>
+                  <tr><td colSpan={8} style={{ padding: 32, textAlign: "center", color: "#94a3b8" }}>Nenhuma pessoa localizada.</td></tr>
                 ) : (
                   guarantors.map(g => {
                     const isPJ = g.personType === "PJ";
@@ -761,10 +769,15 @@ export default function GuarantorsPage() {
                           <Scale size={11} /> {g.codevedores_count ?? 0}
                         </span>
                       </td>
+                      <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: (g.testemunhas_count ?? 0) > 0 ? "#ecfeff" : "#f1f5f9", color: (g.testemunhas_count ?? 0) > 0 ? "#0e7490" : "#94a3b8" }}>
+                          <UsersIcon size={11} /> {g.testemunhas_count ?? 0}
+                        </span>
+                      </td>
                       <td style={{ padding: "10px 14px", textAlign: "right" }}>
                         <div style={{ display: "inline-flex", gap: 4 }}>
-                          <button onClick={() => openEdit(g)} className="btn-icon" title="Editar Fiador"><Edit2 size={13} /></button>
-                          <button onClick={() => setDeleteModal(g)} className="btn-icon" title="Remover Fiador" style={{ color: "#dc2626" }}><Trash2 size={13} /></button>
+                          <button onClick={() => openEdit(g)} className="btn-icon" title="Editar Pessoa"><Edit2 size={13} /></button>
+                          <button onClick={() => setDeleteModal(g)} className="btn-icon" title="Remover Pessoa" style={{ color: "#dc2626" }}><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>
@@ -810,10 +823,10 @@ export default function GuarantorsPage() {
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                     <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
-                      {selected ? "Editar Fiador" : "Novo Fiador"}
+                      {selected ? "Editar Pessoa" : "Nova Pessoa"}
                     </span>
                     <span style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>
-                      {selected ? `Atualizando registro #${selected.id}` : "Preencha as guias abaixo para registrar um novo fiador"}
+                      {selected ? `Atualizando registro #${selected.id}` : "Preencha as guias abaixo para registrar uma nova pessoa"}
                     </span>
                   </div>
                 </div>
@@ -907,7 +920,7 @@ export default function GuarantorsPage() {
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                       {/* ── Toggle PF / PJ ─────────────────────────────── */}
                       <div>
-                        <label className="sigx-label">TIPO DE FIADOR *</label>
+                        <label className="sigx-label">TIPO DE PESSOA *</label>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                           {([
                             { key: "PF" as const, label: "Pessoa Física",   icon: User,      color: "#059669", bg: "#ecfdf5", border: "#a7f3d0" },
@@ -1276,7 +1289,7 @@ export default function GuarantorsPage() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <strong style={{ fontSize: 12, color: "#1e2139", display: "block" }}>Vincular a Clientes da Carteira</strong>
                           <span className="keep-case" style={{ fontSize: 10.5, color: "#64748b" }}>
-                            Marque os clientes que terão este fiador como garantidor solidário.
+                            Marque os clientes que terão esta pessoa como vínculo padrão (Fiador, Codevedor ou Testemunha).
                           </span>
                         </div>
                         <span style={{ fontSize: 11, fontWeight: 700, color: "#2563eb" }}>
@@ -1393,12 +1406,12 @@ export default function GuarantorsPage() {
                   }}
                 >
                   <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>
-                    {selected ? "Edição registrada com auditoria automática" : "Novo fiador será atribuído à esteira"}
+                    {selected ? "Edição registrada com auditoria automática" : "Nova pessoa será atribuída à esteira"}
                   </span>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button type="button" className="btn-secondary" onClick={() => setFormOpen(false)}>Cancelar</button>
                     <button type="submit" className="btn-primary" style={{ minWidth: 150, justifyContent: "center" }} disabled={cnpjLoading || !!documentError}>
-                      {selected ? "Atualizar Fiador" : "Salvar Fiador"}
+                      {selected ? "Atualizar Pessoa" : "Salvar Pessoa"}
                     </button>
                   </div>
                 </div>
@@ -1410,8 +1423,8 @@ export default function GuarantorsPage() {
         <ConfirmDialog
           open={!!deleteModal}
           tone="danger"
-          title="Remover Fiador"
-          description="Esta ação é permanente. Os dados do fiador e todos os vínculos serão apagados do sistema."
+          title="Remover Pessoa"
+          description="Esta ação é permanente. Os dados da pessoa e todos os vínculos (Fiador, Codevedor e Testemunha) serão apagados do sistema."
           entityLabel={deleteModal?.personType === "PJ" ? "Pessoa Jurídica" : "Pessoa Física"}
           entityName={deleteModal?.name}
           entityDetail={
@@ -1421,7 +1434,7 @@ export default function GuarantorsPage() {
           }
           consequences={[
             "Vínculos com clientes serão desfeitos automaticamente.",
-            "Vínculos com contratos garantidos por este fiador também serão removidos.",
+            "Vínculos com contratos (em qualquer papel) também serão removidos.",
           ]}
           confirmLabel="Confirmar Remoção"
           onConfirm={handleDelete}
