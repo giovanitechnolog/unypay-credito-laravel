@@ -65,6 +65,7 @@ Route::middleware('auth')->group(function () {
     // do modal de Contratos). Declarado antes de /clients/{id} de propósito.
     Route::get   ('/api/clients/{id}/guarantors', [ClientController::class, 'guarantors'])->name('clients.guarantors');
     Route::get   ('/api/cnpj/{cnpj}',             [IntegrationController::class, 'lookupCnpj'])->name('integrations.cnpj');
+    Route::get   ('/api/cpf/{cpf}',               [IntegrationController::class, 'lookupCpf'])->name('integrations.cpf');
     Route::get   ('/clients/{id}', [ClientController::class, 'show'])->name('clients.show');
     Route::put   ('/clients/{id}', [ClientController::class, 'update'])->name('clients.update');
     Route::delete('/clients/{id}', [ClientController::class, 'destroy'])->name('clients.destroy');
@@ -187,6 +188,22 @@ Route::middleware('auth')->group(function () {
     Route::post('/api/contract-types', [ContractTypeController::class, 'store']);
     Route::put('/api/contract-types/{id}', [ContractTypeController::class, 'update']);
     Route::delete('/api/contract-types/{id}', [ContractTypeController::class, 'destroy']);
+
+    /*
+    |--------------------------------------------------------------------------
+    | 🌐 Integrações Externas (CRUD + Teste de Conexão)
+    |--------------------------------------------------------------------------
+    | Tela onde o operador cadastra URL/credenciais de APIs externas
+    | (Rodopar SIGx, ReceitaWS, ViaCEP, Serasa, etc.). Inclui um endpoint
+    | dedicado `test` que dispara uma requisição real e devolve o resultado
+    | (status HTTP + mensagem) para o botão "Testar" da tabela.
+    */
+    Route::get('/integracoes',                          [IntegrationController::class, 'page'])->name('integrations.index');
+    Route::get   ('/api/integrations',                  [IntegrationController::class, 'index'])->name('integrations.list');
+    Route::post  ('/api/integrations',                  [IntegrationController::class, 'store'])->name('integrations.store');
+    Route::put   ('/api/integrations/{id}',             [IntegrationController::class, 'update'])->name('integrations.update');
+    Route::delete('/api/integrations/{id}',             [IntegrationController::class, 'destroy'])->name('integrations.destroy');
+    Route::post  ('/api/integrations/{id}/test',        [IntegrationController::class, 'test'])->name('integrations.test');
 
     /*
     |--------------------------------------------------------------------------

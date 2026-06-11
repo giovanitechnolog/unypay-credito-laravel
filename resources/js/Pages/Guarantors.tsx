@@ -17,6 +17,7 @@ import {
   validateCPF,
 } from "../lib/documentValidation";
 import { maskPhone } from "../lib/masks";
+import { fetchSigxByCpf, getRedHighlight } from "../lib/sigx";
 
 interface ClientLite {
   id: number;
@@ -170,6 +171,56 @@ export default function GuarantorsPage() {
   const [documentError, setDocumentError] = useState("");
   const [cnpjLoading, setCnpjLoading] = useState(false);
   const lastFetchedCnpjRef = useRef("");
+  // 🚀 Sincronização SIGx (CPF). Estilo idêntico ao GuarantorFormFields:
+  // após sync bem-sucedido, campos não retornados pela API ficam vermelhos
+  // como orientação visual (sem virar `required`).
+  const [cpfLoading, setCpfLoading] = useState(false);
+  const [cpfSynced, setCpfSynced] = useState(false);
+
+  const handleSyncCpf = async () => {
+    const digits = onlyDigits(formData.cpf);
+    if (digits.length !== 11) {
+      toast.error("Digite um CPF completo (11 dígitos) antes de sincronizar.");
+      return;
+    }
+    if (!validateCPF(digits)) {
+      toast.error("CPF inválido — corrija antes de consultar o SIGx.");
+      return;
+    }
+
+    setCpfLoading(true);
+    try {
+      const result = await fetchSigxByCpf(digits);
+      if (!result.ok || !result.data) {
+        toast.error(result.error ?? "Não foi possível consultar o SIGx.");
+        return;
+      }
+
+      const d = result.data;
+      setFormData(p => ({
+        ...p,
+        name:          d.name          || p.name,
+        rg:            d.rg            || p.rg,
+        email:         d.email         || p.email,
+        phone:         d.phone         ? maskPhone(String(d.phone)) : p.phone,
+        nationality:   d.nationality   || p.nationality,
+        maritalStatus: d.maritalStatus || p.maritalStatus,
+        zipCode:       d.zipCode       ? maskCEP(String(d.zipCode)) : p.zipCode,
+        street:        d.street        || p.street,
+        number:        d.number        ? String(d.number) : p.number,
+        complement:    d.complement    || p.complement,
+        neighborhood:  d.neighborhood  || p.neighborhood,
+        city:          d.city          || p.city,
+        state:         d.state         ? String(d.state).toUpperCase() : p.state,
+      }));
+      setCpfSynced(true);
+      toast.success("Dados do SIGx aplicados ao formulário.");
+    } catch (err) {
+      toast.error(extractFirstError(err, "Falha ao consultar o SIGx."));
+    } finally {
+      setCpfLoading(false);
+    }
+  };
 
   const handleCepChange = async (raw: string) => {
     const masked = maskCEP(raw);
@@ -275,6 +326,7 @@ export default function GuarantorsPage() {
     setCepFeedback("");
     setDocumentError("");
     setCnpjLoading(false);
+    setCpfSynced(false);
     lastFetchedCnpjRef.current = "";
     setFormOpen(true);
   };
@@ -307,38 +359,33 @@ export default function GuarantorsPage() {
     setCepFeedback("");
     setDocumentError("");
     setCnpjLoading(false);
+    setCpfSynced(false);
     lastFetchedCnpjRef.current = onlyDigits(g.cnpj ?? "");
     setFormOpen(true);
   };
 
   /**
-   * Alterna entre PF e PJ limpando os campos exclusivos do tipo anterior.
-   * Mantém endereço e nome (que servem aos dois).
+   * 🚀 Alterna entre PF e PJ resetando TODO o formulário. Regra de negócio:
+   * dados de pessoa física (nome próprio, e-mail pessoal, RG, endereço
+   * residencial, etc.) NÃO podem permanecer ao mudar para pessoa
+   * jurídica — e vice-versa (Razão Social, CNPJ, Inscrição Estadual,
+   * Nome Fantasia não fazem sentido em PF).
+   *
+   * Preservamos apenas a vinculação NxN com clientes (`clientIds`), pois
+   * ela representa relacionamentos externos que independem do tipo de
+   * pessoa que está sendo cadastrada.
    */
   const switchPersonType = (next: PersonType) => {
     setDocumentError("");
+    setCepFeedback("");
     lastFetchedCnpjRef.current = "";
+    setCpfSynced(false);
     setFormData(prev => {
       if (prev.personType === next) return prev;
-      if (next === "PJ") {
-        return {
-          ...prev,
-          personType: "PJ",
-          // Zera campos PF
-          nationality: "",
-          maritalStatus: "",
-          cpf: "",
-          rg: "",
-        };
-      }
       return {
-        ...prev,
-        personType: "PF",
-        nationality: "Brasileiro",
-        // Zera campos PJ
-        cnpj: "",
-        tradeName: "",
-        stateRegistration: "",
+        ...EMPTY_FORM,
+        personType: next,
+        clientIds: prev.clientIds,
       };
     });
   };
@@ -407,6 +454,7 @@ export default function GuarantorsPage() {
       const masked = maskDocument(onlyDigits(value).slice(0, 11));
       setFormData(prev => ({ ...prev, cpf: masked }));
       lastFetchedCnpjRef.current = "";
+      if (cpfSynced) setCpfSynced(false);
       return;
     }
 
@@ -967,48 +1015,15 @@ export default function GuarantorsPage() {
                       </div>
 
                       {/* ── Campos de Pessoa Física ────────────────────── */}
+                      {/* 🚀 CPF/RG vem PRIMEIRO porque o CPF dispara o
+                          auto-preenchimento via SIGx. Mesma lógica que
+                          PJ, onde o CNPJ inicia a Receita Federal. */}
                       {formData.personType === "PF" && (
                         <>
-                          <div>
-                            <label className="sigx-label">NOME COMPLETO *</label>
-                            <input
-                              type="text"
-                              className="sigx-input"
-                              value={formData.name}
-                              onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
-                              required
-                            />
-                          </div>
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                            <div>
-                              <label className="sigx-label">NACIONALIDADE *</label>
-                              <input
-                                type="text"
-                                className="sigx-input"
-                                value={formData.nationality}
-                                onChange={e => setFormData(p => ({ ...p, nationality: e.target.value }))}
-                                required
-                              />
-                            </div>
-                            <div>
-                              <label className="sigx-label">ESTADO CIVIL *</label>
-                              <select
-                                className="sigx-input"
-                                value={formData.maritalStatus}
-                                onChange={e => setFormData(p => ({ ...p, maritalStatus: e.target.value }))}
-                                required
-                              >
-                                <option value="">Selecione...</option>
-                                {MARITAL_STATUS_OPTIONS.map(opt => (
-                                  <option key={opt} value={opt}>{opt}</option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                             <div>
                               <label className="sigx-label">CPF *</label>
-                              <div style={{ position: "relative" }}>
+                              <div style={{ display: "flex", gap: 8 }}>
                                 <input
                                   type="text"
                                   className="sigx-input mono"
@@ -1016,14 +1031,50 @@ export default function GuarantorsPage() {
                                   value={formData.cpf}
                                   onChange={e => handleDocumentChange(e.target.value)}
                                   onBlur={handleDocumentBlur}
-                                  disabled={cnpjLoading}
+                                  disabled={cnpjLoading || cpfLoading}
                                   required
                                   style={documentError ? { borderColor: "#dc2626" } : undefined}
                                 />
+                                <button
+                                  type="button"
+                                  onClick={handleSyncCpf}
+                                  disabled={cpfLoading || onlyDigits(formData.cpf).length !== 11}
+                                  title="Consulta o CPF na integração SIGx ativa e preenche os campos automaticamente"
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                    padding: "0 12px",
+                                    borderRadius: 8,
+                                    border: "1px solid #2563eb",
+                                    background: cpfLoading ? "#dbeafe" : "#eff6ff",
+                                    color: "#1d4ed8",
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    cursor: cpfLoading || onlyDigits(formData.cpf).length !== 11 ? "not-allowed" : "pointer",
+                                    opacity: cpfLoading || onlyDigits(formData.cpf).length !== 11 ? 0.55 : 1,
+                                    whiteSpace: "nowrap",
+                                    transition: "all 0.12s",
+                                  }}
+                                >
+                                  {cpfLoading ? (
+                                    <Loader2 size={13} className="animate-spin" />
+                                  ) : (
+                                    <RefreshCw size={13} />
+                                  )}
+                                  <span className="keep-case">
+                                    {cpfLoading ? "Consultando..." : "Sincronizar com SIGx"}
+                                  </span>
+                                </button>
                               </div>
                               {documentError && (
                                 <div style={{ color: "#dc2626", fontSize: 11, marginTop: 4, fontWeight: 500 }}>
                                   {documentError}
+                                </div>
+                              )}
+                              {cpfSynced && !documentError && (
+                                <div style={{ color: "#dc2626", fontSize: 11, marginTop: 4, fontWeight: 600 }}>
+                                  Campos em vermelho não foram retornados pelo SIGx — preencha manualmente.
                                 </div>
                               )}
                             </div>
@@ -1035,7 +1086,47 @@ export default function GuarantorsPage() {
                                 placeholder="MG-00.000.000"
                                 value={formData.rg}
                                 onChange={e => setFormData(p => ({ ...p, rg: e.target.value }))}
+                                style={getRedHighlight(formData.rg, cpfSynced)}
                               />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="sigx-label">NOME COMPLETO *</label>
+                            <input
+                              type="text"
+                              className="sigx-input"
+                              value={formData.name}
+                              onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
+                              required
+                              style={getRedHighlight(formData.name, cpfSynced)}
+                            />
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                            <div>
+                              <label className="sigx-label">NACIONALIDADE *</label>
+                              <input
+                                type="text"
+                                className="sigx-input"
+                                value={formData.nationality}
+                                onChange={e => setFormData(p => ({ ...p, nationality: e.target.value }))}
+                                required
+                                style={getRedHighlight(formData.nationality, cpfSynced)}
+                              />
+                            </div>
+                            <div>
+                              <label className="sigx-label">ESTADO CIVIL *</label>
+                              <select
+                                className="sigx-input"
+                                value={formData.maritalStatus}
+                                onChange={e => setFormData(p => ({ ...p, maritalStatus: e.target.value }))}
+                                required
+                                style={getRedHighlight(formData.maritalStatus, cpfSynced)}
+                              >
+                                <option value="">Selecione...</option>
+                                {MARITAL_STATUS_OPTIONS.map(opt => (
+                                  <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                              </select>
                             </div>
                           </div>
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -1048,6 +1139,7 @@ export default function GuarantorsPage() {
                                 onChange={e => setFormData(p => ({ ...p, phone: maskPhone(e.target.value) }))}
                                 disabled={cnpjLoading}
                                 placeholder="(00) 00000-0000"
+                                style={getRedHighlight(formData.phone, cpfSynced)}
                               />
                             </div>
                             <div>
@@ -1059,6 +1151,7 @@ export default function GuarantorsPage() {
                                 onChange={e => setFormData(p => ({ ...p, email: e.target.value }))}
                                 disabled={cnpjLoading}
                                 placeholder="email@exemplo.com"
+                                style={getRedHighlight(formData.email, cpfSynced)}
                               />
                             </div>
                           </div>
@@ -1192,6 +1285,7 @@ export default function GuarantorsPage() {
                             placeholder="00000-000"
                             value={formData.zipCode}
                             onChange={e => handleCepChange(e.target.value)}
+                            style={getRedHighlight(formData.zipCode, cpfSynced)}
                           />
                           {cepFeedback && (
                             <div style={{
@@ -1213,6 +1307,7 @@ export default function GuarantorsPage() {
                             className="sigx-input"
                             value={formData.street}
                             onChange={e => setFormData(p => ({ ...p, street: e.target.value }))}
+                            style={getRedHighlight(formData.street, cpfSynced)}
                           />
                         </div>
                         <div>
@@ -1222,6 +1317,7 @@ export default function GuarantorsPage() {
                             className="sigx-input"
                             value={formData.number}
                             onChange={e => setFormData(p => ({ ...p, number: e.target.value }))}
+                            style={getRedHighlight(formData.number, cpfSynced)}
                           />
                         </div>
                         <div>
@@ -1231,6 +1327,7 @@ export default function GuarantorsPage() {
                             className="sigx-input"
                             value={formData.neighborhood}
                             onChange={e => setFormData(p => ({ ...p, neighborhood: e.target.value }))}
+                            style={getRedHighlight(formData.neighborhood, cpfSynced)}
                           />
                         </div>
                         <div>
@@ -1251,6 +1348,7 @@ export default function GuarantorsPage() {
                             className="sigx-input"
                             value={formData.city}
                             onChange={e => setFormData(p => ({ ...p, city: e.target.value }))}
+                            style={getRedHighlight(formData.city, cpfSynced)}
                           />
                         </div>
                         <div>
@@ -1259,6 +1357,7 @@ export default function GuarantorsPage() {
                             className="sigx-input"
                             value={formData.state}
                             onChange={e => setFormData(p => ({ ...p, state: e.target.value }))}
+                            style={getRedHighlight(formData.state, cpfSynced)}
                           >
                             <option value="">—</option>
                             {UF_OPTIONS.map(uf => (
