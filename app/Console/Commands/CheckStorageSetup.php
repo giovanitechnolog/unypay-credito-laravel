@@ -69,16 +69,31 @@ class CheckStorageSetup extends Command
      */
     private function checkSymlink(bool $fix): bool
     {
-        $linkPath = public_path('storage');
+        $linkPath  = public_path('storage');
+        $appPublic = storage_path('app/public');
 
         if (file_exists($linkPath)) {
-            $this->line(" [OK]  public/storage existe (" . (is_link($linkPath) ? 'symlink' : 'diretório/junction') . ')');
+            $publicReal = realpath($linkPath);
+            $appReal    = realpath($appPublic);
+            $isLinked   = $publicReal !== false && $appReal !== false && $publicReal === $appReal;
+
+            if ($isLinked) {
+                $this->line(' [OK]  public/storage está corretamente linkado a storage/app/public');
+                return false;
+            }
+
+            // Existe mas é um diretório real (não link). UserController fará fallback
+            // de cópia física, então não é erro fatal — apenas avisa.
+            $this->warn(' [WRN] public/storage existe mas NÃO aponta para storage/app/public');
+            $this->warn('       O sistema operará em modo "cópia física" (mais lento, ocupa 2x espaço).');
+            $this->warn('       Para usar symlink: remova manualmente public/storage e rode `php artisan storage:link`.');
             return false;
         }
 
-        $this->error(" [ERR] public/storage NÃO existe — `php artisan storage:link` precisa rodar.");
+        $this->error(' [ERR] public/storage NÃO existe — uploads ficarão inacessíveis via HTTP.');
 
         if (!$fix) {
+            $this->warn('       Rode `php artisan storage:link` ou `php artisan storage:check --fix`.');
             return true;
         }
 
@@ -87,8 +102,9 @@ class CheckStorageSetup extends Command
             $this->info('       → storage:link executado. Verificando…');
             return !file_exists($linkPath);
         } catch (Throwable $e) {
-            $this->error('       Falhou: ' . $e->getMessage());
-            return true;
+            $this->error('       storage:link falhou: ' . $e->getMessage());
+            $this->warn('       OK — UserController usará fallback de cópia física automaticamente.');
+            return false;
         }
     }
 

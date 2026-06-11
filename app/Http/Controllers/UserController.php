@@ -7,6 +7,7 @@ use App\Rules\Cpf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -16,6 +17,7 @@ use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 use RuntimeException;
+use Throwable;
 
 class UserController extends Controller
 {
@@ -270,6 +272,12 @@ class UserController extends Controller
             if ($oldPhoto && Storage::disk(self::PHOTO_DISK)->exists($oldPhoto)) {
                 Storage::disk(self::PHOTO_DISK)->delete($oldPhoto);
             }
+
+            // Em ambientes sem symlink, removemos também a cópia física que
+            // o `storeUserPhoto()` colocou em `public/storage/...` — caso
+            // contrário, o arquivo antigo continuaria sendo servido pelo
+            // webserver mesmo após a troca da foto.
+            $this->unmirrorPhotoFromPublic($oldPhoto);
         }
 
         $user->update($payload);
@@ -320,6 +328,10 @@ class UserController extends Controller
             Storage::disk(self::PHOTO_DISK)->delete($user->photo);
         }
 
+        // Limpa eventual cópia física em `public/storage/...` (ambientes
+        // sem symlink). Em ambientes com symlink válido este helper é no-op.
+        $this->unmirrorPhotoFromPublic($user->photo);
+
         $user->delete();
 
         return response()->json([
@@ -364,6 +376,18 @@ class UserController extends Controller
                 throw new RuntimeException("Arquivo não persistiu no disco após store() (path: {$path}).");
             }
 
+            // 🚀 Garante que a foto fique acessível publicamente, independente
+            // do ambiente. Em servidores onde `php artisan storage:link` nunca
+            // foi executado (ou onde o deploy descartou o symlink) o arquivo
+            // físico existe em `storage/app/public/...` mas não é servido pelo
+            // webserver via `/storage/...`. O helper abaixo:
+            //   1) tenta criar/recriar o symlink quando ausente;
+            //   2) se a criação não for possível (open_basedir, perms,
+            //      hosting com restrição), faz cópia física para
+            //      `public/storage/users/photos/...`.
+            // Assim a URL `/storage/users/photos/foo.png` sempre resolve.
+            $this->mirrorPhotoToPublic($path);
+
             return $path;
         } catch (\Throwable $e) {
             Log::error('[UserController@storeUserPhoto] Falha ao gravar foto', [
@@ -386,5 +410,138 @@ class UserController extends Controller
                 'Detalhes técnicos em storage/logs/laravel.log.'
             );
         }
+    }
+
+    /**
+     * Garante que `$relativePath` (ex.: `users/photos/abc.png`) fique
+     * publicamente acessível via URL `/storage/{relativePath}`.
+     *
+     * Estratégia em 3 camadas (da mais barata à mais robusta):
+     *   1) Verifica se `public/storage` já é um symlink/junction válido
+     *      apontando para `storage/app/public`. Se sim, nada a fazer —
+     *      o arquivo recém-salvo já é visível pelo link.
+     *   2) Se `public/storage` não existe, tenta executar `storage:link`
+     *      programaticamente. Funciona em ambientes onde o usuário do PHP
+     *      tem permissão de criar symlinks (Laragon local, maioria dos
+     *      VPS Linux, Plesk com SymlinkProtection desabilitado, etc.).
+     *   3) Se nenhum dos passos anteriores resultar em link válido,
+     *      cai no fallback de cópia física: copia o arquivo de
+     *      `storage/app/public/{path}` para `public/storage/{path}`.
+     *      Funciona até em hospedagens compartilhadas onde symlink via
+     *      PHP é proibido — o webserver passa a servir a cópia direta.
+     *
+     * Nunca lança — falhas são logadas e ignoradas para não quebrar o
+     * upload (a foto continua persistida no disco principal).
+     */
+    private function mirrorPhotoToPublic(string $relativePath): void
+    {
+        $relativePath = ltrim($relativePath, '/\\');
+        $publicLink   = public_path('storage');
+        $appPublic    = storage_path('app/public');
+        $sourceFile   = $appPublic . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
+
+        if (!is_file($sourceFile)) {
+            return;
+        }
+
+        if ($this->publicStorageIsLinked($publicLink, $appPublic)) {
+            return;
+        }
+
+        if (!file_exists($publicLink)) {
+            try {
+                Artisan::call('storage:link');
+            } catch (Throwable $e) {
+                Log::warning('[UserController@mirrorPhotoToPublic] storage:link falhou', [
+                    'message' => $e->getMessage(),
+                ]);
+            }
+
+            if ($this->publicStorageIsLinked($publicLink, $appPublic)) {
+                return;
+            }
+        }
+
+        try {
+            $targetFile = public_path('storage' . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath));
+            $targetDir  = dirname($targetFile);
+
+            if (!is_dir($targetDir) && !@mkdir($targetDir, 0755, true) && !is_dir($targetDir)) {
+                Log::warning('[UserController@mirrorPhotoToPublic] mkdir falhou', [
+                    'targetDir' => $targetDir,
+                ]);
+                return;
+            }
+
+            if (!@copy($sourceFile, $targetFile)) {
+                Log::warning('[UserController@mirrorPhotoToPublic] copy falhou', [
+                    'sourceFile' => $sourceFile,
+                    'targetFile' => $targetFile,
+                ]);
+            }
+        } catch (Throwable $e) {
+            Log::warning('[UserController@mirrorPhotoToPublic] cópia falhou', [
+                'message'      => $e->getMessage(),
+                'relativePath' => $relativePath,
+            ]);
+        }
+    }
+
+    /**
+     * Contraparte de `mirrorPhotoToPublic`: quando uma foto é removida
+     * (na atualização, troca ou exclusão do usuário), esta rotina apaga
+     * a cópia física eventualmente existente em `public/storage/...`.
+     *
+     * Se `public/storage` for um symlink/junction válido para
+     * `storage/app/public`, a deleção via `Storage::disk('public')->delete()`
+     * já apagou o arquivo "lá e cá" — nada a fazer aqui.
+     *
+     * Caso contrário, a cópia física pode ainda existir no diretório
+     * `public/storage/users/photos/` e precisa ser removida para evitar
+     * "fotos órfãs" servidas após o usuário trocar/remover sua imagem.
+     */
+    private function unmirrorPhotoFromPublic(?string $relativePath): void
+    {
+        if (!$relativePath) {
+            return;
+        }
+
+        $relativePath = ltrim($relativePath, '/\\');
+        $publicLink   = public_path('storage');
+        $appPublic    = storage_path('app/public');
+
+        if ($this->publicStorageIsLinked($publicLink, $appPublic)) {
+            return;
+        }
+
+        $targetFile = public_path('storage' . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath));
+
+        if (is_file($targetFile)) {
+            @unlink($targetFile);
+        }
+    }
+
+    /**
+     * Detecta se `public/storage` está corretamente "linkado" a
+     * `storage/app/public`.
+     *
+     * Em vez de depender só de `is_link()` (que retorna `false` para
+     * junctions do Windows), comparamos o `realpath` dos dois caminhos:
+     * se ambos resolvem para o mesmo diretório real, o link é válido —
+     * seja symlink Unix, junction Windows, ou qualquer estrutura
+     * equivalente que o sistema operacional resolva transparentemente.
+     */
+    private function publicStorageIsLinked(string $publicLink, string $appPublic): bool
+    {
+        if (!file_exists($publicLink)) {
+            return false;
+        }
+
+        $publicReal = realpath($publicLink);
+        $appReal    = realpath($appPublic);
+
+        return $publicReal !== false
+            && $appReal !== false
+            && $publicReal === $appReal;
     }
 }
