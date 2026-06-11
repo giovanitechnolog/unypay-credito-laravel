@@ -1,6 +1,8 @@
-import { useState } from "react";
-import { User, Building2, CheckCircle2, Mail, Phone } from "lucide-react";
+import { useRef, useState } from "react";
+import { User, Building2, CheckCircle2, Mail, Phone, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { maskPhone } from "../lib/masks";
+import { api, extractFirstError } from "../lib/api";
 
 /**
  * Tipo de pessoa do fiador (PF ou PJ).
@@ -127,6 +129,58 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
   };
 
   const [cepFeedback, setCepFeedback] = useState<string>("");
+
+  // 🚀 Auto-preenchimento via Receita Federal — espelha o comportamento da
+  // tela de Pessoas (Guarantors.tsx). Ao completar 14 dígitos no CNPJ, dispara
+  // a consulta em `/api/cnpj/{digits}` e popula razão social, endereço e
+  // contatos. O ref evita disparar a mesma consulta duas vezes (idempotência).
+  const [cnpjLoading, setCnpjLoading] = useState(false);
+  const lastFetchedCnpjRef = useRef("");
+
+  const fetchCnpjData = async (digits: string, current: GuarantorFormValues) => {
+    if (digits.length !== 14 || lastFetchedCnpjRef.current === digits) return;
+
+    setCnpjLoading(true);
+    try {
+      const { data } = await api.get(`/api/cnpj/${digits}`);
+      lastFetchedCnpjRef.current = digits;
+
+      onChange({
+        ...current,
+        name: data.nome || current.name,
+        tradeName: data.fantasia || current.tradeName,
+        zipCode: data.cep ? maskCEP(String(data.cep)) : current.zipCode,
+        street: data.logradouro || current.street,
+        number: data.numero ? String(data.numero) : current.number,
+        complement: data.complemento || current.complement,
+        neighborhood: data.bairro || current.neighborhood,
+        city: data.municipio || current.city,
+        state: data.uf ? String(data.uf).toUpperCase() : current.state,
+        email: data.email || current.email,
+        phone: data.telefone ? maskPhone(String(data.telefone)) : current.phone,
+      });
+
+      toast.success("Dados da Receita Federal preenchidos automaticamente.");
+    } catch (err) {
+      lastFetchedCnpjRef.current = "";
+      toast.error(extractFirstError(err, "Não foi possível consultar o CNPJ."));
+    } finally {
+      setCnpjLoading(false);
+    }
+  };
+
+  const handleCnpjChange = (raw: string) => {
+    const masked = maskCNPJ(raw);
+    const next: GuarantorFormValues = { ...value, cnpj: masked };
+    onChange(next);
+
+    const digits = onlyDigits(masked);
+    if (digits.length !== 14) {
+      lastFetchedCnpjRef.current = "";
+      return;
+    }
+    void fetchCnpjData(digits, next);
+  };
 
   /**
    * Busca o CEP no ViaCEP e preenche logradouro, bairro, cidade e UF.
@@ -352,17 +406,41 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             <div>
               <label className="sigx-label">CNPJ *</label>
-              <input
-                type="text"
-                className="sigx-input mono"
-                placeholder="00.000.000/0000-00"
-                value={value.cnpj}
-                onChange={(e) => set("cnpj", maskCNPJ(e.target.value))}
-                required
-                minLength={18}
-                readOnly={readOnly}
-                style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
-              />
+              <div style={{ position: "relative" }}>
+                <input
+                  type="text"
+                  className="sigx-input mono"
+                  placeholder="00.000.000/0000-00"
+                  value={value.cnpj}
+                  onChange={(e) => handleCnpjChange(e.target.value)}
+                  required
+                  minLength={18}
+                  readOnly={readOnly || cnpjLoading}
+                  style={{
+                    ...(readOnly ? { background: "#f9fafb", color: "#4b5563" } : {}),
+                    ...(cnpjLoading ? { paddingRight: 32 } : {}),
+                  }}
+                />
+                {cnpjLoading && (
+                  <Loader2
+                    size={14}
+                    className="animate-spin"
+                    style={{
+                      position: "absolute",
+                      right: 10,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      color: "#2563eb",
+                      pointerEvents: "none",
+                    }}
+                  />
+                )}
+              </div>
+              {cnpjLoading && (
+                <span className="keep-case" style={{ fontSize: 10, color: "#2563eb", fontWeight: 600 }}>
+                  Consultando Receita Federal...
+                </span>
+              )}
             </div>
             <div>
               <label className="sigx-label">INSCRIÇÃO ESTADUAL</label>
