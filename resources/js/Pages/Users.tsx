@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { Head, usePage } from "@inertiajs/react";
 import {
   Plus, Search, RefreshCw, UserCheck, ShieldAlert, Users, Calendar, Mail,
@@ -7,6 +7,7 @@ import {
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
 import ConfirmDialog from "../Components/ConfirmDialog";
+import PasswordInput from "../Components/PasswordInput";
 import { api, extractFirstError } from "../lib/api";
 
 interface User {
@@ -784,8 +785,7 @@ export default function UsersPage() {
                               (necessária apenas para alterar a senha)
                             </span>
                           </label>
-                          <input
-                            type="password"
+                          <PasswordInput
                             className="sigx-input"
                             value={formData.currentPassword}
                             onChange={e => setFormData(p => ({ ...p, currentPassword: e.target.value }))}
@@ -806,8 +806,7 @@ export default function UsersPage() {
                               </span>
                             )}
                           </label>
-                          <input
-                            type="password"
+                          <PasswordInput
                             className="sigx-input"
                             value={formData.password}
                             onChange={e => setFormData(p => ({ ...p, password: e.target.value }))}
@@ -822,8 +821,7 @@ export default function UsersPage() {
                           <label className="sigx-label">
                             {selectedUser ? "CONFIRMAÇÃO DA NOVA SENHA" : "CONFIRMAÇÃO DE SENHA"} {(!selectedUser || isChangingPassword) && <span>*</span>}
                           </label>
-                          <input
-                            type="password"
+                          <PasswordInput
                             className="sigx-input"
                             value={formData.passwordConfirmation}
                             onChange={e => setFormData(p => ({ ...p, passwordConfirmation: e.target.value }))}
