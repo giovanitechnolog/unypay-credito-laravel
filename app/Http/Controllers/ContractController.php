@@ -484,8 +484,8 @@ class ContractController extends Controller
     }
 
     /**
-     * Sincroniza um papel específico (FIADOR ou CODEVEDOR) na pivot
-     * `contract_guarantor`. Como a relação no Model já filtra por
+     * Sincroniza um papel específico (FIADOR, CODEVEDOR ou TESTEMUNHA) na pivot
+     * `contract_guarantor`. Como cada relação no Model já filtra por
      * `wherePivot('role', ...)`, o `syncWithPivotValues()` com o role
      * desejado garante que:
      *
@@ -493,8 +493,15 @@ class ContractController extends Controller
      *   • o attach insere o role correto na pivot;
      *   • timestamps createdAt/updatedAt são gerenciados pelo Eloquent.
      *
-     * Esse desenho permite chamar o helper duas vezes para o mesmo contrato
-     * (uma para cada papel) sem que um sync apague o outro.
+     * Esse desenho permite chamar o helper três vezes para o mesmo contrato
+     * (uma para cada papel) sem que um sync apague/duplique o outro.
+     *
+     * ⚠️ É CRÍTICO mapear o role para a relação correta. Antes este método
+     * usava `guarantors()` para tudo que não fosse CODEVEDOR — o que para
+     * TESTEMUNHA quebrava de duas formas: (1) o detach só enxergava linhas
+     * `role=FIADOR`, então testemunhas removidas no front nunca eram apagadas;
+     * (2) o attach tentava inserir `(contractId, guarantorId, TESTEMUNHA)`
+     * mesmo quando já existia, violando o unique `(contractId, guarantorId, role)`.
      */
     private function syncContractGuarantors(int $contractId, array $personIds, string $role): void
     {
@@ -508,9 +515,11 @@ class ContractController extends Controller
             fn ($id) => $id > 0
         )));
 
-        $relation = $role === Contract::ROLE_CODEVEDOR
-            ? $contract->codebtors()
-            : $contract->guarantors();
+        $relation = match ($role) {
+            Contract::ROLE_CODEVEDOR  => $contract->codebtors(),
+            Contract::ROLE_TESTEMUNHA => $contract->witnesses(),
+            default                   => $contract->guarantors(),
+        };
 
         $relation->syncWithPivotValues($clean, ['role' => $role]);
     }
