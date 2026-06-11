@@ -65,7 +65,7 @@ export default function GuarantorSearchModal({
         });
         setResults(data);
       } catch (err) {
-        toast.error(extractFirstError(err, "Falha ao buscar fiadores."));
+        toast.error(extractFirstError(err, "Falha ao buscar pessoas."));
         setResults([]);
       } finally {
         setLoading(false);
@@ -87,7 +87,7 @@ export default function GuarantorSearchModal({
 
   const confirmSelection = () => {
     if (selectedCount === 0) {
-      toast.info("Selecione ao menos um fiador para adicionar ao contrato.");
+      toast.info("Selecione ao menos uma pessoa para adicionar ao contrato.");
       return;
     }
     const picked = results.filter((g) => selectedIds.has(g.id));
@@ -96,7 +96,7 @@ export default function GuarantorSearchModal({
 
   const headerStats = useMemo(() => {
     if (loading) return "Carregando…";
-    if (results.length === 0) return search ? "Nenhum fiador encontrado para o filtro" : "Nenhum fiador disponível";
+    if (results.length === 0) return search ? "Nenhuma pessoa encontrada para o filtro" : "Nenhuma pessoa disponível";
     return `${results.length} resultado(s) — ${selectedCount} selecionado(s)`;
   }, [loading, results, search, selectedCount]);
 
@@ -158,9 +158,9 @@ export default function GuarantorSearchModal({
               <ShieldCheck size={16} />
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>Buscar Fiadores Cadastrados</span>
+              <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>Buscar Pessoas Cadastradas</span>
               <span style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>
-                Selecione um ou mais fiadores do banco para vincular ao contrato
+                Selecione uma ou mais pessoas do cadastro para vincular ao contrato
               </span>
             </div>
           </div>
@@ -238,13 +238,13 @@ export default function GuarantorSearchModal({
         >
           {loading ? (
             <div style={{ padding: 24, textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
-              Buscando fiadores…
+              Buscando pessoas…
             </div>
           ) : results.length === 0 ? (
             <div style={{ padding: 32, textAlign: "center", color: "#94a3b8" }}>
               <ShieldCheck size={28} style={{ opacity: 0.3, margin: "0 auto 6px", display: "block" }} />
               <span style={{ fontSize: 12 }}>
-                {search ? "Nenhum fiador localizado para este filtro." : "Digite acima para localizar um fiador, ou cadastre um novo."}
+                {search ? "Nenhuma pessoa localizada para este filtro." : "Digite acima para localizar uma pessoa, ou cadastre uma nova."}
               </span>
             </div>
           ) : (
@@ -335,7 +335,7 @@ export default function GuarantorSearchModal({
             {selectedCount > 0 ? (
               <>
                 <CheckCircle2 size={12} color="#059669" />
-                <strong>{selectedCount}</strong> fiador(es) selecionado(s)
+                <strong>{selectedCount}</strong> pessoa(s) selecionada(s)
               </>
             ) : (
               "Clique nas linhas para selecionar"

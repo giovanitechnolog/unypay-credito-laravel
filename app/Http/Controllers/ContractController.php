@@ -4,13 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Exports\ContractsExport;
 use App\Http\Requests\ContractAssets\StoreContractAssetRequest;
-use App\Http\Requests\ContractWitnesses\StoreContractWitnessRequest;
 use App\Models\Contract;
 use App\Models\ContractAsset;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Maatwebsite\Excel\Facades\Excel;
@@ -51,14 +49,17 @@ class ContractController extends Controller
 
         $rawContracts = $query->orderBy('contracts.id', 'desc')->get();
 
-        // 🚀 Hidratação dos vínculos pessoa↔contrato (Fiadores E Codevedores) em
-        // uma única query auxiliar contra a pivot contract_guarantor. A coluna
-        // `role` na pivot decide em qual array do payload cada item entra.
-        // Evita o N+1 e elimina a necessidade de duas queries paralelas.
+        // 🚀 Hidratação dos vínculos pessoa↔contrato (Fiadores, Codevedores E
+        // Testemunhas) em uma única query auxiliar contra a pivot
+        // contract_guarantor. A coluna `role` na pivot decide em qual array
+        // do payload cada item entra. Evita o N+1 e elimina a necessidade de
+        // queries paralelas. Após a unificação de "Pessoas", testemunhas
+        // passaram a usar a MESMA pivot (role='TESTEMUNHA').
         $contractIds = $rawContracts->pluck('id')->all();
 
         $guarantorsByContract = [];
         $codebtorsByContract  = [];
+        $witnessesByContract  = [];
         if (!empty($contractIds)) {
             $guarantorRows = DB::table('contract_guarantor')
                 ->join('guarantors', 'guarantors.id', '=', 'contract_guarantor.guarantorId')
@@ -85,17 +86,20 @@ class ContractController extends Controller
 
                 if ($g->role === Contract::ROLE_CODEVEDOR) {
                     $codebtorsByContract[$g->contractId][] = $payload;
+                } elseif ($g->role === Contract::ROLE_TESTEMUNHA) {
+                    $witnessesByContract[$g->contractId][] = $payload;
                 } else {
                     $guarantorsByContract[$g->contractId][] = $payload;
                 }
             }
         }
 
-        $rawContracts->transform(function ($row) use ($guarantorsByContract, $codebtorsByContract) {
+        $rawContracts->transform(function ($row) use ($guarantorsByContract, $codebtorsByContract, $witnessesByContract) {
             $paths = json_decode($row->contractPdfPath ?? '[]', true);
             $row->hasContractPdf = !empty($paths) && count($paths) > 0;
             $row->guarantors     = $guarantorsByContract[$row->id] ?? [];
             $row->codebtors      = $codebtorsByContract[$row->id]  ?? [];
+            $row->witnesses      = $witnessesByContract[$row->id]  ?? [];
             return $row;
         });
 
@@ -130,40 +134,6 @@ class ContractController extends Controller
 
         $rawContracts->transform(function ($row) use ($assetsByContract) {
             $row->assets = $assetsByContract[$row->id] ?? [];
-            return $row;
-        });
-
-        // 🚀 Hidratação das testemunhas (1:N — contract_witnesses) em uma
-        // única query auxiliar, mesma estratégia usada com bens em garantia.
-        //
-        // ⚠️  Defensivo: a tabela é criada pelas migrations
-        //     2026_06_05_150000_create_contract_witnesses_table e
-        //     2026_06_05_160000_add_ci_to_contract_witnesses_table.
-        //     Se o operador estiver rodando o app antes de aplicá-las (ex.: ambiente recém-clonado
-        //     ou após reset do BD), evitamos a 500 e retornamos lista vazia. Assim que `php artisan
-        //     migrate` for executado, a tela volta a popular as testemunhas normalmente.
-        $witnessesByContract = [];
-        $witnessesTableExists = Schema::hasTable('contract_witnesses');
-        $witnessesHasCi = $witnessesTableExists && Schema::hasColumn('contract_witnesses', 'ci');
-
-        if ($witnessesTableExists && !empty($contractIds)) {
-            $witnessRows = DB::table('contract_witnesses')
-                ->whereIn('contractId', $contractIds)
-                ->orderBy('id')
-                ->get();
-
-            foreach ($witnessRows as $w) {
-                $witnessesByContract[$w->contractId][] = [
-                    'id'   => (int) $w->id,
-                    'name' => $w->name,
-                    'cpf'  => $w->cpf,
-                    'ci'   => $witnessesHasCi ? ($w->ci ?? null) : null,
-                ];
-            }
-        }
-
-        $rawContracts->transform(function ($row) use ($witnessesByContract) {
-            $row->witnesses = $witnessesByContract[$row->id] ?? [];
             return $row;
         });
 
@@ -300,8 +270,7 @@ class ContractController extends Controller
         // carrega PDFs). Decodifica + normaliza ANTES da validação para que
         // 'assets.*' funcione com os tipos certos.
         $assets    = $this->extractAssets($request);
-        $witnesses = $this->extractWitnesses($request);
-        $request->merge(['assets' => $assets, 'witnesses' => $witnesses]);
+        $request->merge(['assets' => $assets]);
 
         $rules = [
             'contractName'     => 'required|string',
@@ -313,17 +282,19 @@ class ContractController extends Controller
             'consignorId'      => 'nullable|integer|exists:consignors,id',
             'contractPdfs'     => 'nullable|array',
             'contractPdfs.*'   => 'file|mimes:pdf|max:20480',
-            // 🚀 Vínculos pessoa↔contrato. Cada array é independente; ambos
+            // 🚀 Vínculos pessoa↔contrato. Cada array é independente; todos
             // gravam na mesma pivot (contract_guarantor) diferenciados pela
-            // coluna `role`. Ver Contract::ROLE_FIADOR / ROLE_CODEVEDOR.
+            // coluna `role`. Ver Contract::ROLE_FIADOR / ROLE_CODEVEDOR /
+            // ROLE_TESTEMUNHA — Testemunhas passaram a usar o mesmo cadastro
+            // mestre (`guarantors`) que os outros papéis.
             'guarantor_ids'    => 'nullable|array',
             'guarantor_ids.*'  => 'integer|exists:guarantors,id',
             'codebtor_ids'     => 'nullable|array',
             'codebtor_ids.*'   => 'integer|exists:guarantors,id',
+            'witness_ids'      => 'nullable|array',
+            'witness_ids.*'    => 'integer|exists:guarantors,id',
             // 🚀 Bens em garantia (veículos / imóveis)
             'assets'           => 'nullable|array',
-            // 🚀 Testemunhas (nome + CPF — 1:N simples)
-            'witnesses'        => 'nullable|array',
         ];
         $messages = [
             'consignorId.exists' => 'O credor selecionado não existe ou foi removido.',
@@ -334,11 +305,6 @@ class ContractController extends Controller
         foreach ($assets as $i => $asset) {
             $rules    = array_merge($rules,    StoreContractAssetRequest::rulesFor($asset['assetType'] ?? null, "assets.{$i}"));
             $messages = array_merge($messages, StoreContractAssetRequest::messagesFor("assets.{$i}"));
-        }
-
-        foreach ($witnesses as $i => $witness) {
-            $rules    = array_merge($rules,    StoreContractWitnessRequest::rulesFor("witnesses.{$i}"));
-            $messages = array_merge($messages, StoreContractWitnessRequest::messagesFor("witnesses.{$i}"));
         }
 
         $request->validate($rules, $messages);
@@ -375,8 +341,12 @@ class ContractController extends Controller
             (array) $request->input('codebtor_ids', []),
             Contract::ROLE_CODEVEDOR
         );
+        $this->syncContractGuarantors(
+            $contractId,
+            (array) $request->input('witness_ids', []),
+            Contract::ROLE_TESTEMUNHA
+        );
         $this->syncContractAssets($contractId, $assets);
-        $this->syncContractWitnesses($contractId, $witnesses);
 
         return redirect()->route('contracts.index');
     }
@@ -385,10 +355,8 @@ class ContractController extends Controller
     {
         // 🚀 Mesmo tratamento de assets do store — decodifica/normaliza primeiro.
         $assets             = $this->extractAssets($request);
-        $witnesses          = $this->extractWitnesses($request);
         $assetsInPayload    = $request->has('assets');    // checar ANTES do merge
-        $witnessesInPayload = $request->has('witnesses'); // checar ANTES do merge
-        $request->merge(['assets' => $assets, 'witnesses' => $witnesses]);
+        $request->merge(['assets' => $assets]);
 
         $rules = [
             'contractName'     => 'required|string',
@@ -403,8 +371,9 @@ class ContractController extends Controller
             'guarantor_ids.*'  => 'integer|exists:guarantors,id',
             'codebtor_ids'     => 'nullable|array',
             'codebtor_ids.*'   => 'integer|exists:guarantors,id',
+            'witness_ids'      => 'nullable|array',
+            'witness_ids.*'    => 'integer|exists:guarantors,id',
             'assets'           => 'nullable|array',
-            'witnesses'        => 'nullable|array',
         ];
         $messages = [
             'consignorId.exists' => 'O credor selecionado não existe ou foi removido.',
@@ -413,11 +382,6 @@ class ContractController extends Controller
         foreach ($assets as $i => $asset) {
             $rules    = array_merge($rules,    StoreContractAssetRequest::rulesFor($asset['assetType'] ?? null, "assets.{$i}"));
             $messages = array_merge($messages, StoreContractAssetRequest::messagesFor("assets.{$i}"));
-        }
-
-        foreach ($witnesses as $i => $witness) {
-            $rules    = array_merge($rules,    StoreContractWitnessRequest::rulesFor("witnesses.{$i}"));
-            $messages = array_merge($messages, StoreContractWitnessRequest::messagesFor("witnesses.{$i}"));
         }
 
         $request->validate($rules, $messages);
@@ -487,7 +451,7 @@ class ContractController extends Controller
 
         // 🚀 Só sincroniza vínculos pessoa↔contrato se o front enviou
         // explicitamente o campo. Isso evita zerar a relação numa edição
-        // parcial que não tocou na aba "Fiador / Codevedor".
+        // parcial que não tocou na aba de Pessoas.
         if ($request->has('guarantor_ids')) {
             $this->syncContractGuarantors(
                 $id,
@@ -502,6 +466,13 @@ class ContractController extends Controller
                 Contract::ROLE_CODEVEDOR
             );
         }
+        if ($request->has('witness_ids')) {
+            $this->syncContractGuarantors(
+                $id,
+                (array) $request->input('witness_ids', []),
+                Contract::ROLE_TESTEMUNHA
+            );
+        }
 
         // 🚀 Mesma lógica para os bens em garantia: só toca se o front mandou
         // a chave 'assets' (mesmo que vazia, indicando "remover todos").
@@ -509,18 +480,12 @@ class ContractController extends Controller
             $this->syncContractAssets($id, $assets);
         }
 
-        // 🚀 Mesma lógica das testemunhas: só toca se o front mandou a chave
-        // 'witnesses' (mesmo que vazia, indicando "remover todas").
-        if ($witnessesInPayload) {
-            $this->syncContractWitnesses($id, $witnesses, isUpdate: true);
-        }
-
         return redirect()->route('contracts.index');
     }
 
     /**
-     * Sincroniza um papel específico (FIADOR ou CODEVEDOR) na pivot
-     * `contract_guarantor`. Como a relação no Model já filtra por
+     * Sincroniza um papel específico (FIADOR, CODEVEDOR ou TESTEMUNHA) na pivot
+     * `contract_guarantor`. Como cada relação no Model já filtra por
      * `wherePivot('role', ...)`, o `syncWithPivotValues()` com o role
      * desejado garante que:
      *
@@ -528,8 +493,15 @@ class ContractController extends Controller
      *   • o attach insere o role correto na pivot;
      *   • timestamps createdAt/updatedAt são gerenciados pelo Eloquent.
      *
-     * Esse desenho permite chamar o helper duas vezes para o mesmo contrato
-     * (uma para cada papel) sem que um sync apague o outro.
+     * Esse desenho permite chamar o helper três vezes para o mesmo contrato
+     * (uma para cada papel) sem que um sync apague/duplique o outro.
+     *
+     * ⚠️ É CRÍTICO mapear o role para a relação correta. Antes este método
+     * usava `guarantors()` para tudo que não fosse CODEVEDOR — o que para
+     * TESTEMUNHA quebrava de duas formas: (1) o detach só enxergava linhas
+     * `role=FIADOR`, então testemunhas removidas no front nunca eram apagadas;
+     * (2) o attach tentava inserir `(contractId, guarantorId, TESTEMUNHA)`
+     * mesmo quando já existia, violando o unique `(contractId, guarantorId, role)`.
      */
     private function syncContractGuarantors(int $contractId, array $personIds, string $role): void
     {
@@ -543,9 +515,11 @@ class ContractController extends Controller
             fn ($id) => $id > 0
         )));
 
-        $relation = $role === Contract::ROLE_CODEVEDOR
-            ? $contract->codebtors()
-            : $contract->guarantors();
+        $relation = match ($role) {
+            Contract::ROLE_CODEVEDOR  => $contract->codebtors(),
+            Contract::ROLE_TESTEMUNHA => $contract->witnesses(),
+            default                   => $contract->guarantors(),
+        };
 
         $relation->syncWithPivotValues($clean, ['role' => $role]);
     }
@@ -558,31 +532,6 @@ class ContractController extends Controller
      * `guarantor_ids[]`, que são valores escalares. Aqui decodificamos e
      * normalizamos cada item antes de devolver para validação/persistência.
      */
-    /**
-     * 🚀 Lê o array de testemunhas enviado pelo frontend.
-     *
-     * Mesmo padrão de `extractAssets`: no FormData o campo `witnesses`
-     * chega como string JSON serializada.
-     */
-    private function extractWitnesses(Request $request): array
-    {
-        $raw = $request->input('witnesses');
-
-        if (is_string($raw)) {
-            $decoded = json_decode($raw, true);
-            $raw = is_array($decoded) ? $decoded : [];
-        }
-
-        if (! is_array($raw)) {
-            return [];
-        }
-
-        return array_values(array_map(
-            fn ($witness) => StoreContractWitnessRequest::normalize((array) $witness),
-            $raw
-        ));
-    }
-
     private function extractAssets(Request $request): array
     {
         $raw = $request->input('assets');
@@ -645,49 +594,6 @@ class ContractController extends Controller
      * Tudo dentro de uma transação para atomicidade
      * (atende ao "salvar tudo junto em uma Transaction" do briefing).
      */
-    /**
-     * Monta o payload limpo de UMA testemunha para gravação.
-     */
-    private function buildWitnessPayload(array $witness): array
-    {
-        return [
-            'name' => $witness['name'] ?? null,
-            'cpf'  => $witness['cpf']  ?? null,
-            'ci'   => $witness['ci']   ?? null,
-        ];
-    }
-
-    /**
-     * 🚀 Sincroniza as testemunhas de UM contrato.
-     *
-     * Store  → createMany (lista pode ser vazia).
-     * Update → delete-and-recreate (estratégia combinada no briefing).
-     *
-     * Tudo dentro de DB::transaction() para atomicidade.
-     */
-    private function syncContractWitnesses(int $contractId, array $witnesses, bool $isUpdate = false): void
-    {
-        $contract = Contract::find($contractId);
-        if (! $contract) {
-            return;
-        }
-
-        $payloads = array_map(
-            fn ($witness) => $this->buildWitnessPayload($witness),
-            $witnesses
-        );
-
-        DB::transaction(function () use ($contract, $payloads, $isUpdate) {
-            if ($isUpdate) {
-                $contract->witnesses()->delete();
-            }
-
-            if (! empty($payloads)) {
-                $contract->witnesses()->createMany($payloads);
-            }
-        });
-    }
-
     private function syncContractAssets(int $contractId, array $assets): void
     {
         $contract = Contract::find($contractId);
