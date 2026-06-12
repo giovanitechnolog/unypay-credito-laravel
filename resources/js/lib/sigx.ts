@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { toast } from "sonner";
 import { api, extractFirstError } from "./api";
 
 /**
@@ -75,6 +76,41 @@ export async function fetchSigxByCpf(cpf: string): Promise<SigxLookupResult> {
       error: extractFirstError(err, "Falha ao consultar o SIGx."),
     };
   }
+}
+
+/**
+ * Padroniza o feedback ao operador quando o `fetchSigxByCpf` falha.
+ *
+ * Diferencia "CPF não localizado no SIGx" (status 404 — caminho NORMAL,
+ * o operador pode estar cadastrando uma pessoa nova) de erros técnicos
+ * (timeout, integração desativada, falha do provedor, host inacessível):
+ *
+ *   • 404 → `toast.warning` (amarelo) com a orientação de preenchimento
+ *           manual já vinda do backend. Não é um erro: o sistema
+ *           continua funcionando, só não há fonte automática para
+ *           esse CPF.
+ *   • Outros → `toast.error` (vermelho) com a mensagem técnica para
+ *              que o operador saiba que algo precisa de atenção
+ *              (ex.: integração desativada, credencial inválida).
+ *
+ * Use sempre que `fetchSigxByCpf` devolver `result.ok === false` ou
+ * `result.data` vazio. Centralizar aqui mantém todas as telas
+ * (Users / Clients / Guarantors / GuarantorFormFields) com a mesma
+ * UX, e qualquer ajuste de mensagem futura passa a ser feito num
+ * único lugar.
+ */
+export function notifySigxFailure(result: SigxLookupResult): void {
+  const message = result.error ?? "Não foi possível consultar o SIGx.";
+
+  if (result.status === 404) {
+    toast.warning(message, {
+      description:
+        "O cadastro pode prosseguir normalmente: preencha os campos manualmente e salve.",
+    });
+    return;
+  }
+
+  toast.error(message);
 }
 
 /**

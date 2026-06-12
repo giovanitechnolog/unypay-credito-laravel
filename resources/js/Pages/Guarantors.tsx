@@ -17,7 +17,7 @@ import {
   validateCPF,
 } from "../lib/documentValidation";
 import { maskPhone } from "../lib/masks";
-import { fetchSigxByCpf, getRedHighlight } from "../lib/sigx";
+import { fetchSigxByCpf, getRedHighlight, notifySigxFailure } from "../lib/sigx";
 
 interface ClientLite {
   id: number;
@@ -192,7 +192,29 @@ export default function GuarantorsPage() {
     try {
       const result = await fetchSigxByCpf(digits);
       if (!result.ok || !result.data) {
-        toast.error(result.error ?? "Não foi possível consultar o SIGx.");
+        notifySigxFailure(result);
+        // 404 → limpa os campos preenchíveis pelo SIGx para evitar
+        // arrastar dados de um sync anterior. Outros erros (timeout,
+        // integração off) preservam o que já está digitado.
+        if (result.status === 404) {
+          setFormData(p => ({
+            ...p,
+            name:          "",
+            rg:            "",
+            email:         "",
+            phone:         "",
+            nationality:   "",
+            maritalStatus: "",
+            zipCode:       "",
+            street:        "",
+            number:        "",
+            complement:    "",
+            neighborhood:  "",
+            city:          "",
+            state:         "",
+          }));
+          setCpfSynced(false);
+        }
         return;
       }
 

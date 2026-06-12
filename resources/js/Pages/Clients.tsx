@@ -30,7 +30,7 @@ import {
   validateCPF,
 } from "../lib/documentValidation";
 import { maskPhone } from "../lib/masks";
-import { fetchSigxByCpf, getRedHighlight } from "../lib/sigx";
+import { fetchSigxByCpf, getRedHighlight, notifySigxFailure } from "../lib/sigx";
 
 const RISK_COLORS: Record<string, { bg: string; color: string }> = {
   A: { bg: "oklch(92% .08 145)", color: "oklch(35% .15 145)" },
@@ -201,7 +201,23 @@ export default function Clients({ clients, filters }: any) {
     try {
       const result = await fetchSigxByCpf(digits);
       if (!result.ok || !result.data) {
-        toast.error(result.error ?? "Não foi possível consultar o SIGx.");
+        notifySigxFailure(result);
+        // 404 → limpa os campos preenchíveis pelo SIGx para evitar
+        // arrastar dados de um sync anterior. Outros erros (timeout,
+        // integração off) preservam o que já está digitado.
+        if (result.status === 404) {
+          setForm(p => ({
+            ...p,
+            name:    "",
+            email:   "",
+            phone:   "",
+            zipCode: "",
+            address: "",
+            city:    "",
+            state:   "",
+          }));
+          setCpfSynced(false);
+        }
         return;
       }
 
