@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
-import { User, Building2, CheckCircle2, Mail, Phone, Loader2 } from "lucide-react";
+import { useRef, useState, type CSSProperties } from "react";
+import { User, Building2, CheckCircle2, Mail, Phone, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { maskPhone } from "../lib/masks";
 import { api, extractFirstError } from "../lib/api";
+import { fetchSigxByCpf, getRedHighlight } from "../lib/sigx";
 
 /**
  * Tipo de pessoa do fiador (PF ou PJ).
@@ -182,6 +183,67 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
     void fetchCnpjData(digits, next);
   };
 
+  // 🚀 Sincronização SIGx (PF) — quando o operador clica "Sincronizar com SIGx"
+  // a integração ATIVA com finalidade `cpf_lookup` é acionada e os campos do
+  // formulário são preenchidos automaticamente. Campos não retornados pela API
+  // ficam destacados em vermelho (sem virar `required`) — apenas como
+  // orientação visual ao operador, espelhando o comportamento da Ingestão IA.
+  const [cpfLoading, setCpfLoading] = useState(false);
+  const [cpfSynced, setCpfSynced] = useState(false);
+
+  const handleSyncCpf = async () => {
+    const digits = onlyDigits(value.cpf);
+    if (digits.length !== 11) {
+      toast.error("Digite um CPF completo (11 dígitos) antes de sincronizar.");
+      return;
+    }
+
+    setCpfLoading(true);
+    try {
+      const result = await fetchSigxByCpf(digits);
+      if (!result.ok || !result.data) {
+        toast.error(result.error ?? "Não foi possível consultar o SIGx.");
+        return;
+      }
+
+      const d = result.data;
+      onChange({
+        ...value,
+        name:          d.name          || value.name,
+        rg:            d.rg            || value.rg,
+        email:         d.email         || value.email,
+        phone:         d.phone         ? maskPhone(String(d.phone)) : value.phone,
+        nationality:   d.nationality   || value.nationality,
+        maritalStatus: d.maritalStatus || value.maritalStatus,
+        zipCode:       d.zipCode       ? maskCEP(String(d.zipCode)) : value.zipCode,
+        street:        d.street        || value.street,
+        number:        d.number        ? String(d.number) : value.number,
+        complement:    d.complement    || value.complement,
+        neighborhood:  d.neighborhood  || value.neighborhood,
+        city:          d.city          || value.city,
+        state:         d.state         ? String(d.state).toUpperCase() : value.state,
+      });
+      setCpfSynced(true);
+      toast.success("Dados do SIGx aplicados ao formulário.");
+    } catch (err) {
+      toast.error(extractFirstError(err, "Falha ao consultar o SIGx."));
+    } finally {
+      setCpfLoading(false);
+    }
+  };
+
+  /**
+   * Helper para mesclar o style do `readOnly` com o destaque vermelho
+   * pós-sync. Fica vermelho apenas em campos vazios E quando o operador
+   * já clicou "Sincronizar com SIGx" (não polui formulários novos).
+   */
+  const fieldStyle = (val: any): CSSProperties | undefined => {
+    const base = readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined;
+    const highlight = getRedHighlight(val, cpfSynced && value.personType === "PF");
+    if (!base && Object.keys(highlight).length === 0) return undefined;
+    return { ...(base ?? {}), ...highlight };
+  };
+
   /**
    * Busca o CEP no ViaCEP e preenche logradouro, bairro, cidade e UF.
    * Mesma estratégia usada na tela de Clientes (handleFetchCep).
@@ -222,27 +284,31 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
     }
   };
 
-  const switchPersonType = (next: PersonType) => {
+  /**
+   * 🚀 Reseta TODOS os dados (nome, contato, endereço, etc.) ao alternar
+   * entre PF e PJ. Regra de negócio: dados de pessoa física (ex.: nome
+   * "João Silva", e-mail pessoal, telefone celular, endereço residencial)
+   * NÃO devem permanecer ao mudar para pessoa jurídica — e vice-versa
+   * (Razão Social, CNPJ, Inscrição Estadual etc. não fazem sentido em PF).
+   *
+   * Mantemos apenas o `personType` recém-escolhido. O CEP feedback,
+   * a flag de CNPJ já consultado e o destaque vermelho do SIGx também
+   * são limpos para o operador começar com o formulário "zerado".
+   */
+  const handleSwitchPersonType = (next: PersonType) => {
     if (value.personType === next) return;
-    if (next === "PJ") {
-      onChange({
-        ...value,
-        personType: "PJ",
-        nationality: "",
-        maritalStatus: "",
-        cpf: "",
-        rg: "",
-      });
-    } else {
-      onChange({
-        ...value,
-        personType: "PF",
-        nationality: value.nationality || "Brasileiro",
-        cnpj: "",
-        tradeName: "",
-        stateRegistration: "",
-      });
-    }
+    onChange({
+      ...EMPTY_GUARANTOR_FORM,
+      personType: next,
+    });
+    setCepFeedback("");
+    lastFetchedCnpjRef.current = "";
+    setCpfSynced(false);
+  };
+
+  const handleCpfChange = (raw: string) => {
+    set("cpf", maskCPF(raw));
+    if (cpfSynced) setCpfSynced(false);
   };
 
   return (
@@ -262,7 +328,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
               <button
                 type="button"
                 key={opt.key}
-                onClick={() => !readOnly && switchPersonType(opt.key)}
+                onClick={() => !readOnly && handleSwitchPersonType(opt.key)}
                 disabled={readOnly}
                 style={{
                   display: "flex",
@@ -304,6 +370,143 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
         </div>
       </div>
 
+      {/* 🚀 DOCUMENTO PRIMEIRO — CPF (PF) ou CNPJ (PJ) é o ÚNICO campo
+          que dispara auto-preenchimento (SIGx para PF, ReceitaWS para
+          PJ). Colocá-lo no topo do formulário deixa o operador digitar
+          o documento e ter os demais campos preenchidos automaticamente,
+          em vez de digitar nome/nacionalidade/etc. para depois descobrir
+          que tudo seria preenchido pela integração. */}
+
+      {/* ── PESSOA FÍSICA — CPF/RG ────────────────────────── */}
+      {value.personType === "PF" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <div>
+            <label className="sigx-label">CPF *</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                type="text"
+                className="sigx-input mono"
+                placeholder="000.000.000-00"
+                value={value.cpf}
+                onChange={(e) => handleCpfChange(e.target.value)}
+                required
+                minLength={14}
+                readOnly={readOnly || cpfLoading}
+                style={fieldStyle(value.cpf)}
+              />
+              {!readOnly && (
+                <button
+                  type="button"
+                  onClick={handleSyncCpf}
+                  disabled={cpfLoading || onlyDigits(value.cpf).length !== 11}
+                  title="Consulta o CPF na integração SIGx ativa e preenche os campos automaticamente"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "0 12px",
+                    borderRadius: 8,
+                    border: "1px solid #2563eb",
+                    background: cpfLoading ? "#dbeafe" : "#eff6ff",
+                    color: "#1d4ed8",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: cpfLoading || onlyDigits(value.cpf).length !== 11 ? "not-allowed" : "pointer",
+                    opacity: cpfLoading || onlyDigits(value.cpf).length !== 11 ? 0.55 : 1,
+                    whiteSpace: "nowrap",
+                    transition: "all 0.12s",
+                  }}
+                >
+                  {cpfLoading ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <RefreshCw size={13} />
+                  )}
+                  <span className="keep-case">
+                    {cpfLoading ? "Consultando..." : "Sincronizar com SIGx"}
+                  </span>
+                </button>
+              )}
+            </div>
+            {cpfSynced && (
+              <span className="keep-case" style={{ fontSize: 10, color: "#dc2626", fontWeight: 600 }}>
+                Campos em vermelho não foram retornados pelo SIGx — preencha manualmente.
+              </span>
+            )}
+          </div>
+          <div>
+            <label className="sigx-label">RG</label>
+            <input
+              type="text"
+              className="sigx-input"
+              placeholder="MG-00.000.000"
+              value={value.rg}
+              onChange={(e) => set("rg", e.target.value)}
+              maxLength={20}
+              readOnly={readOnly}
+              style={fieldStyle(value.rg)}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── PESSOA JURÍDICA — CNPJ/Inscrição Estadual ───────── */}
+      {value.personType === "PJ" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <div>
+            <label className="sigx-label">CNPJ *</label>
+            <div style={{ position: "relative" }}>
+              <input
+                type="text"
+                className="sigx-input mono"
+                placeholder="00.000.000/0000-00"
+                value={value.cnpj}
+                onChange={(e) => handleCnpjChange(e.target.value)}
+                required
+                minLength={18}
+                readOnly={readOnly || cnpjLoading}
+                style={{
+                  ...(readOnly ? { background: "#f9fafb", color: "#4b5563" } : {}),
+                  ...(cnpjLoading ? { paddingRight: 32 } : {}),
+                }}
+              />
+              {cnpjLoading && (
+                <Loader2
+                  size={14}
+                  className="animate-spin"
+                  style={{
+                    position: "absolute",
+                    right: 10,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    color: "#2563eb",
+                    pointerEvents: "none",
+                  }}
+                />
+              )}
+            </div>
+            {cnpjLoading && (
+              <span className="keep-case" style={{ fontSize: 10, color: "#2563eb", fontWeight: 600 }}>
+                Consultando Receita Federal...
+              </span>
+            )}
+          </div>
+          <div>
+            <label className="sigx-label">INSCRIÇÃO ESTADUAL</label>
+            <input
+              type="text"
+              className="sigx-input"
+              placeholder='Número ou "ISENTO"'
+              value={value.stateRegistration}
+              onChange={(e) => set("stateRegistration", e.target.value)}
+              maxLength={30}
+              readOnly={readOnly}
+              style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+            />
+          </div>
+        </div>
+      )}
+
       {/* ── Nome / Razão Social ─────────────────────────────── */}
       <div>
         <label className="sigx-label">
@@ -317,146 +520,59 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
           required
           maxLength={255}
           readOnly={readOnly}
-          style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+          style={fieldStyle(value.name)}
         />
       </div>
 
-      {/* ── PESSOA FÍSICA ───────────────────────────────────── */}
+      {/* ── Demais campos específicos por tipo ──────────────── */}
       {value.personType === "PF" && (
-        <>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <div>
-              <label className="sigx-label">NACIONALIDADE *</label>
-              <input
-                type="text"
-                className="sigx-input"
-                value={value.nationality}
-                onChange={(e) => set("nationality", e.target.value)}
-                required
-                maxLength={80}
-                readOnly={readOnly}
-                style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
-              />
-            </div>
-            <div>
-              <label className="sigx-label">ESTADO CIVIL *</label>
-              <select
-                className="sigx-input"
-                value={value.maritalStatus}
-                onChange={(e) => set("maritalStatus", e.target.value)}
-                required
-                disabled={readOnly}
-                style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
-              >
-                <option value="">Selecione...</option>
-                {MARITAL_STATUS_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <div>
-              <label className="sigx-label">CPF *</label>
-              <input
-                type="text"
-                className="sigx-input mono"
-                placeholder="000.000.000-00"
-                value={value.cpf}
-                onChange={(e) => set("cpf", maskCPF(e.target.value))}
-                required
-                minLength={14}
-                readOnly={readOnly}
-                style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
-              />
-            </div>
-            <div>
-              <label className="sigx-label">RG</label>
-              <input
-                type="text"
-                className="sigx-input"
-                placeholder="MG-00.000.000"
-                value={value.rg}
-                onChange={(e) => set("rg", e.target.value)}
-                maxLength={20}
-                readOnly={readOnly}
-                style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
-              />
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* ── PESSOA JURÍDICA ─────────────────────────────────── */}
-      {value.personType === "PJ" && (
-        <>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <div>
-            <label className="sigx-label">NOME FANTASIA *</label>
+            <label className="sigx-label">NACIONALIDADE *</label>
             <input
               type="text"
               className="sigx-input"
-              value={value.tradeName}
-              onChange={(e) => set("tradeName", e.target.value)}
+              value={value.nationality}
+              onChange={(e) => set("nationality", e.target.value)}
               required
-              maxLength={255}
+              maxLength={80}
               readOnly={readOnly}
-              style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+              style={fieldStyle(value.nationality)}
             />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <div>
-              <label className="sigx-label">CNPJ *</label>
-              <div style={{ position: "relative" }}>
-                <input
-                  type="text"
-                  className="sigx-input mono"
-                  placeholder="00.000.000/0000-00"
-                  value={value.cnpj}
-                  onChange={(e) => handleCnpjChange(e.target.value)}
-                  required
-                  minLength={18}
-                  readOnly={readOnly || cnpjLoading}
-                  style={{
-                    ...(readOnly ? { background: "#f9fafb", color: "#4b5563" } : {}),
-                    ...(cnpjLoading ? { paddingRight: 32 } : {}),
-                  }}
-                />
-                {cnpjLoading && (
-                  <Loader2
-                    size={14}
-                    className="animate-spin"
-                    style={{
-                      position: "absolute",
-                      right: 10,
-                      top: "50%",
-                      transform: "translateY(-50%)",
-                      color: "#2563eb",
-                      pointerEvents: "none",
-                    }}
-                  />
-                )}
-              </div>
-              {cnpjLoading && (
-                <span className="keep-case" style={{ fontSize: 10, color: "#2563eb", fontWeight: 600 }}>
-                  Consultando Receita Federal...
-                </span>
-              )}
-            </div>
-            <div>
-              <label className="sigx-label">INSCRIÇÃO ESTADUAL</label>
-              <input
-                type="text"
-                className="sigx-input"
-                placeholder='Número ou "ISENTO"'
-                value={value.stateRegistration}
-                onChange={(e) => set("stateRegistration", e.target.value)}
-                maxLength={30}
-                readOnly={readOnly}
-                style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
-              />
-            </div>
+          <div>
+            <label className="sigx-label">ESTADO CIVIL *</label>
+            <select
+              className="sigx-input"
+              value={value.maritalStatus}
+              onChange={(e) => set("maritalStatus", e.target.value)}
+              required
+              disabled={readOnly}
+              style={fieldStyle(value.maritalStatus)}
+            >
+              <option value="">Selecione...</option>
+              {MARITAL_STATUS_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </select>
           </div>
-        </>
+        </div>
+      )}
+
+      {value.personType === "PJ" && (
+        <div>
+          <label className="sigx-label">NOME FANTASIA *</label>
+          <input
+            type="text"
+            className="sigx-input"
+            value={value.tradeName}
+            onChange={(e) => set("tradeName", e.target.value)}
+            required
+            maxLength={255}
+            readOnly={readOnly}
+            style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+          />
+        </div>
       )}
 
       {/* ── Contato (comum a PF e PJ) ───────────────────────── */}
@@ -473,7 +589,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
             onChange={(e) => set("email", e.target.value)}
             maxLength={255}
             readOnly={readOnly}
-            style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+            style={fieldStyle(value.email)}
           />
         </div>
         <div>
@@ -488,7 +604,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
             onChange={(e) => set("phone", maskPhone(e.target.value))}
             maxLength={20}
             readOnly={readOnly}
-            style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+            style={fieldStyle(value.phone)}
           />
         </div>
       </div>
@@ -515,7 +631,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
             value={value.zipCode}
             onChange={(e) => handleCepChange(e.target.value)}
             readOnly={readOnly}
-            style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+            style={fieldStyle(value.zipCode)}
           />
           {cepFeedback && (
             <span className="keep-case" style={{ fontSize: 10, color: "#16a34a", fontWeight: 600 }}>
@@ -532,7 +648,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
             onChange={(e) => set("street", e.target.value)}
             maxLength={255}
             readOnly={readOnly}
-            style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+            style={fieldStyle(value.street)}
           />
         </div>
         <div>
@@ -544,7 +660,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
             onChange={(e) => set("number", e.target.value)}
             maxLength={20}
             readOnly={readOnly}
-            style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+            style={fieldStyle(value.number)}
           />
         </div>
         <div>
@@ -556,7 +672,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
             onChange={(e) => set("neighborhood", e.target.value)}
             maxLength={120}
             readOnly={readOnly}
-            style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+            style={fieldStyle(value.neighborhood)}
           />
         </div>
         <div>
@@ -583,7 +699,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
             onChange={(e) => set("city", e.target.value)}
             maxLength={120}
             readOnly={readOnly}
-            style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+            style={fieldStyle(value.city)}
           />
         </div>
         <div>
@@ -593,7 +709,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
             value={value.state}
             onChange={(e) => set("state", e.target.value)}
             disabled={readOnly}
-            style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+            style={fieldStyle(value.state)}
           >
             <option value="">—</option>
             {UF_OPTIONS.map((uf) => (

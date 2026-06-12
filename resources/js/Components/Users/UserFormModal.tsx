@@ -1,6 +1,7 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { Camera, User as UserIcon, X } from "lucide-react";
 import { api, extractFirstError } from "../../lib/api";
+import PasswordInput from "../PasswordInput";
 import type { User, UserFormValues, UserRole } from "../../types/user";
 
 interface UserFormModalProps {
@@ -298,8 +299,7 @@ export default function UserFormModal({
             style={{ marginTop: 14 }}
             hint={isEdit ? "Deixe em branco para manter a senha atual." : "Mínimo de 8 caracteres."}
           >
-            <input
-              type="password"
+            <PasswordInput
               value={values.password}
               onChange={(e) => setField("password", e.target.value)}
               required={!isEdit}
