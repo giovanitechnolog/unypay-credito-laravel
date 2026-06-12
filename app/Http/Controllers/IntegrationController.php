@@ -155,24 +155,54 @@ class IntegrationController extends Controller
                 'page'     => 1,
             ]);
 
-            if ($response->failed()) {
+            // O SIGx pode sinalizar "CPF não localizado" de três formas
+            // diferentes — todas devolvem 404 amigável para o front:
+            //   1) HTTP 404 direto (versões mais recentes do endpoint).
+            //   2) HTTP 200 com `data: []` (paginação sem resultados).
+            //   3) HTTP 200 com chave `error`/`errors` no body (alguns
+            //      provedores intermediários respondem assim).
+            // O objetivo é produzir UMA mensagem amigável consistente,
+            // sem expor o body cru da resposta upstream para o operador.
+            if ($response->status() === 404) {
                 return response()->json([
-                    'message' => "SIGx respondeu HTTP {$response->status()}.",
-                    'detail'  => mb_substr((string) $response->body(), 0, 240),
+                    'message' => $this->buildCpfNotFoundMessage(
+                        $digits,
+                        $this->extractRemoteMessage($response->json(), $response->body())
+                    ),
+                ], 404);
+            }
+
+            if ($response->failed()) {
+                $remote = $this->extractRemoteMessage($response->json(), $response->body());
+                return response()->json([
+                    'message' => $remote
+                        ? "Falha ao consultar o SIGx (HTTP {$response->status()}): {$remote}"
+                        : "SIGx respondeu HTTP {$response->status()} sem detalhes adicionais.",
                 ], 502);
             }
 
             $payload = $response->json();
             if (! is_array($payload)) {
                 return response()->json([
-                    'message' => 'SIGx devolveu uma resposta inesperada (não-JSON).',
+                    'message' => 'SIGx devolveu uma resposta inesperada (não-JSON). Tente novamente em instantes.',
                 ], 502);
+            }
+
+            // Alguns gateways embarcam um campo `error` no body 200
+            // quando o CPF não está cadastrado — tratamos como 404.
+            if (isset($payload['error']) || isset($payload['errors'])) {
+                return response()->json([
+                    'message' => $this->buildCpfNotFoundMessage(
+                        $digits,
+                        $this->extractRemoteMessage($payload, '')
+                    ),
+                ], 404);
             }
 
             $records = $payload['data'] ?? [];
             if (! is_array($records) || count($records) === 0) {
                 return response()->json([
-                    'message' => 'CPF não encontrado no SIGx.',
+                    'message' => $this->buildCpfNotFoundMessage($digits, null),
                 ], 404);
             }
 
@@ -209,16 +239,28 @@ class IntegrationController extends Controller
      * português) e cai em null para campos não retornados — o frontend
      * usa esses nulls para destacar em vermelho o que ainda precisa ser
      * preenchido manualmente.
+     *
+     * Variações conhecidas tratadas explicitamente:
+     *   • E-mail: `email` e `site_email` (o SIGx renomeou recentemente
+     *     o campo, e versões antigas ainda mandam `email`).
+     *   • Telefone: pode vir com prefixo de país (`+55 (35) 9 8853-9242`).
+     *     O front usa `maskPhone` brasileiro que re-aplica DDD + número
+     *     a partir dos dígitos crus; se deixássemos o "+55" passar, os
+     *     dois primeiros dígitos ("55") seriam interpretados como DDD.
+     *   • `contatos[]`: usado como fallback quando os campos do topo
+     *     vierem null/vazios e o registro contiver contatos secundários.
      */
     private function normalizeSigxPerson(array $row, string $cpfDigits): array
     {
+        [$email, $phone] = $this->extractSigxContacts($row);
+
         return [
             'name'          => $row['nome']            ?? $row['name']        ?? null,
             'shortName'     => $row['nome_abreviado']  ?? null,
             'cpf'           => $row['cpf_cnpj']        ?? $row['cpf']         ?? $cpfDigits,
             'rg'            => $row['rg']              ?? null,
-            'email'         => $row['email']           ?? null,
-            'phone'         => $row['telefone']        ?? $row['phone']       ?? null,
+            'email'         => $email,
+            'phone'         => $phone,
             'birthDate'     => $row['data_nascimento'] ?? $row['birthDate']   ?? null,
             'gender'        => $row['sexo']            ?? $row['gender']      ?? null,
             'maritalStatus' => $row['estado_civil']    ?? $row['maritalStatus'] ?? null,
@@ -231,6 +273,182 @@ class IntegrationController extends Controller
             'state'         => $row['uf']              ?? $row['estado']      ?? $row['state']        ?? null,
             'zipCode'       => $row['cep']             ?? $row['zipCode']     ?? null,
         ];
+    }
+
+    /**
+     * Resolve o par (email, telefone) a partir de um registro do SIGx,
+     * lidando com renomeações de campos e fallback para a lista
+     * `contatos[]` quando o topo do registro vier vazio.
+     *
+     * @return array{0: ?string, 1: ?string} [email, phone]
+     */
+    private function extractSigxContacts(array $row): array
+    {
+        $email = $this->firstNonEmpty([$row['email'] ?? null, $row['site_email'] ?? null]);
+        $phone = $this->firstNonEmpty([$row['telefone'] ?? null, $row['phone'] ?? null]);
+
+        if (($email === null || $phone === null) && isset($row['contatos']) && is_array($row['contatos'])) {
+            foreach ($row['contatos'] as $contato) {
+                if (! is_array($contato)) {
+                    continue;
+                }
+                if ($email === null) {
+                    $email = $this->firstNonEmpty([$contato['email'] ?? null, $contato['site_email'] ?? null]);
+                }
+                if ($phone === null) {
+                    $phone = $this->firstNonEmpty([$contato['telefone'] ?? null, $contato['phone'] ?? null]);
+                }
+                if ($email !== null && $phone !== null) {
+                    break;
+                }
+            }
+        }
+
+        return [$email, $this->stripPhoneCountryCode($phone)];
+    }
+
+    /**
+     * Remove o prefixo de código de país brasileiro ("+55") do telefone.
+     *
+     * Por que: os formulários do front aplicam um `maskPhone` brasileiro
+     * que re-mascara a partir dos dígitos crus (`(DD) NNNNN-NNNN`). Se
+     * mantivéssemos o "+55", o mask trataria os dois primeiros dígitos
+     * como o DDD e produziria um telefone bizarro.
+     *
+     * Casos suportados: "+55 (35) ...", "55 (35) ...", "+55-35-...".
+     * Telefones sem prefixo de país passam intactos.
+     */
+    private function stripPhoneCountryCode(?string $phone): ?string
+    {
+        if ($phone === null) {
+            return null;
+        }
+
+        $trimmed = trim($phone);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $stripped = preg_replace('/^\+?55[\s\-]*/', '', $trimmed);
+
+        return $stripped !== null && $stripped !== '' ? $stripped : $trimmed;
+    }
+
+    /**
+     * Devolve o primeiro valor não-nulo e não-vazio (após trim) de uma
+     * lista. Útil para resolver "este campo veio com o nome A ou B,
+     * pega o que estiver preenchido".
+     */
+    private function firstNonEmpty(array $candidates): ?string
+    {
+        foreach ($candidates as $value) {
+            if ($value === null) {
+                continue;
+            }
+            $trimmed = trim((string) $value);
+            if ($trimmed !== '') {
+                return $trimmed;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Monta a mensagem amigável de "CPF não localizado" exibida no
+     * toast do front quando a sincronização não encontra a pessoa.
+     *
+     * A mensagem é deliberadamente acolhedora — o operador pode estar
+     * cadastrando uma pessoa nova, então não é um erro: é só um aviso
+     * de que ele precisa preencher os campos manualmente.
+     *
+     * Quando o SIGx devolve algum motivo específico (ex.: "CPF inválido
+     * no nosso cadastro", "Cliente bloqueado"), incorporamos essa frase
+     * entre parênteses para dar contexto ao operador, mas SEMPRE com a
+     * orientação de preenchimento manual em primeiro lugar.
+     */
+    private function buildCpfNotFoundMessage(string $cpfDigits, ?string $remoteMessage): string
+    {
+        $masked = $this->maskCpfForDisplay($cpfDigits);
+        $base   = "CPF {$masked} não localizado na base do SIGx — preencha os dados manualmente.";
+
+        if ($remoteMessage !== null && $remoteMessage !== '') {
+            // Evita repetir a frase "CPF não encontrado" ao concatenar:
+            // se o motivo upstream já contém essa expressão, ignoramos.
+            $lower = mb_strtolower($remoteMessage);
+            if (! str_contains($lower, 'não encontrado') && ! str_contains($lower, 'nao encontrado')) {
+                return $base . ' (Motivo do SIGx: ' . $remoteMessage . ')';
+            }
+        }
+
+        return $base;
+    }
+
+    /**
+     * Aplica a máscara `XXX.XXX.XXX-XX` para exibição em mensagens.
+     * Não usar para gravação — só para humanizar o toast.
+     */
+    private function maskCpfForDisplay(string $digits): string
+    {
+        if (strlen($digits) !== 11) {
+            return $digits;
+        }
+
+        return substr($digits, 0, 3) . '.'
+             . substr($digits, 3, 3) . '.'
+             . substr($digits, 6, 3) . '-'
+             . substr($digits, 9, 2);
+    }
+
+    /**
+     * Extrai uma mensagem amigável de um corpo de resposta do SIGx,
+     * tentando as chaves mais comuns em respostas de erro de APIs
+     * brasileiras (Laravel, FastAPI, Django REST e custom). Se o
+     * body for HTML (página de erro de gateway, 502 nginx, etc.) ou
+     * estiver vazio, devolve null para que o caller use o texto padrão.
+     *
+     * Mensagens muito longas são truncadas em 200 caracteres para não
+     * estourarem a largura do toast no front.
+     */
+    private function extractRemoteMessage($payload, string $rawBody): ?string
+    {
+        if (is_array($payload)) {
+            $candidates = [
+                $payload['message']           ?? null,
+                $payload['error']             ?? null,
+                $payload['error_description'] ?? null,
+                $payload['detail']            ?? null,
+                $payload['msg']               ?? null,
+            ];
+
+            // `errors` pode ser uma lista — pega o primeiro item textual.
+            if (isset($payload['errors']) && is_array($payload['errors'])) {
+                foreach ($payload['errors'] as $err) {
+                    if (is_string($err)) {
+                        $candidates[] = $err;
+                        break;
+                    }
+                    if (is_array($err)) {
+                        $candidates[] = $err['message'] ?? $err['detail'] ?? null;
+                        break;
+                    }
+                }
+            }
+
+            foreach ($candidates as $candidate) {
+                if (is_string($candidate) && trim($candidate) !== '') {
+                    $clean = trim($candidate);
+                    return mb_strlen($clean) > 200 ? mb_substr($clean, 0, 200) . '…' : $clean;
+                }
+            }
+        }
+
+        $body = trim($rawBody);
+        if ($body === '' || str_starts_with($body, '<')) {
+            return null;
+        }
+
+        return mb_strlen($body) > 200 ? mb_substr($body, 0, 200) . '…' : $body;
     }
 
     /**
