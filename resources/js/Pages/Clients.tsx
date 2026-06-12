@@ -3,7 +3,7 @@ import { Head, router } from "@inertiajs/react";
 import {
   Plus, Search, Edit2, Trash2, Users, Building2,
   User, Shield, FileText, X, Eye, Upload, Loader2, CreditCard, QrCode,
-  UserCheck, Scale, IdCard, MapPin, Landmark, ScrollText, Download,
+  UserCheck, Scale, IdCard, MapPin, Landmark, ScrollText, Download, RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
@@ -30,6 +30,7 @@ import {
   validateCPF,
 } from "../lib/documentValidation";
 import { maskPhone } from "../lib/masks";
+import { fetchSigxByCpf, getRedHighlight } from "../lib/sigx";
 
 const RISK_COLORS: Record<string, { bg: string; color: string }> = {
   A: { bg: "oklch(92% .08 145)", color: "oklch(35% .15 145)" },
@@ -179,6 +180,87 @@ export default function Clients({ clients, filters }: any) {
   const [documentError, setDocumentError] = useState("");
   const [cnpjLoading, setCnpjLoading] = useState(false);
   const lastFetchedCnpjRef = useRef("");
+  // 🚀 Sincronização SIGx para PF (CPF). Mesma estratégia do GuarantorFormFields
+  // e Guarantors.tsx: pós-sucesso, campos não retornados pela API ficam
+  // destacados em vermelho como orientação visual (sem virar `required`).
+  const [cpfLoading, setCpfLoading] = useState(false);
+  const [cpfSynced, setCpfSynced] = useState(false);
+
+  const handleSyncCpf = async () => {
+    const digits = onlyDigits(form.document);
+    if (digits.length !== 11) {
+      toast.error("Digite um CPF completo (11 dígitos) antes de sincronizar.");
+      return;
+    }
+    if (!validateCPF(digits)) {
+      toast.error("CPF inválido — corrija antes de consultar o SIGx.");
+      return;
+    }
+
+    setCpfLoading(true);
+    try {
+      const result = await fetchSigxByCpf(digits);
+      if (!result.ok || !result.data) {
+        toast.error(result.error ?? "Não foi possível consultar o SIGx.");
+        return;
+      }
+
+      const d = result.data;
+      // Como o cadastro de Cliente usa endereço FLAT (`address` único campo),
+      // concatenamos os componentes de endereço retornados pelo SIGx em uma
+      // só linha — o operador pode ajustar manualmente se preferir.
+      const addressParts = [d.street, d.number, d.complement, d.neighborhood]
+        .filter(Boolean)
+        .join(", ");
+
+      setForm(p => ({
+        ...p,
+        name:    d.name    || p.name,
+        email:   d.email   || p.email,
+        phone:   d.phone   ? maskPhone(String(d.phone)) : p.phone,
+        zipCode: d.zipCode ? maskCEP(String(d.zipCode))  : p.zipCode,
+        address: addressParts || p.address,
+        city:    d.city    || p.city,
+        state:   d.state   ? String(d.state).toUpperCase() : p.state,
+      }));
+      setCpfSynced(true);
+      toast.success("Dados do SIGx aplicados ao formulário.");
+    } catch (err) {
+      toast.error(extractFirstError(err, "Falha ao consultar o SIGx."));
+    } finally {
+      setCpfLoading(false);
+    }
+  };
+
+  /**
+   * 🚀 Alterna entre PF e PJ resetando os dados pessoais do cadastro.
+   * Regra de negócio: dados de pessoa física (nome próprio, CPF, e-mail
+   * pessoal, endereço residencial) NÃO podem permanecer ao mudar para
+   * pessoa jurídica — e vice-versa.
+   *
+   * Preservamos itens que dependem mais do CADASTRO em si do que do
+   * tipo de pessoa: contas bancárias (`bankAccounts`), rating de risco
+   * e o array de notas/observações jurídicas. Isso evita que o operador
+   * perca trabalho ao alternar o toggle por engano. Os campos pessoais
+   * (nome, documento, contato, endereço) e os dados auxiliares de fiador
+   * cadastrados na tela são limpos.
+   */
+  const handleSwitchPersonType = (next: "PF" | "PJ") => {
+    if (form.personType === next) return;
+    setDocumentError("");
+    setCnpjLoading(false);
+    setCpfSynced(false);
+    lastFetchedCnpjRef.current = "";
+    setCepMeta({ main: "", fiador1: "", fiador2: "" });
+    setForm(prev => ({
+      ...emptyForm,
+      personType: next,
+      // Preserva itens não-pessoais (já preenchidos pelo operador):
+      bankAccounts: prev.bankAccounts,
+      riskRating: prev.riskRating,
+      observacoesJuridicas: prev.observacoesJuridicas,
+    }));
+  };
 
   // 🚀 Lista de pessoas (Fiador/Codevedor) que aparecem em CONTRATOS do
   // cliente — somente leitura. A fonte é a pivot contract_guarantor (com role)
@@ -290,6 +372,7 @@ export default function Clients({ clients, filters }: any) {
     }
     setDocumentError("");
     setCnpjLoading(false);
+    setCpfSynced(false);
     lastFetchedCnpjRef.current = "";
     setCepMeta({ main: "", fiador1: "", fiador2: "" });
     setActiveTab("dados");
@@ -359,8 +442,28 @@ export default function Clients({ clients, filters }: any) {
     const nextPersonType = personTypeFromDocument(masked);
     const digits = onlyDigits(masked);
 
-    setForm(prev => ({ ...prev, document: masked, personType: nextPersonType }));
+    setForm(prev => {
+      // 🚀 Quando o operador digita o documento e ele cresce além de 11
+      // dígitos (deixa de ser CPF e vira CNPJ) ou encolhe abaixo (volta
+      // a ser CPF), o `personTypeFromDocument` muda de PF↔PJ. Nesse
+      // momento limpamos os campos pessoais para evitar mesclar dados
+      // de pessoa física com dados de pessoa jurídica no mesmo cadastro.
+      if (prev.personType !== nextPersonType) {
+        return {
+          ...emptyForm,
+          // Preserva o que o operador acabou de digitar e os itens
+          // não-pessoais (mesma lógica do `handleSwitchPersonType`).
+          document: masked,
+          personType: nextPersonType,
+          bankAccounts: prev.bankAccounts,
+          riskRating: prev.riskRating,
+          observacoesJuridicas: prev.observacoesJuridicas,
+        };
+      }
+      return { ...prev, document: masked, personType: nextPersonType };
+    });
     setDocumentError("");
+    if (cpfSynced) setCpfSynced(false);
 
     if (digits.length !== 14) {
       lastFetchedCnpjRef.current = "";
@@ -882,31 +985,75 @@ export default function Clients({ clients, filters }: any) {
                   
                   {activeTab === "dados" && (
                     <div className="form-grid-3">
-                      <div className="col-span-3"><Label>NOME COMPLETO / RAZÃO SOCIAL *</Label><input className="sigx-input" value={form.name} onChange={f("name")} required disabled={cnpjLoading} placeholder="Nome completo ou razão social" /></div>
+                      {/* 🚀 TIPO DE PESSOA + DOCUMENTO no topo: o operador
+                          escolhe o tipo, digita o documento e o sistema
+                          dispara o auto-preenchimento (CPF→SIGx ou CNPJ→Receita).
+                          Nome/razão social fica logo abaixo, recebendo o
+                          retorno da API automaticamente. */}
                       <div>
                         <Label>TIPO DE PESSOA</Label>
-                        <select className="sigx-input" value={form.personType} onChange={f("personType")} disabled={cnpjLoading}>
+                        <select
+                          className="sigx-input"
+                          value={form.personType}
+                          onChange={(e) => handleSwitchPersonType(e.target.value as "PF" | "PJ")}
+                          disabled={cnpjLoading}
+                        >
                           <option value="PF">Pessoa Física</option><option value="PJ">Pessoa Jurídica</option>
                         </select>
                       </div>
-                      <div>
+                      <div className="col-span-2">
                         <Label>CPF ou CNPJ</Label>
-                        <div style={{ position: "relative" }}>
-                          <input
-                            className="sigx-input"
-                            value={form.document}
-                            onChange={(e) => handleDocumentChange(e.target.value)}
-                            onBlur={handleDocumentBlur}
-                            disabled={cnpjLoading}
-                            placeholder="000.000.000-00 ou 00.000.000/0000-00"
-                            style={documentError ? { borderColor: "#dc2626" } : undefined}
-                          />
-                          {cnpjLoading && (
-                            <Loader2
-                              size={14}
-                              className="animate-spin"
-                              style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: "#2563eb" }}
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <div style={{ position: "relative", flex: 1 }}>
+                            <input
+                              className="sigx-input"
+                              value={form.document}
+                              onChange={(e) => handleDocumentChange(e.target.value)}
+                              onBlur={handleDocumentBlur}
+                              disabled={cnpjLoading || cpfLoading}
+                              placeholder="000.000.000-00 ou 00.000.000/0000-00"
+                              style={documentError ? { borderColor: "#dc2626" } : undefined}
                             />
+                            {cnpjLoading && (
+                              <Loader2
+                                size={14}
+                                className="animate-spin"
+                                style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: "#2563eb" }}
+                              />
+                            )}
+                          </div>
+                          {form.personType === "PF" && (
+                            <button
+                              type="button"
+                              onClick={handleSyncCpf}
+                              disabled={cpfLoading || onlyDigits(form.document).length !== 11}
+                              title="Consulta o CPF na integração SIGx ativa e preenche os campos automaticamente"
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 6,
+                                padding: "0 12px",
+                                borderRadius: 8,
+                                border: "1px solid #2563eb",
+                                background: cpfLoading ? "#dbeafe" : "#eff6ff",
+                                color: "#1d4ed8",
+                                fontSize: 11,
+                                fontWeight: 600,
+                                cursor: cpfLoading || onlyDigits(form.document).length !== 11 ? "not-allowed" : "pointer",
+                                opacity: cpfLoading || onlyDigits(form.document).length !== 11 ? 0.55 : 1,
+                                whiteSpace: "nowrap",
+                                transition: "all 0.12s",
+                              }}
+                            >
+                              {cpfLoading ? (
+                                <Loader2 size={13} className="animate-spin" />
+                              ) : (
+                                <RefreshCw size={13} />
+                              )}
+                              <span className="keep-case">
+                                {cpfLoading ? "Consultando..." : "Sincronizar com SIGx"}
+                              </span>
+                            </button>
                           )}
                         </div>
                         {documentError && (
@@ -919,17 +1066,23 @@ export default function Clients({ clients, filters }: any) {
                             Consultando dados na Receita Federal...
                           </div>
                         )}
+                        {cpfSynced && !cnpjLoading && !documentError && (
+                          <div style={{ color: "#dc2626", fontSize: 11, marginTop: 4, fontWeight: 600 }}>
+                            Campos em vermelho não foram retornados pelo SIGx — preencha manualmente.
+                          </div>
+                        )}
                       </div>
+                      <div className="col-span-3"><Label>NOME COMPLETO / RAZÃO SOCIAL *</Label><input className="sigx-input" value={form.name} onChange={f("name")} required disabled={cnpjLoading} placeholder="Nome completo ou razão social" style={getRedHighlight(form.name, cpfSynced && form.personType === "PF")} /></div>
                       <div>
                         <Label>RATING DE RISCO</Label>
                         <select className="sigx-input" value={form.riskRating} onChange={f("riskRating")} disabled={cnpjLoading}>
                           <option value="A">Rating A (Excelente)</option><option value="B">Rating B (Bom)</option><option value="C">Rating C (Regular)</option><option value="D">Rating D (Ruim)</option><option value="E">Rating E (Péssimo)</option>
                         </select>
                       </div>
-                      <div><Label>TELEFONE / WHATSAPP</Label><input className="sigx-input" value={form.phone} onChange={(e) => setForm(p => ({ ...p, phone: maskPhone(e.target.value) }))} disabled={cnpjLoading} placeholder="(00) 00000-0000" /></div>
-                      <div className="col-span-2"><Label>E-MAIL</Label><input type="email" className="sigx-input" value={form.email} onChange={f("email")} disabled={cnpjLoading} placeholder="email@exemplo.com" /></div>
+                      <div><Label>TELEFONE / WHATSAPP</Label><input className="sigx-input" value={form.phone} onChange={(e) => setForm(p => ({ ...p, phone: maskPhone(e.target.value) }))} disabled={cnpjLoading} placeholder="(00) 00000-0000" style={getRedHighlight(form.phone, cpfSynced && form.personType === "PF")} /></div>
+                      <div><Label>E-MAIL</Label><input type="email" className="sigx-input" value={form.email} onChange={f("email")} disabled={cnpjLoading} placeholder="email@exemplo.com" style={getRedHighlight(form.email, cpfSynced && form.personType === "PF")} /></div>
                       <div><Label>PROFISSÃO / ATIVIDADE</Label><input className="sigx-input" value={form.profissao} onChange={f("profissao")} disabled={cnpjLoading} placeholder="Ex: Empresário, Transportador..." /></div>
-                      <div><Label>RENDA MENSAL (R$)</Label><input className="sigx-input mono" value={form.rendaMensal} onChange={f("rendaMensal")} disabled={cnpjLoading} placeholder="0,00" /></div>
+                      <div className="col-span-2"><Label>RENDA MENSAL (R$)</Label><input className="sigx-input mono" value={form.rendaMensal} onChange={f("rendaMensal")} disabled={cnpjLoading} placeholder="0,00" /></div>
                     </div>
                   )}
 
@@ -937,13 +1090,20 @@ export default function Clients({ clients, filters }: any) {
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                       <div>
                         <Label>CEP</Label>
-                        <input className="sigx-input" style={{ width: "38%" }} value={form.zipCode} disabled={cnpjLoading} onChange={(e) => { const masked = maskCEP(e.target.value); setForm(p => ({ ...p, zipCode: masked })); if (masked.replace(/\D/g, "").length === 8) handleFetchCep(masked, "main"); }} placeholder="00000-000" />
+                        <input
+                          className="sigx-input"
+                          style={{ width: "38%", ...getRedHighlight(form.zipCode, cpfSynced && form.personType === "PF") }}
+                          value={form.zipCode}
+                          disabled={cnpjLoading}
+                          onChange={(e) => { const masked = maskCEP(e.target.value); setForm(p => ({ ...p, zipCode: masked })); if (masked.replace(/\D/g, "").length === 8) handleFetchCep(masked, "main"); }}
+                          placeholder="00000-000"
+                        />
                         {cepMeta.main && <div style={{ color: "var(--color-green)", fontSize: 11, fontWeight: 600, marginTop: 4 }}>{cepMeta.main}</div>}
                       </div>
-                      <div><Label>ENDEREÇO COMPLETO</Label><input className="sigx-input" value={form.address} onChange={f("address")} disabled={cnpjLoading} /></div>
+                      <div><Label>ENDEREÇO COMPLETO</Label><input className="sigx-input" value={form.address} onChange={f("address")} disabled={cnpjLoading} style={getRedHighlight(form.address, cpfSynced && form.personType === "PF")} /></div>
                       <div className="form-grid-3">
-                        <div className="col-span-2"><Label>CIDADE</Label><input className="sigx-input" value={form.city} onChange={f("city")} disabled={cnpjLoading} /></div>
-                        <div><Label>ESTADO (UF)</Label><input className="sigx-input" value={form.state} onChange={f("state")} disabled={cnpjLoading} maxLength={2} /></div>
+                        <div className="col-span-2"><Label>CIDADE</Label><input className="sigx-input" value={form.city} onChange={f("city")} disabled={cnpjLoading} style={getRedHighlight(form.city, cpfSynced && form.personType === "PF")} /></div>
+                        <div><Label>ESTADO (UF)</Label><input className="sigx-input" value={form.state} onChange={f("state")} disabled={cnpjLoading} maxLength={2} style={getRedHighlight(form.state, cpfSynced && form.personType === "PF")} /></div>
                       </div>
                     </div>
                   )}

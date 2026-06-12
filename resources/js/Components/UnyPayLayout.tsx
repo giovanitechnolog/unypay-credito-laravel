@@ -4,7 +4,7 @@ import {
   LayoutDashboard, List, Users, FileText, Calculator,
   TrendingUp, ClipboardList, LogOut, Menu, Bell,
   ChevronDown, Shield, CreditCard, ChevronRight, History,
-  UserCog, Handshake, Landmark, Sparkles, LayoutGrid,
+  UserCog, Handshake, Landmark, Sparkles, LayoutGrid, Plug,
 } from "lucide-react";
 
 const NAV_SECTIONS = [
@@ -33,7 +33,8 @@ const NAV_SECTIONS = [
   {
     label: "SISTEMA",
     items: [
-      { href: "/serasa", label: "Monitor Serasa", icon: Shield },
+      { href: "/serasa",     label: "Monitor Serasa", icon: Shield },
+      { href: "/integracoes", label: "Integrações",    icon: Plug },
       //{ href: "/audit",  label: "Auditoria",      icon: ClipboardList },
     ],
   },
@@ -62,6 +63,7 @@ function getPageTitle(url: string) {
   if (url === "/ipca") return "Tabela IPCA";
   if (url === "/simulator") return "Simulador";
   if (url === "/serasa") return "Monitor Serasa";
+  if (url === "/integracoes") return "Integrações";
   if (url === "/audit") return "Auditoria";
   if (url === "/usuarios") return "Usuários";
   return "UnyPay® Crédito";
@@ -84,6 +86,7 @@ function getBreadcrumb(url: string) {
   if (url === "/ipca") return [base, { label: "Tabela IPCA" }];
   if (url === "/simulator") return [base, { label: "Simulador" }];
   if (url === "/serasa") return [base, { label: "Monitor Serasa" }];
+  if (url === "/integracoes") return [base, { label: "Sistema" }, { label: "Integrações" }];
   if (url === "/audit") return [base, { label: "Auditoria" }];
   if (url === "/usuarios") return [base, { label: "Gestão Interna" }, { label: "Usuários" }];
   return [base];

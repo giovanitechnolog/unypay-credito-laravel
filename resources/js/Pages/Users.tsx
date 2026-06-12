@@ -2,13 +2,14 @@ import React, { useCallback, useEffect, useState, useMemo, useRef } from "react"
 import { Head, usePage } from "@inertiajs/react";
 import {
   Plus, Search, RefreshCw, UserCheck, ShieldAlert, Users, Calendar, Mail,
-  Shield, ShieldCheck, Edit2, Trash2, X, KeyRound, IdCard, Camera, Upload, Trash,
+  Shield, ShieldCheck, Edit2, Trash2, X, KeyRound, IdCard, Camera, Upload, Trash, Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
 import ConfirmDialog from "../Components/ConfirmDialog";
 import PasswordInput from "../Components/PasswordInput";
 import { api, extractFirstError } from "../lib/api";
+import { fetchSigxByCpf, getRedHighlight } from "../lib/sigx";
 
 interface User {
   id: number;
@@ -127,6 +128,11 @@ export default function UsersPage() {
     cpf: "", rg: "", phone: "", birthDate: "", gender: ""
   });
   const [cpfError, setCpfError] = useState<string | null>(null);
+  // 🚀 Sincronização SIGx — quando o operador clica "Sincronizar com SIGx",
+  // os campos preenchidos automaticamente ficam normais e os NÃO preenchidos
+  // são destacados em vermelho (orientação visual, não bloqueia o submit).
+  const [cpfLoading, setCpfLoading] = useState(false);
+  const [cpfSynced, setCpfSynced] = useState(false);
   // E-mail original do usuário em edição. Usado para detectar quando o
   // operador alterou o e-mail e ativar/desativar a redigitação.
   const [originalEmail, setOriginalEmail] = useState<string>("");
@@ -177,6 +183,7 @@ export default function UsersPage() {
     setSelectedUser(null);
     setOriginalEmail("");
     setCpfError(null);
+    setCpfSynced(false);
     setFormData({
       name: "", email: "", emailConfirmation: "",
       currentPassword: "", password: "", passwordConfirmation: "",
@@ -193,6 +200,7 @@ export default function UsersPage() {
     setSelectedUser(user);
     setOriginalEmail(user.email ?? "");
     setCpfError(null);
+    setCpfSynced(false);
     setFormData({
       name: user.name,
       email: user.email,
@@ -252,6 +260,53 @@ export default function UsersPage() {
     }
     setPhotoFile(null);
     setPhotoPreview(null);
+  };
+
+  /**
+   * 🚀 Aciona a integração SIGx (Rodopar) para preencher os campos do
+   * operador a partir do CPF. Usa a integração ATIVA com finalidade
+   * `cpf_lookup` cadastrada no menu Sistema → Integrações.
+   *
+   * Pós-sucesso, sinalizamos `cpfSynced=true`: os campos não retornados
+   * pela API ganham destaque vermelho (estilo Ingestão IA) — orientando
+   * o operador a completar manualmente, SEM marcar como obrigatório.
+   */
+  const handleSyncCpf = async () => {
+    const digits = (formData.cpf ?? "").replace(/\D/g, "");
+    if (digits.length !== 11) {
+      toast.error("Digite um CPF completo (11 dígitos) antes de sincronizar.");
+      return;
+    }
+    if (!isValidCpf(digits)) {
+      toast.error("CPF inválido — corrija antes de consultar o SIGx.");
+      return;
+    }
+
+    setCpfLoading(true);
+    try {
+      const result = await fetchSigxByCpf(digits);
+      if (!result.ok || !result.data) {
+        toast.error(result.error ?? "Não foi possível consultar o SIGx.");
+        return;
+      }
+
+      const d = result.data;
+      setFormData(p => ({
+        ...p,
+        name:      d.name      || p.name,
+        email:     d.email     || p.email,
+        rg:        d.rg        || p.rg,
+        phone:     d.phone     ? maskPhone(String(d.phone)) : p.phone,
+        birthDate: d.birthDate || p.birthDate,
+        gender:    d.gender    || p.gender,
+      }));
+      setCpfSynced(true);
+      toast.success("Dados do SIGx aplicados ao formulário.");
+    } catch (err) {
+      toast.error(extractFirstError(err, "Falha ao consultar o SIGx."));
+    } finally {
+      setCpfLoading(false);
+    }
   };
 
   const handleFormSubmit = async (e: React.FormEvent) => {
@@ -725,6 +780,7 @@ export default function UsersPage() {
                           onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
                           maxLength={FIELD_MAX_LENGTH.name}
                           required
+                          style={getRedHighlight(formData.name, cpfSynced)}
                         />
                       </div>
 
@@ -744,6 +800,7 @@ export default function UsersPage() {
                             onChange={e => setFormData(p => ({ ...p, email: e.target.value }))}
                             maxLength={FIELD_MAX_LENGTH.email}
                             required
+                            style={getRedHighlight(formData.email, cpfSynced)}
                           />
                         </div>
                         <div>
@@ -864,30 +921,70 @@ export default function UsersPage() {
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                         <div>
                           <label className="sigx-label">CPF</label>
-                          <input
-                            type="text"
-                            className="sigx-input mono"
-                            placeholder="000.000.000-00"
-                            value={formData.cpf}
-                            maxLength={FIELD_MAX_LENGTH.cpf}
-                            onChange={e => {
-                              const next = maskCPF(e.target.value);
-                              setFormData(p => ({ ...p, cpf: next }));
-                              setCpfError(null);
-                            }}
-                            onBlur={e => {
-                              const v = e.target.value;
-                              if (v && !isValidCpf(v)) {
-                                setCpfError("O CPF informado é inválido.");
-                              } else {
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <input
+                              type="text"
+                              className="sigx-input mono"
+                              placeholder="000.000.000-00"
+                              value={formData.cpf}
+                              maxLength={FIELD_MAX_LENGTH.cpf}
+                              onChange={e => {
+                                const next = maskCPF(e.target.value);
+                                setFormData(p => ({ ...p, cpf: next }));
                                 setCpfError(null);
-                              }
-                            }}
-                            style={cpfError ? { borderColor: "#dc2626", boxShadow: "0 0 0 3px rgba(220,38,38,0.12)" } : undefined}
-                          />
+                                if (cpfSynced) setCpfSynced(false);
+                              }}
+                              onBlur={e => {
+                                const v = e.target.value;
+                                if (v && !isValidCpf(v)) {
+                                  setCpfError("O CPF informado é inválido.");
+                                } else {
+                                  setCpfError(null);
+                                }
+                              }}
+                              readOnly={cpfLoading}
+                              style={cpfError ? { borderColor: "#dc2626", boxShadow: "0 0 0 3px rgba(220,38,38,0.12)" } : undefined}
+                            />
+                            <button
+                              type="button"
+                              onClick={handleSyncCpf}
+                              disabled={cpfLoading || formData.cpf.replace(/\D/g, "").length !== 11}
+                              title="Consulta o CPF na integração SIGx ativa e preenche os campos automaticamente"
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 6,
+                                padding: "0 12px",
+                                borderRadius: 8,
+                                border: "1px solid #2563eb",
+                                background: cpfLoading ? "#dbeafe" : "#eff6ff",
+                                color: "#1d4ed8",
+                                fontSize: 11,
+                                fontWeight: 600,
+                                cursor: cpfLoading || formData.cpf.replace(/\D/g, "").length !== 11 ? "not-allowed" : "pointer",
+                                opacity: cpfLoading || formData.cpf.replace(/\D/g, "").length !== 11 ? 0.55 : 1,
+                                whiteSpace: "nowrap",
+                                transition: "all 0.12s",
+                              }}
+                            >
+                              {cpfLoading ? (
+                                <Loader2 size={13} className="animate-spin" />
+                              ) : (
+                                <RefreshCw size={13} />
+                              )}
+                              <span className="keep-case">
+                                {cpfLoading ? "Consultando..." : "Sincronizar com SIGx"}
+                              </span>
+                            </button>
+                          </div>
                           {cpfError && (
                             <span className="keep-case" style={{ display: "block", marginTop: 4, fontSize: 10.5, color: "#dc2626", fontWeight: 600 }}>
                               {cpfError}
+                            </span>
+                          )}
+                          {cpfSynced && !cpfError && (
+                            <span className="keep-case" style={{ display: "block", marginTop: 4, fontSize: 10.5, color: "#dc2626", fontWeight: 600 }}>
+                              Campos em vermelho não foram retornados pelo SIGx — preencha manualmente.
                             </span>
                           )}
                         </div>
@@ -899,6 +996,7 @@ export default function UsersPage() {
                             value={formData.rg}
                             maxLength={FIELD_MAX_LENGTH.rg}
                             onChange={e => setFormData(p => ({ ...p, rg: e.target.value }))}
+                            style={getRedHighlight(formData.rg, cpfSynced)}
                           />
                         </div>
                       </div>
@@ -912,6 +1010,7 @@ export default function UsersPage() {
                             value={formData.phone}
                             maxLength={FIELD_MAX_LENGTH.phone}
                             onChange={e => setFormData(p => ({ ...p, phone: maskPhone(e.target.value) }))}
+                            style={getRedHighlight(formData.phone, cpfSynced)}
                           />
                         </div>
                         <div>
@@ -921,6 +1020,7 @@ export default function UsersPage() {
                             className="sigx-input"
                             value={formData.birthDate}
                             onChange={e => setFormData(p => ({ ...p, birthDate: e.target.value }))}
+                            style={getRedHighlight(formData.birthDate, cpfSynced)}
                           />
                         </div>
                       </div>
@@ -930,6 +1030,7 @@ export default function UsersPage() {
                           className="sigx-input"
                           value={formData.gender}
                           onChange={e => setFormData(p => ({ ...p, gender: e.target.value }))}
+                          style={getRedHighlight(formData.gender, cpfSynced)}
                         >
                           <option value="">Não Informar</option>
                           <option value="Masculino">Masculino</option>
