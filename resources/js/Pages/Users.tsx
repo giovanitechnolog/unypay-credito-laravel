@@ -9,7 +9,7 @@ import UnyPayLayout from "../Components/UnyPayLayout";
 import ConfirmDialog from "../Components/ConfirmDialog";
 import PasswordInput from "../Components/PasswordInput";
 import { api, extractFirstError } from "../lib/api";
-import { fetchSigxByCpf, getRedHighlight } from "../lib/sigx";
+import { fetchSigxByCpf, getRedHighlight, notifySigxFailure } from "../lib/sigx";
 
 interface User {
   id: number;
@@ -286,7 +286,26 @@ export default function UsersPage() {
     try {
       const result = await fetchSigxByCpf(digits);
       if (!result.ok || !result.data) {
-        toast.error(result.error ?? "Não foi possível consultar o SIGx.");
+        notifySigxFailure(result);
+        // Quando o CPF não foi localizado (404), limpamos os campos que
+        // poderiam ter sido preenchidos por um sync anterior — caso
+        // contrário, dados antigos ficariam "pendurados" no formulário e
+        // confundiriam o operador no preenchimento manual. Em outros
+        // erros (timeout, integração desativada), preservamos o que já
+        // está digitado: o sync falhou por motivo técnico, não porque
+        // os dados existentes estão errados.
+        if (result.status === 404) {
+          setFormData(p => ({
+            ...p,
+            name:      "",
+            email:     "",
+            rg:        "",
+            phone:     "",
+            birthDate: "",
+            gender:    "",
+          }));
+          setCpfSynced(false);
+        }
         return;
       }
 

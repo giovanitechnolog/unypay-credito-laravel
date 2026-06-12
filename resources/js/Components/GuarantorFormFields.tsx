@@ -3,7 +3,7 @@ import { User, Building2, CheckCircle2, Mail, Phone, Loader2, RefreshCw } from "
 import { toast } from "sonner";
 import { maskPhone } from "../lib/masks";
 import { api, extractFirstError } from "../lib/api";
-import { fetchSigxByCpf, getRedHighlight } from "../lib/sigx";
+import { fetchSigxByCpf, getRedHighlight, notifySigxFailure } from "../lib/sigx";
 
 /**
  * Tipo de pessoa do fiador (PF ou PJ).
@@ -202,7 +202,29 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
     try {
       const result = await fetchSigxByCpf(digits);
       if (!result.ok || !result.data) {
-        toast.error(result.error ?? "Não foi possível consultar o SIGx.");
+        notifySigxFailure(result);
+        // 404 → limpa os campos preenchíveis pelo SIGx para evitar
+        // arrastar dados de um sync anterior. Outros erros (timeout,
+        // integração off) preservam o que já está digitado.
+        if (result.status === 404) {
+          onChange({
+            ...value,
+            name:          "",
+            rg:            "",
+            email:         "",
+            phone:         "",
+            nationality:   "",
+            maritalStatus: "",
+            zipCode:       "",
+            street:        "",
+            number:        "",
+            complement:    "",
+            neighborhood:  "",
+            city:          "",
+            state:         "",
+          });
+          setCpfSynced(false);
+        }
         return;
       }
 
