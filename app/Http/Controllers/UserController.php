@@ -67,48 +67,6 @@ class UserController extends Controller
     }
 
     /**
-     * Limites de tamanho por campo, espelhando exatamente o schema da
-     * tabela `users` (migrations 0001 + add_cadastro_fields). Centralizados
-     * aqui para que controller, attributes() e mensagens fiquem em sincronia
-     * — e para tornar trivial a manutenção quando a coluna mudar.
-     */
-    private const LIMITS = [
-        'name'      => 255,   // text na DDL, mas regulamos UX em 255
-        'email'     => 320,   // string(320) — RFC 5321
-        'password'  => 255,   // limite de bcrypt usável
-        'cpf'       => 14,    // 000.000.000-00 → guardado sem máscara, 11 dígitos
-        'rg'        => 20,
-        'phone'     => 15,    // (00) 00000-0000 → guardado sem máscara, até 11 dígitos
-        'gender'    => 20,
-    ];
-
-    /**
-     * Nomes amigáveis em PT-BR para os :attribute das mensagens automáticas
-     * do validation.php. Compartilhado entre store() e update() para garantir
-     * consistência. Inclui também as chaves de confirmação (regra `confirmed`
-     * do Laravel espera `email_confirmation` / `password_confirmation`).
-     */
-    private function attributes(): array
-    {
-        return [
-            'name'                  => 'nome completo',
-            'email'                 => 'e-mail',
-            'email_confirmation'    => 'confirmação de e-mail',
-            'password'              => 'nova senha',
-            'password_confirmation' => 'confirmação da nova senha',
-            'current_password'      => 'senha atual',
-            'role'                  => 'nível de permissão',
-            'status'                => 'status operacional',
-            'photo'                 => 'foto',
-            'cpf'                   => 'CPF',
-            'rg'                    => 'RG',
-            'phone'                 => 'telefone',
-            'birthDate'             => 'data de nascimento',
-            'gender'                => 'gênero',
-        ];
-    }
-
-    /**
      * Renderiza a página /usuarios via Inertia.
      */
     public function index(): Response
