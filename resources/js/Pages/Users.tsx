@@ -483,7 +483,7 @@ export default function UsersPage() {
         
         <div>
           <h2 style={{ fontSize: 20, fontWeight: 700, color: "#1e293b", margin: 0 }}>Controle de Operadores</h2>
-          <p style={{ fontSize: 12, color: "#64748b", margin: "2px 0 0 0" }}>Gerencie os níveis de acessos, dados cadastrais e o status das chaves de segurança dos colaboradores.</p>
+          <p style={{ fontSize: 12, color: "#64748b", margin: "2px 0 0 0" }}>Gerencie os níveis de acessos e os dados cadastrais dos colaboradores.</p>
         </div>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
