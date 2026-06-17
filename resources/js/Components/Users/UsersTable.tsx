@@ -141,7 +141,7 @@ function Td({ children, style }: { children: React.ReactNode; style?: React.CSSP
 }
 
 function formatDate(iso?: string) {
-  if (!iso) return "—";
+  if (!iso) return "Nunca acessou";
   try {
     return new Date(iso).toLocaleString("pt-BR");
   } catch {

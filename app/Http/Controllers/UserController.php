@@ -147,7 +147,7 @@ class UserController extends Controller
 
         $user = User::create([
             'created_by'   => Auth::id(),
-            'name'         => $request->input('name'),
+            'name'         => $this->uppercaseText($request->input('name')),
             'email'        => Str::lower($request->input('email')),
             'password'     => $request->input('password'),
             'photo'        => $photoPath,
@@ -155,11 +155,11 @@ class UserController extends Controller
             'status'       => $request->input('status', 'Ativo'),
             'loginMethod'  => 'password',
             'cpf'          => $cpf,
-            'rg'           => $request->input('rg'),
+            'rg'           => $this->uppercaseText($request->input('rg')),
             'phone'        => $phone,
             'birthDate'    => $request->input('birthDate'),
             'gender'       => $request->input('gender'),
-            'lastSignedIn' => now(),
+            'lastSignedIn' => null,
         ]);
 
         return response()->json([
@@ -241,12 +241,12 @@ class UserController extends Controller
         $phone = $request->input('phone') ? preg_replace('/\D/', '', $request->input('phone')) : null;
 
         $payload = [
-            'name'      => $request->input('name'),
+            'name'      => $this->uppercaseText($request->input('name')),
             'email'     => Str::lower($request->input('email')),
             'role'      => $request->input('role', $user->role),
             'status'    => $request->input('status', $user->status),
             'cpf'       => $cpf,
-            'rg'        => $request->input('rg'),
+            'rg'        => $this->uppercaseText($request->input('rg')),
             'phone'     => $phone,
             'birthDate' => $request->input('birthDate'),
             'gender'    => $request->input('gender'),
@@ -304,8 +304,8 @@ class UserController extends Controller
             'password.min'                        => 'A nova senha deve ter pelo menos :min caracteres.',
             'current_password.required'           => 'Informe a senha atual para alterar a senha.',
             'cpf.unique'                          => 'Este CPF já está vinculado a outro operador.',
-            'role.in'                             => 'Selecione um nível de permissão válido (Operador ou Diretor).',
-            'status.in'                           => 'Selecione um status válido (Ativo ou Inativo).',
+            'role.in'                             => 'Selecione um nível de permissão válido (PADRÃO ou ADMINISTRADOR).',
+            'status.in'                           => 'Selecione um status válido (ATIVO ou INATIVO).',
             'photo.image'                         => 'A foto deve ser uma imagem válida (JPG, PNG ou WEBP).',
             'photo.max'                           => 'A foto não pode ultrapassar 2 MB.',
         ];
@@ -543,5 +543,17 @@ class UserController extends Controller
         return $publicReal !== false
             && $appReal !== false
             && $publicReal === $appReal;
+    }
+
+    /**
+     * Normaliza campos de texto livre para caixa alta (UTF-8).
+     */
+    private function uppercaseText(?string $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return $value;
+        }
+
+        return mb_strtoupper(trim($value), 'UTF-8');
     }
 }

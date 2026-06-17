@@ -17,7 +17,7 @@ import { Eye, EyeOff } from "lucide-react";
 type PasswordInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type">;
 
 export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
-  function PasswordInput({ style, ...rest }, ref) {
+  function PasswordInput({ style, className, ...rest }, ref) {
     const [visible, setVisible] = useState(false);
 
     return (
@@ -26,9 +26,12 @@ export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
           ref={ref}
           {...rest}
           type={visible ? "text" : "password"}
+          className={[className, "password-input"].filter(Boolean).join(" ") || undefined}
           style={{
             // Reserva espaço à direita para o botão não cobrir o texto.
             paddingRight: 38,
+            // Senhas nunca devem sofrer text-transform (caixa alta quebra login).
+            textTransform: "none",
             ...style,
           }}
         />

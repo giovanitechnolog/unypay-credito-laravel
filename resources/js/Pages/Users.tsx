@@ -61,6 +61,26 @@ const FIELD_MAX_LENGTH = {
   gender: 20,
 } as const;
 
+/** Shell compartilhado dos cards de estatística — flex proporcional, visual original. */
+const STAT_CARD: React.CSSProperties = {
+  flex: "1 1 0",
+  minWidth: 150,
+  background: "white",
+  border: "1px solid #e2e8f0",
+  padding: "10px 12px",
+  borderRadius: 8,
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+};
+
+const uppercaseText = (value: string) => value.toUpperCase();
+
+const formatLastAccess = (lastSignedIn?: string | null) => {
+  if (!lastSignedIn) return "Nunca acessou";
+  return new Date(lastSignedIn).toLocaleDateString("pt-BR");
+};
+
 /**
  * Validação de CPF — algoritmo oficial dos dois dígitos verificadores
  * (Receita Federal). Aceita máscara ou só dígitos. Retorna true para CPF
@@ -174,6 +194,7 @@ export default function UsersPage() {
   const counters = useMemo(() => {
     return {
       total: users.length,
+      padrao: users.filter(u => u.role === "user").length,
       admins: users.filter(u => u.role === "admin").length,
       ativos: users.filter(u => u.status === "Ativo").length,
     };
@@ -202,7 +223,7 @@ export default function UsersPage() {
     setCpfError(null);
     setCpfSynced(false);
     setFormData({
-      name: user.name,
+      name: uppercaseText(user.name ?? ""),
       email: user.email,
       // Em edição: pré-preenchemos a confirmação com o e-mail atual; o
       // input fica desabilitado enquanto o e-mail não muda. Assim que o
@@ -215,7 +236,7 @@ export default function UsersPage() {
       role: user.role,
       status: user.status ?? "Ativo",
       cpf: user.cpf ? maskCPF(user.cpf) : "",
-      rg: user.rg ?? "",
+      rg: user.rg ? uppercaseText(user.rg) : "",
       phone: user.phone ? maskPhone(user.phone) : "",
       birthDate: user.birthDate ?? "",
       gender: user.gender ?? ""
@@ -312,9 +333,9 @@ export default function UsersPage() {
       const d = result.data;
       setFormData(p => ({
         ...p,
-        name:      d.name      || p.name,
+        name:      d.name      ? uppercaseText(d.name)      : p.name,
         email:     d.email     || p.email,
-        rg:        d.rg        || p.rg,
+        rg:        d.rg        ? uppercaseText(String(d.rg)) : p.rg,
         phone:     d.phone     ? maskPhone(String(d.phone)) : p.phone,
         birthDate: d.birthDate || p.birthDate,
         gender:    d.gender    || p.gender,
@@ -364,13 +385,13 @@ export default function UsersPage() {
     // (`confirmed`, `current_password`). Campos vazios não são enviados na
     // edição quando não está alterando senha (mantém a senha atual no banco).
     const data = new FormData();
-    data.append("name",  formData.name);
+    data.append("name",  uppercaseText(formData.name.trim()));
     data.append("email", formData.email);
     if (requireEmailConfirm) data.append("email_confirmation", formData.emailConfirmation);
     data.append("role",   formData.role);
     data.append("status", formData.status);
     data.append("cpf",    formData.cpf);
-    data.append("rg",     formData.rg);
+    data.append("rg",     formData.rg ? uppercaseText(formData.rg.trim()) : formData.rg);
     data.append("phone",  formData.phone);
     data.append("birthDate", formData.birthDate);
     data.append("gender", formData.gender);
@@ -436,7 +457,8 @@ export default function UsersPage() {
         .users-page input[type="email"],
         .users-page input[type="password"],
         .users-page input[type="date"],
-        .users-page input[type="number"] { text-transform: none; }
+        .users-page input[type="number"],
+        .users-page input.password-input { text-transform: none !important; }
         .users-page input::placeholder,
         .users-page textarea::placeholder { text-transform: none; }
         .users-page .keep-case,
@@ -464,18 +486,34 @@ export default function UsersPage() {
           <p style={{ fontSize: 12, color: "#64748b", margin: "2px 0 0 0" }}>Gerencie os níveis de acessos, dados cadastrais e o status das chaves de segurança dos colaboradores.</p>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-          <div style={{ background: "white", border: "1px solid #e2e8f0", padding: 14, borderRadius: 8, display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ padding: 8, background: "#f1f5f9", borderRadius: 6, color: "#475569" }}><Users size={18} /></div>
-            <div><span style={{ fontSize: 11, color: "#64748b", display: "block" }}>Total de Operadores</span><strong style={{ fontSize: 18, color: "#0f172a" }}>{counters.total}</strong></div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          <div style={STAT_CARD}>
+            <div style={{ padding: 7, background: "#f1f5f9", borderRadius: 6, color: "#475569", flexShrink: 0 }}><Users size={17} /></div>
+            <div style={{ minWidth: 0 }}>
+              <span style={{ fontSize: 10, color: "#64748b", display: "block", lineHeight: 1.3 }}>Total de Operadores</span>
+              <strong style={{ fontSize: 16, color: "#0f172a" }}>{counters.total}</strong>
+            </div>
           </div>
-          <div style={{ background: "white", border: "1px solid #e2e8f0", padding: 14, borderRadius: 8, display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ padding: 8, background: "#ecfdf5", borderRadius: 6, color: "#059669" }}><UserCheck size={18} /></div>
-            <div><span style={{ fontSize: 11, color: "#64748b", display: "block" }}>Status Ativos</span><strong style={{ fontSize: 18, color: "#059669" }}>{counters.ativos}</strong></div>
+          <div style={STAT_CARD}>
+            <div style={{ padding: 7, background: "#ecfdf5", borderRadius: 6, color: "#059669", flexShrink: 0 }}><UserCheck size={17} /></div>
+            <div style={{ minWidth: 0 }}>
+              <span style={{ fontSize: 10, color: "#64748b", display: "block", lineHeight: 1.3 }}>Status Ativos</span>
+              <strong style={{ fontSize: 16, color: "#059669" }}>{counters.ativos}</strong>
+            </div>
           </div>
-          <div style={{ background: "white", border: "1px solid #e2e8f0", padding: 14, borderRadius: 8, display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ padding: 8, background: "#fbf7ff", borderRadius: 6, color: "#6b21a8" }}><ShieldCheck size={18} /></div>
-            <div><span style={{ fontSize: 11, color: "#64748b", display: "block" }}>Administradores</span><strong style={{ fontSize: 18, color: "#6b21a8" }}>{counters.admins}</strong></div>
+          <div style={STAT_CARD}>
+            <div style={{ padding: 7, background: "#eff6ff", borderRadius: 6, color: "#2563eb", flexShrink: 0 }}><Shield size={17} /></div>
+            <div style={{ minWidth: 0 }}>
+              <span style={{ fontSize: 10, color: "#64748b", display: "block", lineHeight: 1.3 }}>Usuários Padrão</span>
+              <strong style={{ fontSize: 16, color: "#2563eb" }}>{counters.padrao}</strong>
+            </div>
+          </div>
+          <div style={STAT_CARD}>
+            <div style={{ padding: 7, background: "#fbf7ff", borderRadius: 6, color: "#6b21a8", flexShrink: 0 }}><ShieldCheck size={17} /></div>
+            <div style={{ minWidth: 0 }}>
+              <span style={{ fontSize: 10, color: "#64748b", display: "block", lineHeight: 1.3 }}>Administradores</span>
+              <strong style={{ fontSize: 16, color: "#6b21a8" }}>{counters.admins}</strong>
+            </div>
           </div>
         </div>
 
@@ -523,7 +561,7 @@ export default function UsersPage() {
                           </div>
                           <div>
                             <strong style={{ color: "#0f172a", fontSize: 13, display: "block" }}>{u.name}</strong>
-                            <span style={{ fontSize: 10, color: "#94a3b8", display: "flex", alignItems: "center", gap: 4 }}><Calendar size={10} /> Último Acesso: {u.lastSignedIn ? new Date(u.lastSignedIn).toLocaleDateString("pt-BR") : "—"}</span>
+                            <span style={{ fontSize: 10, color: "#94a3b8", display: "flex", alignItems: "center", gap: 4 }}><Calendar size={10} /> Último Acesso: {formatLastAccess(u.lastSignedIn)}</span>
                           </div>
                         </div>
                       </td>
@@ -538,7 +576,7 @@ export default function UsersPage() {
                       </td>
                       <td style={{ padding: "10px 14px", textAlign: "center" }}>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: u.role === "admin" ? "#fbf7ff" : "#f1f5f9", color: u.role === "admin" ? "#6b21a8" : "#475569" }}>
-                          <Shield size={11} /> {u.role === "admin" ? "Diretor" : "Operador"}
+                          <Shield size={11} /> {u.role === "admin" ? "ADMINISTRADOR" : "PADRÃO"}
                         </span>
                       </td>
                       <td style={{ padding: "10px 14px", textAlign: "center" }}>
@@ -796,7 +834,7 @@ export default function UsersPage() {
                           type="text"
                           className="sigx-input"
                           value={formData.name}
-                          onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
+                          onChange={e => setFormData(p => ({ ...p, name: uppercaseText(e.target.value) }))}
                           maxLength={FIELD_MAX_LENGTH.name}
                           required
                           style={getRedHighlight(formData.name, cpfSynced)}
@@ -854,7 +892,7 @@ export default function UsersPage() {
                               entre si quando o operador começa a digitar (isChangingPassword).
                               Deixar TODOS vazios → mantém a senha existente. */}
                       {selectedUser && (
-                        <div>
+                        <div className="keep-case">
                           <label className="sigx-label">
                             SENHA ATUAL {isChangingPassword && <span>*</span>}
                             <span className="keep-case" style={{ color: "#94a3b8", fontWeight: 500, fontSize: 10, marginLeft: 6 }}>
@@ -872,7 +910,7 @@ export default function UsersPage() {
                           />
                         </div>
                       )}
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                      <div className="keep-case" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                         <div>
                           <label className="sigx-label">
                             {selectedUser ? "NOVA SENHA" : "SENHA DE ACESSO *"}
@@ -920,15 +958,15 @@ export default function UsersPage() {
                         <div>
                           <label className="sigx-label">NÍVEL DE PERMISSÃO</label>
                           <select className="sigx-input" value={formData.role} onChange={e => setFormData(p => ({ ...p, role: e.target.value }))}>
-                            <option value="user">Operador Padrão</option>
-                            <option value="admin">Diretor Administrativo</option>
+                            <option value="user">PADRÃO</option>
+                            <option value="admin">ADMINISTRADOR</option>
                           </select>
                         </div>
                         <div>
                           <label className="sigx-label">STATUS OPERACIONAL</label>
                           <select className="sigx-input" value={formData.status} onChange={e => setFormData(p => ({ ...p, status: e.target.value }))}>
-                            <option value="Ativo">Chave Ativa</option>
-                            <option value="Inativo">Bloqueado</option>
+                            <option value="Ativo">ATIVO</option>
+                            <option value="Inativo">INATIVO</option>
                           </select>
                         </div>
                       </div>
@@ -1014,7 +1052,7 @@ export default function UsersPage() {
                             className="sigx-input"
                             value={formData.rg}
                             maxLength={FIELD_MAX_LENGTH.rg}
-                            onChange={e => setFormData(p => ({ ...p, rg: e.target.value }))}
+                            onChange={e => setFormData(p => ({ ...p, rg: uppercaseText(e.target.value) }))}
                             style={getRedHighlight(formData.rg, cpfSynced)}
                           />
                         </div>
