@@ -81,6 +81,23 @@ const formatLastAccess = (lastSignedIn?: string | null) => {
   return new Date(lastSignedIn).toLocaleDateString("pt-BR");
 };
 
+function UserAvatar({ photoUrl, size = 32 }: { photoUrl?: string | null; size?: number }) {
+  const [broken, setBroken] = useState(false);
+
+  if (!photoUrl || broken) {
+    return <Users size={Math.round(size * 0.44)} style={{ margin: "0 auto", color: "#94a3b8" }} />;
+  }
+
+  return (
+    <img
+      src={photoUrl}
+      alt=""
+      onError={() => setBroken(true)}
+      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+    />
+  );
+}
+
 /**
  * Validação de CPF — algoritmo oficial dos dois dígitos verificadores
  * (Receita Federal). Aceita máscara ou só dígitos. Retorna true para CPF
@@ -124,6 +141,10 @@ const NO_PASTE_PROPS: React.InputHTMLAttributes<HTMLInputElement> = {
 export default function UsersPage() {
   const { auth } = usePage<any>().props;
   const currentUserId = auth?.user?.id ?? null;
+  const isAdmin = auth?.user?.role === "admin";
+
+  const canEditUser = (user: User) => isAdmin || user.id === currentUserId;
+  const canDeleteUser = (user: User) => isAdmin && user.id !== currentUserId;
 
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -164,6 +185,7 @@ export default function UsersPage() {
   // sensíveis. Em edição, só exigimos redigitar o e-mail SE ele mudou,
   // e só exigimos senha atual SE o operador começou a digitar uma nova.
   const isEditing = !!selectedUser;
+  const editingSelfOnly = isEditing && selectedUser?.id === currentUserId && !isAdmin;
   const emailChanged = isEditing && formData.email.trim().toLowerCase() !== originalEmail.toLowerCase();
   const requireEmailConfirm = !isEditing || emailChanged;
   const isChangingPassword =
@@ -201,6 +223,7 @@ export default function UsersPage() {
   }, [users]);
 
   const openCreate = () => {
+    if (!isAdmin) return;
     setSelectedUser(null);
     setOriginalEmail("");
     setCpfError(null);
@@ -218,6 +241,10 @@ export default function UsersPage() {
   };
 
   const openEdit = (user: User) => {
+    if (!canEditUser(user)) {
+      toast.error("Você só pode editar os seus próprios dados.");
+      return;
+    }
     setSelectedUser(user);
     setOriginalEmail(user.email ?? "");
     setCpfError(null);
@@ -242,7 +269,7 @@ export default function UsersPage() {
       gender: user.gender ?? ""
     });
     setPhotoFile(null);
-    setPhotoPreview(user.photo ? `/storage/${user.photo}` : null);
+    setPhotoPreview(user.photoUrl ?? null);
     setActiveFormTab("perfil");
     setFormOpen(true);
   };
@@ -388,8 +415,10 @@ export default function UsersPage() {
     data.append("name",  uppercaseText(formData.name.trim()));
     data.append("email", formData.email);
     if (requireEmailConfirm) data.append("email_confirmation", formData.emailConfirmation);
-    data.append("role",   formData.role);
-    data.append("status", formData.status);
+    if (isAdmin) {
+      data.append("role",   formData.role);
+      data.append("status", formData.status);
+    }
     data.append("cpf",    formData.cpf);
     data.append("rg",     formData.rg ? uppercaseText(formData.rg.trim()) : formData.rg);
     data.append("phone",  formData.phone);
@@ -532,7 +561,9 @@ export default function UsersPage() {
               </div>
               <button onClick={() => fetchUsers(search)} title="Atualizar Grade" style={{ background: "white", border: "1px solid #cbd5e1", borderRadius: 6, padding: "6px 8px", cursor: "pointer", color: "#64748b", display: "flex" }}><RefreshCw size={13} /></button>
             </div>
-            <button onClick={openCreate} style={{ display: "flex", alignItems: "center", gap: 6, background: "#1e2139", color: "white", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}><Plus size={14} /> Novo Usuário</button>
+            {isAdmin && (
+              <button onClick={openCreate} style={{ display: "flex", alignItems: "center", gap: 6, background: "#1e2139", color: "white", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}><Plus size={14} /> Novo Usuário</button>
+            )}
           </div>
 
           <div style={{ overflowX: "auto" }}>
@@ -557,7 +588,7 @@ export default function UsersPage() {
                       <td style={{ padding: "10px 14px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                           <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#e2e8f0", overflow: "hidden", display: "flex", alignItems: "center", justifyItems: "center" }}>
-                            {u.photo ? <img src={`/storage/${u.photo}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <Users size={14} style={{ margin: "0 auto", color: "#94a3b8" }} />}
+                            <UserAvatar photoUrl={u.photoUrl} />
                           </div>
                           <div>
                             <strong style={{ color: "#0f172a", fontSize: 13, display: "block" }}>{u.name}</strong>
@@ -584,8 +615,12 @@ export default function UsersPage() {
                       </td>
                       <td style={{ padding: "10px 14px", textAlign: "right" }}>
                         <div style={{ display: "inline-flex", gap: 4 }}>
-                          <button onClick={() => openEdit(u)} className="btn-icon" title="Editar Ficha"><Edit2 size={13} /></button>
-                          <button onClick={() => setDeleteModalUser(u)} disabled={currentUserId === u.id} className="btn-icon" style={{ color: "#dc2626", opacity: currentUserId === u.id ? 0.3 : 1 }} title="Excluir Colaborador"><Trash2 size={13} /></button>
+                          {canEditUser(u) && (
+                            <button onClick={() => openEdit(u)} className="btn-icon" title={u.id === currentUserId && !isAdmin ? "Editar Meus Dados" : "Editar Ficha"}><Edit2 size={13} /></button>
+                          )}
+                          {canDeleteUser(u) && (
+                            <button onClick={() => setDeleteModalUser(u)} className="btn-icon" style={{ color: "#dc2626" }} title="Excluir Colaborador"><Trash2 size={13} /></button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -630,10 +665,16 @@ export default function UsersPage() {
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                     <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
-                      {selectedUser ? "Editar Operador" : "Novo Operador"}
+                      {selectedUser
+                        ? (editingSelfOnly ? "Meus Dados" : "Editar Operador")
+                        : "Novo Operador"}
                     </span>
                     <span style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>
-                      {selectedUser ? `Atualizando registro #${selectedUser.id}` : "Preencha as guias abaixo para registrar a nova chave"}
+                      {selectedUser
+                        ? (editingSelfOnly
+                          ? "Atualize suas informações de acesso e cadastro"
+                          : `Atualizando registro #${selectedUser.id}`)
+                        : "Preencha as guias abaixo para registrar a nova chave"}
                     </span>
                   </div>
                 </div>
@@ -954,22 +995,24 @@ export default function UsersPage() {
                         </div>
                       </div>
 
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                        <div>
-                          <label className="sigx-label">NÍVEL DE PERMISSÃO</label>
-                          <select className="sigx-input" value={formData.role} onChange={e => setFormData(p => ({ ...p, role: e.target.value }))}>
-                            <option value="user">PADRÃO</option>
-                            <option value="admin">ADMINISTRADOR</option>
-                          </select>
+                      {!editingSelfOnly && (
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                          <div>
+                            <label className="sigx-label">NÍVEL DE PERMISSÃO</label>
+                            <select className="sigx-input" value={formData.role} onChange={e => setFormData(p => ({ ...p, role: e.target.value }))}>
+                              <option value="user">PADRÃO</option>
+                              <option value="admin">ADMINISTRADOR</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="sigx-label">STATUS OPERACIONAL</label>
+                            <select className="sigx-input" value={formData.status} onChange={e => setFormData(p => ({ ...p, status: e.target.value }))}>
+                              <option value="Ativo">ATIVO</option>
+                              <option value="Inativo">INATIVO</option>
+                            </select>
+                          </div>
                         </div>
-                        <div>
-                          <label className="sigx-label">STATUS OPERACIONAL</label>
-                          <select className="sigx-input" value={formData.status} onChange={e => setFormData(p => ({ ...p, status: e.target.value }))}>
-                            <option value="Ativo">ATIVO</option>
-                            <option value="Inativo">INATIVO</option>
-                          </select>
-                        </div>
-                      </div>
+                      )}
                     </div>
                   )}
 
