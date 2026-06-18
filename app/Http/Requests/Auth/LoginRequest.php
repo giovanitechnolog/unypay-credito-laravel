@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Auth;
 
+use App\Http\Middleware\EnsureUserIsActive;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Auth;
@@ -55,10 +56,20 @@ class LoginRequest extends FormRequest
             ]);
         }
 
+        $user = Auth::user();
+
+        if ($user && ! $user->isActive()) {
+            Auth::logout();
+
+            throw ValidationException::withMessages([
+                'email' => EnsureUserIsActive::INACTIVE_MESSAGE,
+            ]);
+        }
+
         RateLimiter::clear($this->throttleKey());
 
         // Atualiza o último login (campo customizado existente no schema).
-        if ($user = Auth::user()) {
+        if ($user) {
             $user->forceFill(['lastSignedIn' => now()])->saveQuietly();
         }
     }

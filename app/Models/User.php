@@ -88,6 +88,11 @@ class User extends Authenticatable
         return $this->role === 'admin';
     }
 
+    public function isActive(): bool
+    {
+        return ($this->status ?? 'Ativo') === 'Ativo';
+    }
+
     /**
      * A migration original definiu colunas customizadas para timestamps.
      */
