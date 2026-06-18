@@ -16,10 +16,19 @@ interface LayoutAuthUser {
   role?: string;
 }
 
-function UserAvatarBubble({ user, size = 36 }: { user: LayoutAuthUser; size?: number }) {
+function UserAvatarBubble({
+  user,
+  size = 36,
+  variant = "header",
+}: {
+  user: LayoutAuthUser;
+  size?: number;
+  variant?: "header" | "sidebar";
+}) {
   const [broken, setBroken] = useState(false);
   const initial = user?.name?.charAt(0)?.toUpperCase() ?? "U";
   const showPhoto = !!user?.photoUrl && !broken;
+  const fallbackBg = variant === "sidebar" ? "#3b82f6" : "#1e2139";
 
   return (
     <div
@@ -27,11 +36,11 @@ function UserAvatarBubble({ user, size = 36 }: { user: LayoutAuthUser; size?: nu
         width: size,
         height: size,
         borderRadius: "50%",
-        background: showPhoto ? "#e2e8f0" : "#10b981",
+        background: showPhoto ? "#e2e8f0" : fallbackBg,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        color: "white",
+        color: "#ffffff",
         fontWeight: 700,
         fontSize: Math.round(size * 0.39),
         flexShrink: 0,
@@ -148,7 +157,7 @@ export default function UnyPayLayout({ children }: { children: React.ReactNode }
   const [profileOpen, setProfileOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
 
-  const userRoleLabel = user?.role === "admin" ? "Administrador" : "Padrão";
+  const userRoleLabel = user?.role === "admin" ? "Usuário Administrador" : "Usuário Padrão";
 
   useEffect(() => {
     if (!userMenuOpen) return;
@@ -260,7 +269,7 @@ export default function UnyPayLayout({ children }: { children: React.ReactNode }
       {/* Footer */}
       {!mini ? (
         <div className="sigx-sidebar-footer" style={{ padding: "16px", borderTop: "1px solid #2d3154", display: "flex", alignItems: "center", gap: 10 }}>
-          <UserAvatarBubble user={user} size={36} />
+          <UserAvatarBubble user={user} size={36} variant="sidebar" />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ color: "white", fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {user?.name ?? "Usuário"}

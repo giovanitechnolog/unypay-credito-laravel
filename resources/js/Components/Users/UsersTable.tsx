@@ -107,7 +107,7 @@ function Avatar({ name, photoUrl }: { name: string; photoUrl?: string | null }) 
         height: 36,
         borderRadius: "50%",
         background: "#1e2139",
-        color: "white",
+        color: "#ffffff",
         fontWeight: 700,
         fontSize: 13,
         display: "flex",
