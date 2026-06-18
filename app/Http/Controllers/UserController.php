@@ -104,6 +104,22 @@ class UserController extends Controller
     }
 
     /**
+     * GET /api/users/profile — ficha completa do operador autenticado.
+     */
+    public function profile(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        return response()->json([
+            'user' => $user->only([
+                'id', 'name', 'email', 'photo', 'role', 'status',
+                'cpf', 'rg', 'phone', 'birthDate', 'gender',
+                'createdAt', 'updatedAt', 'lastSignedIn',
+            ]) + ['photoUrl' => $user->photoUrl],
+        ]);
+    }
+
+    /**
      * POST /api/users — cria um novo usuário administrativo.
      *
      * Camadas de segurança:
