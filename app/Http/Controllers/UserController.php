@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -103,6 +104,22 @@ class UserController extends Controller
     }
 
     /**
+     * GET /api/users/profile — ficha completa do operador autenticado.
+     */
+    public function profile(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        return response()->json([
+            'user' => $user->only([
+                'id', 'name', 'email', 'photo', 'role', 'status',
+                'cpf', 'rg', 'phone', 'birthDate', 'gender',
+                'createdAt', 'updatedAt', 'lastSignedIn',
+            ]) + ['photoUrl' => $user->photoUrl],
+        ]);
+    }
+
+    /**
      * POST /api/users — cria um novo usuário administrativo.
      *
      * Camadas de segurança:
@@ -113,6 +130,12 @@ class UserController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if (!$request->user()->isAdmin()) {
+            return response()->json([
+                'message' => 'Apenas administradores podem cadastrar novos usuários.',
+            ], 403);
+        }
+
         $rules = [
             'name'                  => ['required', 'string', 'max:' . self::LIMITS['name']],
             'email'                 => ['required', 'email', 'max:' . self::LIMITS['email'], 'confirmed', 'unique:users,email'],
@@ -159,7 +182,6 @@ class UserController extends Controller
             'phone'        => $phone,
             'birthDate'    => $request->input('birthDate'),
             'gender'       => $request->input('gender'),
-            'lastSignedIn' => null,
         ]);
 
         return response()->json([
@@ -182,7 +204,14 @@ class UserController extends Controller
      */
     public function update(Request $request, int $id): JsonResponse
     {
+        $actor = $request->user();
         $user = User::findOrFail($id);
+
+        if (!$actor->isAdmin() && $actor->id !== $user->id) {
+            return response()->json([
+                'message' => 'Você só pode editar os seus próprios dados.',
+            ], 403);
+        }
 
         $emailChanged = Str::lower((string) $request->input('email'))
             !== Str::lower((string) $user->email);
@@ -200,8 +229,12 @@ class UserController extends Controller
                 $emailChanged ? 'confirmed' : 'nullable',
                 Rule::unique('users', 'email')->ignore($user->id),
             ],
-            'role'      => ['required', Rule::in(['user', 'admin'])],
-            'status'    => ['required', Rule::in(['Ativo', 'Inativo'])],
+            'role'      => $actor->isAdmin()
+                ? ['required', Rule::in(['user', 'admin'])]
+                : ['prohibited'],
+            'status'    => $actor->isAdmin()
+                ? ['required', Rule::in(['Ativo', 'Inativo'])]
+                : ['prohibited'],
             'photo'     => ['nullable', 'file', 'image', 'max:2048'],
             'cpf'       => [
                 'nullable',
@@ -243,14 +276,17 @@ class UserController extends Controller
         $payload = [
             'name'      => $this->uppercaseText($request->input('name')),
             'email'     => Str::lower($request->input('email')),
-            'role'      => $request->input('role', $user->role),
-            'status'    => $request->input('status', $user->status),
             'cpf'       => $cpf,
             'rg'        => $this->uppercaseText($request->input('rg')),
             'phone'     => $phone,
             'birthDate' => $request->input('birthDate'),
             'gender'    => $request->input('gender'),
         ];
+
+        if ($actor->isAdmin()) {
+            $payload['role']   = $request->input('role', $user->role);
+            $payload['status'] = $request->input('status', $user->status);
+        }
 
         if ($changingPassword) {
             $payload['password'] = $request->input('password');
@@ -316,6 +352,12 @@ class UserController extends Controller
      */
     public function destroy(Request $request, int $id): JsonResponse
     {
+        if (!$request->user()->isAdmin()) {
+            return response()->json([
+                'message' => 'Apenas administradores podem excluir usuários.',
+            ], 403);
+        }
+
         $user = User::findOrFail($id);
 
         if ($request->user()->id === $user->id) {
@@ -328,11 +370,17 @@ class UserController extends Controller
             Storage::disk(self::PHOTO_DISK)->delete($user->photo);
         }
 
-        // Limpa eventual cópia física em `public/storage/...` (ambientes
-        // sem symlink). Em ambientes com symlink válido este helper é no-op.
         $this->unmirrorPhotoFromPublic($user->photo);
 
-        $user->delete();
+        DB::transaction(function () use ($user) {
+            DB::table('contracts')->where('user_id', $user->id)->update(['user_id' => null]);
+            DB::table('clients')->where('user_id', $user->id)->update(['user_id' => null]);
+            DB::table('payments')->where('user_id', $user->id)->update(['user_id' => null]);
+            DB::table('loan_simulations')->where('user_id', $user->id)->update(['user_id' => null]);
+            DB::table('users')->where('created_by', $user->id)->update(['created_by' => null]);
+
+            $user->delete();
+        });
 
         return response()->json([
             'message' => 'Usuário excluído com sucesso.',

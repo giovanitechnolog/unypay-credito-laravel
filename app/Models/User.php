@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class User extends Authenticatable
@@ -61,8 +62,9 @@ class User extends Authenticatable
     }
 
     /**
-     * URL pública para exibir a foto na UI. Retorna null caso o usuário ainda
-     * não tenha foto cadastrada.
+     * URL pública para exibir a foto na UI. Retorna null quando o usuário não
+     * tem foto ou quando o arquivo não existe mais em disco (evita 403 no
+     * front ao usar `php artisan serve`, que repassa URLs órfãs ao Laravel).
      */
     protected function photoUrl(): Attribute
     {
@@ -70,8 +72,25 @@ class User extends Authenticatable
             if (empty($this->photo)) {
                 return null;
             }
-            return '/storage/' . ltrim($this->photo, '/');
+
+            $path = ltrim($this->photo, '/');
+
+            if (!Storage::disk('public')->exists($path)) {
+                return null;
+            }
+
+            return '/storage/' . $path;
         });
+    }
+
+    public function isAdmin(): bool
+    {
+        return $this->role === 'admin';
+    }
+
+    public function isActive(): bool
+    {
+        return ($this->status ?? 'Ativo') === 'Ativo';
     }
 
     /**

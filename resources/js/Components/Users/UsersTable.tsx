@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Pencil, Trash2 } from "lucide-react";
 import type { User } from "../../types/user";
 
@@ -76,14 +77,37 @@ export default function UsersTable({ users, loading, currentUserId, onEdit, onDe
 
 function Avatar({ name, photoUrl }: { name: string; photoUrl?: string | null }) {
   const initial = (name?.trim()?.charAt(0) || "U").toUpperCase();
+  const [broken, setBroken] = useState(false);
+
+  if (photoUrl && !broken) {
+    return (
+      <div
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: "50%",
+          overflow: "hidden",
+          flexShrink: 0,
+        }}
+      >
+        <img
+          src={photoUrl}
+          alt=""
+          onError={() => setBroken(true)}
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
         width: 36,
         height: 36,
         borderRadius: "50%",
-        background: photoUrl ? `center / cover no-repeat url(${photoUrl})` : "#1e2139",
-        color: "white",
+        background: "#1e2139",
+        color: "#ffffff",
         fontWeight: 700,
         fontSize: 13,
         display: "flex",
@@ -92,7 +116,7 @@ function Avatar({ name, photoUrl }: { name: string; photoUrl?: string | null }) 
         flexShrink: 0,
       }}
     >
-      {!photoUrl && initial}
+      {initial}
     </div>
   );
 }

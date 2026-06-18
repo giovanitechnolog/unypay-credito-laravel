@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState, useMemo, useRef } from "react"
 import { Head, usePage } from "@inertiajs/react";
 import {
   Plus, Search, RefreshCw, UserCheck, ShieldAlert, Users, Calendar, Mail,
-  Shield, ShieldCheck, Edit2, Trash2, X, KeyRound, IdCard, Camera, Upload, Trash, Loader2,
+  Shield, ShieldCheck, Edit2, Trash2, Eye, X, KeyRound, IdCard, Camera, Upload, Trash, Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
@@ -81,6 +81,23 @@ const formatLastAccess = (lastSignedIn?: string | null) => {
   return new Date(lastSignedIn).toLocaleDateString("pt-BR");
 };
 
+function UserAvatar({ photoUrl, size = 32 }: { photoUrl?: string | null; size?: number }) {
+  const [broken, setBroken] = useState(false);
+
+  if (!photoUrl || broken) {
+    return <Users size={Math.round(size * 0.44)} style={{ margin: "0 auto", color: "#94a3b8" }} />;
+  }
+
+  return (
+    <img
+      src={photoUrl}
+      alt=""
+      onError={() => setBroken(true)}
+      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+    />
+  );
+}
+
 /**
  * Validação de CPF — algoritmo oficial dos dois dígitos verificadores
  * (Receita Federal). Aceita máscara ou só dígitos. Retorna true para CPF
@@ -124,12 +141,16 @@ const NO_PASTE_PROPS: React.InputHTMLAttributes<HTMLInputElement> = {
 export default function UsersPage() {
   const { auth } = usePage<any>().props;
   const currentUserId = auth?.user?.id ?? null;
+  const isAdmin = auth?.user?.role === "admin";
+
+  const showEditIcon = (user: User) => isAdmin || user.id === currentUserId;
 
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
   const [formOpen, setFormOpen] = useState(false);
+  const [formViewOnly, setFormViewOnly] = useState(false);
   const [activeFormTab, setActiveFormTab] = useState("perfil");
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [deleteModalUser, setDeleteModalUser] = useState<User | null>(null);
@@ -164,6 +185,7 @@ export default function UsersPage() {
   // sensíveis. Em edição, só exigimos redigitar o e-mail SE ele mudou,
   // e só exigimos senha atual SE o operador começou a digitar uma nova.
   const isEditing = !!selectedUser;
+  const editingSelfOnly = isEditing && !formViewOnly && selectedUser?.id === currentUserId && !isAdmin;
   const emailChanged = isEditing && formData.email.trim().toLowerCase() !== originalEmail.toLowerCase();
   const requireEmailConfirm = !isEditing || emailChanged;
   const isChangingPassword =
@@ -201,6 +223,8 @@ export default function UsersPage() {
   }, [users]);
 
   const openCreate = () => {
+    if (!isAdmin) return;
+    setFormViewOnly(false);
     setSelectedUser(null);
     setOriginalEmail("");
     setCpfError(null);
@@ -217,18 +241,13 @@ export default function UsersPage() {
     setFormOpen(true);
   };
 
-  const openEdit = (user: User) => {
-    setSelectedUser(user);
+  const populateFormFromUser = (user: User) => {
     setOriginalEmail(user.email ?? "");
     setCpfError(null);
     setCpfSynced(false);
     setFormData({
       name: uppercaseText(user.name ?? ""),
       email: user.email,
-      // Em edição: pré-preenchemos a confirmação com o e-mail atual; o
-      // input fica desabilitado enquanto o e-mail não muda. Assim que o
-      // operador altera o e-mail, o efeito abaixo limpa esse campo e
-      // habilita a redigitação manual (sem paste).
       emailConfirmation: user.email ?? "",
       currentPassword: "",
       password: "",
@@ -242,10 +261,49 @@ export default function UsersPage() {
       gender: user.gender ?? ""
     });
     setPhotoFile(null);
-    setPhotoPreview(user.photo ? `/storage/${user.photo}` : null);
+    setPhotoPreview(user.photoUrl ?? null);
     setActiveFormTab("perfil");
+  };
+
+  const openView = (user: User) => {
+    setFormViewOnly(true);
+    setSelectedUser(user);
+    populateFormFromUser(user);
     setFormOpen(true);
   };
+
+  const openEdit = (user: User) => {
+    if (!isAdmin && user.id !== currentUserId) {
+      openView(user);
+      return;
+    }
+    setFormViewOnly(false);
+    setSelectedUser(user);
+    populateFormFromUser(user);
+    setFormOpen(true);
+  };
+
+  const handlePrimaryAction = (user: User) => {
+    if (isAdmin || user.id === currentUserId) {
+      openEdit(user);
+      return;
+    }
+    openView(user);
+  };
+
+  const handleDeleteAction = (user: User) => {
+    if (!isAdmin) {
+      toast.error("Acesso negado: exclusão permitida apenas para administradores.");
+      return;
+    }
+    if (user.id === currentUserId) {
+      toast.error("Você não pode excluir o próprio usuário operacional.");
+      return;
+    }
+    setDeleteModalUser(user);
+  };
+
+  const isDeleteRestricted = (user: User) => !isAdmin || user.id === currentUserId;
 
   // Quando o e-mail principal muda (em edição), limpamos a confirmação
   // para forçar a redigitação manual. Em criação, deixa intocado.
@@ -388,8 +446,10 @@ export default function UsersPage() {
     data.append("name",  uppercaseText(formData.name.trim()));
     data.append("email", formData.email);
     if (requireEmailConfirm) data.append("email_confirmation", formData.emailConfirmation);
-    data.append("role",   formData.role);
-    data.append("status", formData.status);
+    if (isAdmin) {
+      data.append("role",   formData.role);
+      data.append("status", formData.status);
+    }
     data.append("cpf",    formData.cpf);
     data.append("rg",     formData.rg ? uppercaseText(formData.rg.trim()) : formData.rg);
     data.append("phone",  formData.phone);
@@ -532,7 +592,9 @@ export default function UsersPage() {
               </div>
               <button onClick={() => fetchUsers(search)} title="Atualizar Grade" style={{ background: "white", border: "1px solid #cbd5e1", borderRadius: 6, padding: "6px 8px", cursor: "pointer", color: "#64748b", display: "flex" }}><RefreshCw size={13} /></button>
             </div>
-            <button onClick={openCreate} style={{ display: "flex", alignItems: "center", gap: 6, background: "#1e2139", color: "white", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}><Plus size={14} /> Novo Usuário</button>
+            {isAdmin && (
+              <button onClick={openCreate} style={{ display: "flex", alignItems: "center", gap: 6, background: "#1e2139", color: "white", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}><Plus size={14} /> Novo Usuário</button>
+            )}
           </div>
 
           <div style={{ overflowX: "auto" }}>
@@ -557,7 +619,7 @@ export default function UsersPage() {
                       <td style={{ padding: "10px 14px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                           <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#e2e8f0", overflow: "hidden", display: "flex", alignItems: "center", justifyItems: "center" }}>
-                            {u.photo ? <img src={`/storage/${u.photo}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <Users size={14} style={{ margin: "0 auto", color: "#94a3b8" }} />}
+                            <UserAvatar photoUrl={u.photoUrl} />
                           </div>
                           <div>
                             <strong style={{ color: "#0f172a", fontSize: 13, display: "block" }}>{u.name}</strong>
@@ -584,8 +646,29 @@ export default function UsersPage() {
                       </td>
                       <td style={{ padding: "10px 14px", textAlign: "right" }}>
                         <div style={{ display: "inline-flex", gap: 4 }}>
-                          <button onClick={() => openEdit(u)} className="btn-icon" title="Editar Ficha"><Edit2 size={13} /></button>
-                          <button onClick={() => setDeleteModalUser(u)} disabled={currentUserId === u.id} className="btn-icon" style={{ color: "#dc2626", opacity: currentUserId === u.id ? 0.3 : 1 }} title="Excluir Colaborador"><Trash2 size={13} /></button>
+                          <button
+                            onClick={() => handlePrimaryAction(u)}
+                            className="btn-icon"
+                            title={
+                              showEditIcon(u)
+                                ? (u.id === currentUserId && !isAdmin ? "Editar Meus Dados" : "Editar Ficha")
+                                : "Visualizar Ficha"
+                            }
+                          >
+                            {showEditIcon(u) ? <Edit2 size={13} /> : <Eye size={13} />}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteAction(u)}
+                            className="btn-icon"
+                            title="Excluir Colaborador"
+                            style={{
+                              color: "#dc2626",
+                              opacity: isDeleteRestricted(u) ? 0.3 : 1,
+                              cursor: "pointer",
+                            }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -630,10 +713,22 @@ export default function UsersPage() {
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                     <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
-                      {selectedUser ? "Editar Operador" : "Novo Operador"}
+                      {selectedUser
+                        ? (formViewOnly
+                          ? "Visualizar Operador"
+                          : editingSelfOnly
+                            ? "Meus Dados"
+                            : "Editar Operador")
+                        : "Novo Operador"}
                     </span>
                     <span style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>
-                      {selectedUser ? `Atualizando registro #${selectedUser.id}` : "Preencha as guias abaixo para registrar a nova chave"}
+                      {selectedUser
+                        ? (formViewOnly
+                          ? `Consulta somente leitura do registro #${selectedUser.id}`
+                          : editingSelfOnly
+                            ? "Atualize suas informações de acesso e cadastro"
+                            : `Atualizando registro #${selectedUser.id}`)
+                        : "Preencha as guias abaixo para registrar a nova chave"}
                     </span>
                   </div>
                 </div>
@@ -702,6 +797,10 @@ export default function UsersPage() {
               </div>
 
               <form onSubmit={handleFormSubmit} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+                <fieldset
+                  disabled={formViewOnly}
+                  style={{ border: "none", padding: 0, margin: 0, minWidth: 0, display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
+                >
                 <div
                   className="sigx-modal-body users-modal-body"
                   style={{
@@ -954,22 +1053,24 @@ export default function UsersPage() {
                         </div>
                       </div>
 
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                        <div>
-                          <label className="sigx-label">NÍVEL DE PERMISSÃO</label>
-                          <select className="sigx-input" value={formData.role} onChange={e => setFormData(p => ({ ...p, role: e.target.value }))}>
-                            <option value="user">PADRÃO</option>
-                            <option value="admin">ADMINISTRADOR</option>
-                          </select>
+                      {!editingSelfOnly && (
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                          <div>
+                            <label className="sigx-label">NÍVEL DE PERMISSÃO</label>
+                            <select className="sigx-input" value={formData.role} onChange={e => setFormData(p => ({ ...p, role: e.target.value }))}>
+                              <option value="user">PADRÃO</option>
+                              <option value="admin">ADMINISTRADOR</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="sigx-label">STATUS OPERACIONAL</label>
+                            <select className="sigx-input" value={formData.status} onChange={e => setFormData(p => ({ ...p, status: e.target.value }))}>
+                              <option value="Ativo">ATIVO</option>
+                              <option value="Inativo">INATIVO</option>
+                            </select>
+                          </div>
                         </div>
-                        <div>
-                          <label className="sigx-label">STATUS OPERACIONAL</label>
-                          <select className="sigx-input" value={formData.status} onChange={e => setFormData(p => ({ ...p, status: e.target.value }))}>
-                            <option value="Ativo">ATIVO</option>
-                            <option value="Inativo">INATIVO</option>
-                          </select>
-                        </div>
-                      </div>
+                      )}
                     </div>
                   )}
 
@@ -1098,6 +1199,7 @@ export default function UsersPage() {
                     </div>
                   )}
                 </div>
+                </fieldset>
 
                 <div
                   style={{
@@ -1111,13 +1213,21 @@ export default function UsersPage() {
                   }}
                 >
                   <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>
-                    {selectedUser ? "Edição registrada com auditoria automática" : "Novo operador será atribuído ao seu usuário"}
+                    {formViewOnly
+                      ? "Modo somente leitura — alterações não são permitidas"
+                      : selectedUser
+                        ? "Edição registrada com auditoria automática"
+                        : "Novo operador será atribuído ao seu usuário"}
                   </span>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <button type="button" className="btn-secondary" onClick={() => setFormOpen(false)}>Cancelar</button>
-                    <button type="submit" className="btn-primary" style={{ minWidth: 150, justifyContent: "center" }}>
-                      {selectedUser ? "Atualizar Operador" : "Salvar Operador"}
+                    <button type="button" className="btn-secondary" onClick={() => setFormOpen(false)}>
+                      {formViewOnly ? "Fechar" : "Cancelar"}
                     </button>
+                    {!formViewOnly && (
+                      <button type="submit" className="btn-primary" style={{ minWidth: 150, justifyContent: "center" }}>
+                        {selectedUser ? "Atualizar Operador" : "Salvar Operador"}
+                      </button>
+                    )}
                   </div>
                 </div>
               </form>
