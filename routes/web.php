@@ -138,6 +138,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/usuarios', [UserController::class, 'index'])->name('users.index');
 
     Route::get   ('/api/users',         [UserController::class, 'list'])->name('users.list');
+    Route::get   ('/api/users/profile', [UserController::class, 'profile'])->name('users.profile');
     Route::post  ('/api/users',         [UserController::class, 'store'])->name('users.store');
     Route::put   ('/api/users/{user}',  [UserController::class, 'update'])->name('users.update');
     Route::delete('/api/users/{user}',  [UserController::class, 'destroy'])->name('users.destroy');
