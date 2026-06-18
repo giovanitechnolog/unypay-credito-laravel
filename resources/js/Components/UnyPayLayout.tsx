@@ -27,8 +27,8 @@ function UserAvatarBubble({
 }) {
   const [broken, setBroken] = useState(false);
   const initial = user?.name?.charAt(0)?.toUpperCase() ?? "U";
-  const showPhoto = !!user?.photoUrl && !broken;
-  const fallbackBg = variant === "sidebar" ? "#3b82f6" : "#1e2139";
+  const isSidebar = variant === "sidebar";
+  const showPhoto = !isSidebar && !!user?.photoUrl && !broken;
 
   return (
     <div
@@ -36,7 +36,7 @@ function UserAvatarBubble({
         width: size,
         height: size,
         borderRadius: "50%",
-        background: showPhoto ? "#e2e8f0" : fallbackBg,
+        background: isSidebar ? "rgb(79, 86, 98)" : showPhoto ? "#e2e8f0" : "#1e2139",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
