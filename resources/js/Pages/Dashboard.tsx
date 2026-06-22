@@ -102,7 +102,7 @@ export default function Dashboard({ kpis, monthlyEvolution, interestTable, overd
 
   return (
     <UnyPayLayout>
-      <Head title="Performance de Crédito" />
+      <Head title="Dashboard de Performance" />
 
       <style>{`
         /* —— Caixa alta visual da tela inteira —— */
