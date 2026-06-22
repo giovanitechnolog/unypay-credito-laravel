@@ -65,7 +65,7 @@ const NAV_SECTIONS = [
   {
     label: "CRÉDITO",
     items: [
-      { href: "/",               label: "Dashboard",           icon: LayoutDashboard },
+      { href: "/",               label: "Dashboard",           title: "Dashboard de Performance", icon: LayoutDashboard },
       { href: "/contract-panel", label: "Painel de Contratos", icon: LayoutGrid },
       { href: "/lancamentos",    label: "Lançamentos",         icon: List },
       { href: "/clients",        label: "Clientes",            icon: Users },
@@ -238,13 +238,14 @@ export default function UnyPayLayout({ children }: { children: React.ReactNode }
               <div className="sigx-sidebar-section" style={{ color: '#6b7280', fontSize: '10px', fontWeight: 700, padding: '12px 16px 4px' }}>{section.label}</div>
             )}
             {mini && <div style={{ height: 8 }} />}
-            {section.items.map(({ href, label, icon: Icon }) => {
+            {section.items.map(({ href, label, title, icon: Icon }) => {
               const active = isActive(href);
+              const tooltip = title ?? label;
               return (
                 <Link key={href} href={href} onClick={() => setSidebarOpen(false)} style={{ textDecoration: 'none' }}>
                   <div
                     className={`sigx-sidebar-item${active ? " active" : ""}`}
-                    title={mini ? label : undefined}
+                    title={mini ? tooltip : title}
                     style={{
                       display: "flex",
                       alignItems: "center",
