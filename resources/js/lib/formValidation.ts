@@ -109,9 +109,10 @@ export interface PersonLike {
 export function isPersonItemInvalid(g: PersonLike): boolean {
   if (!g.name?.trim()) return true;
   if (g.isFromDb) return false;
-  const doc = g.personType === "PJ"
+  const fromForm = g.personType === "PJ"
     ? onlyDigits(String(g.formValues?.cnpj ?? ""))
     : onlyDigits(String(g.formValues?.cpf ?? ""));
+  const doc = fromForm || onlyDigits(String(g.document ?? ""));
   return doc.length !== (g.personType === "PJ" ? 14 : 11);
 }
 

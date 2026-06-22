@@ -528,6 +528,9 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
       data.codevedores = Array.isArray(data.codevedores) ? data.codevedores : [];
       data.testemunhas = Array.isArray(data.testemunhas) ? data.testemunhas : [];
       data.regras      = data.regras && typeof data.regras === "object" ? data.regras : {};
+      if (!data.regras.foro && data.taxas?.foro) {
+        data.regras.foro = data.taxas.foro;
+      }
 
       // Compatibilidade com garantia antiga (objeto único) — converte para array
       // O formato final é o mesmo aceito por `aiAssetToContractAssetItem`, que
@@ -693,6 +696,16 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
     }));
   };
 
+  /** Foro exibido/validado na aba Regras — fallback para taxas.foro vindo da IA. */
+  const getRegrasForo = (): string =>
+    String(extractedData?.regras?.foro ?? extractedData?.taxas?.foro ?? "");
+
+  const isRegrasTabInvalid = (): boolean => {
+    if (!extractedData) return false;
+    return hasAnyEmptyField([getRegrasForo()])
+      || selectedTestemunhas.some(isPersonItemInvalid);
+  };
+
   /* ──────────────────────────────────────────────────────────────────────
    * 🚀 Helpers dos modais — espelham 1-para-1 a tela de Contracts.tsx.
    * ───────────────────────────────────────────────────────────────────── */
@@ -812,7 +825,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
       case "garantias":
         return selectedAssets.some(isAssetItemIncomplete);
       case "regras":
-        return selectedTestemunhas.some(isPersonItemInvalid);
+        return isRegrasTabInvalid();
       default:
         return false;
     }
@@ -1872,8 +1885,8 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                       </label>
                       <input
                         className="sigx-input"
-                        style={getInputStyle(extractedData.regras?.foro)}
-                        value={extractedData.regras?.foro || ""}
+                        style={getInputStyle(getRegrasForo())}
+                        value={getRegrasForo()}
                         onChange={e => handleUpdateRule("foro", e.target.value)}
                         placeholder="Ex: Belo Horizonte / MG"
                       />
