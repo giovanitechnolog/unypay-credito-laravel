@@ -72,7 +72,7 @@ const NAV_SECTIONS = [
       { href: "/credores",       label: "Credores",            icon: Landmark },
       { href: "/pessoas",        label: "Pessoas",             icon: Handshake },
       { href: "/contracts",      label: "Contratos",           icon: FileText },
-      { href: "/ai-ingestion",   label: "Ingestão com IA",     icon: Sparkles },
+      { href: "/ai-ingestion",   label: "Importação com IA",   icon: Sparkles },
       { href: "/pagamentos",     label: "Pagamentos",          icon: CreditCard },
     ],
   },
@@ -104,7 +104,7 @@ const NAV_SECTIONS = [
 function getPageTitle(url: string) {
   if (url === "/" || url === "/dashboard") return "Dashboard";
   if (url === "/contract-panel") return "Painel de Contratos";
-  if (url === "/ai-ingestion") return "Ingestão com IA";
+  if (url === "/ai-ingestion") return "Importação com IA";
   if (url === "/lancamentos") return "Lançamentos";
   if (url === "/clients") return "Clientes";
   if (url.startsWith("/clients/")) return "Detalhe do Cliente";
@@ -127,7 +127,7 @@ function getBreadcrumb(url: string) {
   const base = { label: "UnyPay® Crédito", href: "/" };
   if (url === "/" || url === "/dashboard") return [base, { label: "Dashboard" }];
   if (url === "/contract-panel") return [base, { label: "Painel de Contratos" }];
-  if (url === "/ai-ingestion") return [base, { label: "Ingestão com IA" }];
+  if (url === "/ai-ingestion") return [base, { label: "Importação com IA" }];
   if (url === "/lancamentos") return [base, { label: "Lançamentos" }];
   if (url === "/clients") return [base, { label: "Clientes" }];
   if (url.startsWith("/clients/")) return [base, { label: "Clientes", href: "/clients" }, { label: "Detalhe" }];

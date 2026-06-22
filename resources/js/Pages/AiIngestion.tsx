@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Head } from "@inertiajs/react";
 import {
   Upload, Sparkles, FileText, RefreshCw,
   CircleDollarSign, Landmark, Percent, Shield, Car, Check, FileCheck, AlertCircle,
   Users, UserCheck, BookOpen, Home, X, Scale, CreditCard, QrCode, MapPin,
-  Edit2, Eye, Trash2,
+  Edit2, Eye, Trash2, Plus,
 } from "lucide-react";
 import { toast } from "sonner";
 import UnyPayLayout from "../Components/UnyPayLayout";
@@ -15,6 +15,7 @@ import VinculoPessoaList, {
 import GuarantorQuickCreateModal, { QuickCreateMode } from "../Components/GuarantorQuickCreateModal";
 import GuarantorSearchModal, { GuarantorLite } from "../Components/GuarantorSearchModal";
 import AssetQuickCreateModal, { AssetModalMode } from "../Components/AssetQuickCreateModal";
+import ConsignorFormModal from "../Components/ConsignorFormModal";
 import {
   GuarantorFormValues,
   EMPTY_GUARANTOR_FORM,
@@ -29,6 +30,15 @@ import {
   maskArea,
 } from "../Components/AssetFormFields";
 import { maskDocument, findGuarantorByDocument } from "../lib/documentValidation";
+import {
+  getEmptyFieldStyle,
+  getAssetEmptyFieldLabels,
+  isAssetItemIncomplete,
+  isPersonItemIncomplete,
+  isPersonItemInvalid,
+  hasAnyEmptyField,
+  missingFieldBadgeStyle,
+} from "../lib/formValidation";
 import { api } from "../lib/api";
 
 interface ConsignorLite {
@@ -44,7 +54,24 @@ interface ConsignorLite {
   complement: string | null;
   city: string | null;
   state: string | null;
+  bankAccounts?: { id: number; bankName: string; agency: string | null; accountNumber: string | null; accountType: string; pixKey: string | null }[];
 }
+
+const mapConsignorLite = (c: any): ConsignorLite => ({
+  id: Number(c.id),
+  name: c.name ?? "",
+  document: c.document ?? null,
+  phone: c.phone ?? null,
+  email: c.email ?? null,
+  street: c.street ?? null,
+  number: c.number ?? null,
+  neighborhood: c.neighborhood ?? null,
+  zipCode: c.zipCode ?? null,
+  complement: c.complement ?? null,
+  city: c.city ?? null,
+  state: c.state ?? null,
+  bankAccounts: Array.isArray(c.bankAccounts) ? c.bankAccounts : [],
+});
 
 interface AiIngestionProps {
   contractTypes: any[];
@@ -383,6 +410,9 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
   // mas o fluxo atual cria sempre cadastros novos a partir do conteúdo do PDF.
   void contractTypes; void existingClients;
 
+  const [consignorList, setConsignorList] = useState<ConsignorLite[]>(consignors);
+  useEffect(() => { setConsignorList(consignors); }, [consignors]);
+
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeReviewTab, setActiveReviewTab] = useState("basico");
@@ -423,6 +453,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
   // por nome similar é feita pelo próprio <select> nativo do HTML5 quando
   // o usuário começa a digitar com a lista aberta.
   const [selectedConsignor, setSelectedConsignor] = useState<ConsignorLite | null>(null);
+  const [consignorModalOpen, setConsignorModalOpen] = useState(false);
 
   // Resolve o credor selecionado a partir do nome textual extraído pela IA.
   // Em uma "ingestão fresca" (logo após análise do PDF), tentamos casar o
@@ -441,7 +472,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
       }));
       return;
     }
-    const found = consignors.find(c => c.id === id) || null;
+    const found = consignorList.find(c => c.id === id) || null;
     setSelectedConsignor(found);
     setExtractedData((prev: any) => ({
       ...prev,
@@ -520,11 +551,11 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
       // exato (case/diacritic-insensitive) tem prioridade; senão pegamos o
       // primeiro registro que contenha o termo.
       const extractedName: string = (data.dados_basicos?.credor_divida || "").trim();
-      if (extractedName && consignors.length) {
+      if (extractedName && consignorList.length) {
         const norm = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
         const target = norm(extractedName);
-        const exact = consignors.find(c => norm(c.name || "") === target);
-        const partial = exact ?? consignors.find(c => norm(c.name || "").includes(target) || target.includes(norm(c.name || "")));
+        const exact = consignorList.find(c => norm(c.name || "") === target);
+        const partial = exact ?? consignorList.find(c => norm(c.name || "").includes(target) || target.includes(norm(c.name || "")));
         if (partial) {
           setSelectedConsignor(partial);
           data.dados_basicos = {
@@ -640,7 +671,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
       toast.error(
         apiMessage
           ? `Falha ao salvar: ${apiMessage}`
-          : "Falha ao persistir a ingestão no banco de dados."
+          : "Falha ao persistir a importação no banco de dados."
       );
       console.error("[AiIngestion@save] erro detalhado:", err?.response?.data ?? err);
     } finally {
@@ -734,60 +765,89 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
 
   const isTabInvalid = (tabKey: string): boolean => {
     if (!extractedData) return false;
+    const b = extractedData.dados_basicos ?? {};
+    const v = extractedData.valores ?? {};
+    const bank = extractedData.banco ?? {};
+    const t = extractedData.taxas ?? {};
+
     switch (tabKey) {
-      case "basico":
-        return !extractedData.dados_basicos?.cliente_devedor
-            || !extractedData.dados_basicos?.documento
-            || !extractedData.dados_basicos?.data_emissao
-            || !extractedData.dados_basicos?.tipo;
+      case "basico": {
+        const objeto = b.objeto || (b.cliente_devedor ? `CONTRATO INTEGRADOR IA - ${b.cliente_devedor}` : "");
+        return hasAnyEmptyField([
+          b.cliente_devedor,
+          b.documento,
+          b.cep,
+          b.endereco,
+          b.codigo_interno,
+          b.data_emissao,
+          objeto,
+          b.tipo,
+        ]);
+      }
       case "credor":
-        return !extractedData.dados_basicos?.consignor_id
-            && !extractedData.dados_basicos?.credor_divida
-            && !selectedConsignor?.id;
+        return !selectedConsignor?.id && !b.consignor_id;
       case "financeiro":
-        return !extractedData.valores?.valor_principal
-            || !extractedData.valores?.numero_parcelas
-            || !extractedData.valores?.valor_parcela
-            || !extractedData.banco?.nome;
+        return hasAnyEmptyField([
+          v.valor_principal,
+          v.valor_financiado,
+          v.numero_parcelas,
+          v.valor_parcela,
+          bank.nome,
+          bank.agencia,
+          bank.conta,
+          bank.pix,
+          v.iof,
+        ]);
       case "taxas":
-        return !extractedData.taxas?.juros_mes
-            || !extractedData.taxas?.data_primeiro_vencimento;
+        return hasAnyEmptyField([
+          t.data_primeiro_vencimento,
+          t.tac,
+          t.juros_mes,
+          t.mora_mes,
+          t.multa_atraso,
+          t.honorarios,
+        ]);
       case "fiadores":
-        // Itens inválidos = sem nome OU com documento de tamanho errado.
-        return [...selectedFiadores, ...selectedCodevedores].some((g) => {
-          if (!g.name?.trim()) return true;
-          if (g.isFromDb) return false;
-          const doc = g.personType === "PJ"
-            ? onlyDigits(g.formValues?.cnpj ?? "")
-            : onlyDigits(g.formValues?.cpf ?? "");
-          return doc.length !== (g.personType === "PJ" ? 14 : 11);
-        });
+        return [...selectedFiadores, ...selectedCodevedores].some(isPersonItemIncomplete);
       case "garantias":
-        return selectedAssets.some((a) => {
-          if (a.assetType === "vehicle") return !a.brand?.trim() || !a.model?.trim() || !a.plate?.trim();
-          return !a.location?.trim() || !a.registryNumber?.trim() || !a.totalArea?.trim();
-        });
+        return selectedAssets.some(isAssetItemIncomplete);
       case "regras":
-        return selectedTestemunhas.some((g) => {
-          if (!g.name?.trim()) return true;
-          if (g.isFromDb) return false;
-          const doc = g.personType === "PJ"
-            ? onlyDigits(g.formValues?.cnpj ?? "")
-            : onlyDigits(g.formValues?.cpf ?? "");
-          return doc.length !== (g.personType === "PJ" ? 14 : 11);
-        });
+        return selectedTestemunhas.some(isPersonItemInvalid);
       default:
         return false;
     }
   };
 
-  const getInputStyle = (value: any) => {
-    const isEmpty = value === undefined || value === null || value === "" || value === 0;
-    return {
-      borderColor: isEmpty ? "#ef4444" : "#cbd5e1",
-      backgroundColor: isEmpty ? "#fef2f2" : "white",
-      transition: "all 0.1s"
-    };
+  const getInputStyle = getEmptyFieldStyle;
+
+  const getTabButtonStyle = (active: boolean, hasError: boolean): React.CSSProperties => ({
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "7px 12px",
+    fontSize: 11,
+    fontWeight: active || hasError ? 700 : 500,
+    cursor: "pointer",
+    borderRadius: 6,
+    background: hasError ? "#fef2f2" : active ? "white" : "transparent",
+    color: hasError ? "#ef4444" : active ? "#1e2139" : "#475569",
+    border: hasError ? "1px solid #fca5a5" : active ? "1px solid #e2e8f0" : "1px solid transparent",
+    boxShadow: active ? "0 1px 2px rgba(15,23,42,0.06)" : "none",
+    whiteSpace: "nowrap",
+    transition: "all 0.1s",
+  });
+
+  const getTabIconColor = (active: boolean, hasError: boolean) =>
+    hasError ? "#ef4444" : active ? "#2563eb" : "#94a3b8";
+
+  const handleConsignorSaved = (saved: { id: number; name?: string; [key: string]: any }) => {
+    const lite = mapConsignorLite(saved);
+    setConsignorList(prev => {
+      const exists = prev.some(c => c.id === lite.id);
+      return exists ? prev.map(c => c.id === lite.id ? lite : c) : [...prev, lite];
+    });
+    handleSelectConsignor(lite.id);
+    setConsignorModalOpen(false);
   };
 
   /**
@@ -828,13 +888,14 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
         }}
         onOpenView={(id) => openGuarantorViewModal(id, target)}
         formatDocument={formatGuarantorDocument}
+        isItemInvalid={target === "TESTEMUNHA" ? isPersonItemInvalid : isPersonItemIncomplete}
       />
     );
   };
 
   return (
     <UnyPayLayout>
-      <Head title="Ingestão Inteligente via IA" />
+      <Head title="Importação Inteligente via IA" />
 
       <div style={{ display: "flex", gap: "16px", height: "100%", padding: "12px", boxSizing: "border-box", background: "#f1f5f9" }}>
         
@@ -1012,7 +1073,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                 <button
                   type="button"
                   onClick={() => { setExtractedData(null); setSelectedConsignor(null); }}
-                  title="Descartar e iniciar nova ingestão"
+                  title="Descartar e iniciar nova importação"
                   style={{
                     background: "rgba(255,255,255,0.08)",
                     border: "none",
@@ -1057,26 +1118,11 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                       type="button" 
                       key={tab.key}
                       onClick={() => setActiveReviewTab(tab.key)} 
-                      style={{ 
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        padding: "7px 12px",
-                        fontSize: 11,
-                        fontWeight: active ? 700 : 500, 
-                        cursor: "pointer",
-                        borderRadius: 6,
-                        background: active ? "white" : "transparent", 
-                        color: hasError ? "#ef4444" : active ? "#1e2139" : "#475569",
-                        border: active ? "1px solid #e2e8f0" : "1px solid transparent",
-                        boxShadow: active ? "0 1px 2px rgba(15,23,42,0.06)" : "none",
-                        whiteSpace: "nowrap",
-                        transition: "all 0.1s",
-                      }}
+                      style={getTabButtonStyle(active, hasError)}
                     >
-                      <Icon size={12} style={{ color: active ? "#2563eb" : "#94a3b8" }} />
+                      <Icon size={12} style={{ color: getTabIconColor(active, hasError) }} />
                       {tab.label}
-                      {hasError && <AlertCircle size={10} className="text-red-500 animate-pulse" />}
+                      {hasError && <AlertCircle size={10} style={{ color: "#ef4444" }} className="animate-pulse" />}
                     </button>
                   );
                 })}
@@ -1121,6 +1167,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                       <label className="sigx-label">CEP</label>
                       <input
                         className="sigx-input mono"
+                        style={getInputStyle(extractedData.dados_basicos?.cep)}
                         value={extractedData.dados_basicos?.cep || ""}
                         onChange={e => updateNested("dados_basicos", "cep", maskCEP(e.target.value))}
                         placeholder="00000-000"
@@ -1131,6 +1178,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                       <label className="sigx-label">ENDEREÇO</label>
                       <input
                         className="sigx-input"
+                        style={getInputStyle(extractedData.dados_basicos?.endereco)}
                         value={extractedData.dados_basicos?.endereco || ""}
                         onChange={e => updateNested("dados_basicos", "endereco", e.target.value)}
                         maxLength={255}
@@ -1140,6 +1188,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                       <label className="sigx-label">CÓDIGO INTERNO *</label>
                       <input
                         className="sigx-input mono"
+                        style={getInputStyle(extractedData.dados_basicos?.codigo_interno)}
                         value={extractedData.dados_basicos?.codigo_interno || ""}
                         onChange={e => updateNested("dados_basicos", "codigo_interno", e.target.value)}
                         maxLength={50}
@@ -1159,6 +1208,12 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                       <label className="sigx-label">NOME OU OBJETO DO CONTRATO</label>
                       <input
                         className="sigx-input"
+                        style={getInputStyle(
+                          extractedData.dados_basicos?.objeto
+                          || (extractedData.dados_basicos?.cliente_devedor
+                            ? `CONTRATO INTEGRADOR IA - ${extractedData.dados_basicos.cliente_devedor}`
+                            : "")
+                        )}
                         value={extractedData.dados_basicos?.objeto || (extractedData.dados_basicos?.cliente_devedor ? `CONTRATO INTEGRADOR IA - ${extractedData.dados_basicos.cliente_devedor}` : "")}
                         onChange={e => updateNested("dados_basicos", "objeto", e.target.value)}
                         maxLength={255}
@@ -1290,23 +1345,33 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                       <label className="sigx-label" style={{ marginBottom: 4, display: "block" }}>
                         CREDOR{" "}
                         <span style={{ fontWeight: 400, color: "#94a3b8" }}>
-                          ({consignors.length} disponíve{consignors.length === 1 ? "l" : "is"})
+                          ({consignorList.length} disponíve{consignorList.length === 1 ? "l" : "is"})
                         </span>
                       </label>
-                      <select
-                        className="sigx-input"
-                        style={getInputStyle(selectedConsignor?.id)}
-                        value={String(selectedConsignor?.id || "")}
-                        onChange={(e) => handleSelectConsignor(Number(e.target.value))}
-                      >
-                        <option value="">— Sem credor vinculado —</option>
-                        {consignors.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                            {c.document ? ` — ${formatConsignorDocument(c.document)}` : ""}
-                          </option>
-                        ))}
-                      </select>
+                      <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+                        <select
+                          className="sigx-input"
+                          style={{ ...getInputStyle(selectedConsignor?.id), flex: 1 }}
+                          value={String(selectedConsignor?.id || "")}
+                          onChange={(e) => handleSelectConsignor(Number(e.target.value))}
+                        >
+                          <option value="">— Sem credor vinculado —</option>
+                          {consignorList.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                              {c.document ? ` — ${formatConsignorDocument(c.document)}` : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          onClick={() => setConsignorModalOpen(true)}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "0 14px", fontSize: 11, whiteSpace: "nowrap" }}
+                        >
+                          <Plus size={12} /> Novo Credor
+                        </button>
+                      </div>
                     </div>
 
                     {/* Dados Gerais — read-only quando há credor selecionado */}
@@ -1364,17 +1429,17 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                     {!selectedConsignor && (
                       <div
                         style={{
-                          border: "1px dashed #cbd5e1",
+                          border: "1px dashed #fca5a5",
                           borderRadius: 8,
                           padding: 28,
-                          background: "#f8fafc",
+                          background: "#fef2f2",
                           textAlign: "center",
-                          color: "#94a3b8",
+                          color: "#991b1b",
                         }}
                       >
-                        <Landmark size={26} style={{ opacity: 0.3, margin: "0 auto 6px", display: "block" }} />
-                        <span style={{ fontSize: 11.5 }}>
-                          Nenhum credor vinculado. Use o campo de busca acima para selecionar um cadastrado em "Credores".
+                        <Landmark size={26} style={{ opacity: 0.4, margin: "0 auto 6px", display: "block", color: "#ef4444" }} />
+                        <span style={{ fontSize: 11.5, fontWeight: 600 }}>
+                          Nenhum credor vinculado. Selecione um cadastrado ou clique em "Novo Credor" para cadastrar.
                         </span>
                       </div>
                     )}
@@ -1404,6 +1469,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                           inputMode="numeric"
                           className="sigx-input mono"
                           placeholder="0,00"
+                          style={getInputStyle(extractedData.valores?.valor_financiado)}
                           value={maskMoneyDisplay(extractedData.valores?.valor_financiado)}
                           onChange={e => updateNested("valores", "valor_financiado", maskMoneyParse(e.target.value))}
                         />
@@ -1466,6 +1532,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                       <label className="sigx-label">AGÊNCIA</label>
                           <input
                             className="sigx-input mono"
+                            style={getInputStyle(extractedData.banco?.agencia)}
                             value={extractedData.banco?.agencia || ""}
                             onChange={e => updateNested("banco", "agencia", e.target.value)}
                           />
@@ -1485,6 +1552,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                           </label>
                           <input
                             className="sigx-input mono"
+                            style={getInputStyle(extractedData.banco?.pix)}
                             value={extractedData.banco?.pix || ""}
                             onChange={e => updateNested("banco", "pix", e.target.value)}
                             placeholder="CPF/CNPJ, e-mail, celular ou chave aleatória"
@@ -1501,6 +1569,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                           inputMode="numeric"
                           className="sigx-input mono"
                           placeholder="0,00"
+                          style={getInputStyle(extractedData.valores?.iof)}
                           value={maskMoneyDisplay(extractedData.valores?.iof)}
                           onChange={e => updateNested("valores", "iof", maskMoneyParse(e.target.value))}
                         />
@@ -1541,7 +1610,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                           type="text"
                           inputMode="numeric"
                           className="sigx-input mono"
-                          style={{ borderColor: "#2563eb" }}
+                          style={getInputStyle(extractedData.taxas?.tac)}
                           placeholder="0,00"
                           value={maskMoneyDisplay(extractedData.taxas?.tac)}
                           onChange={e => updateNested("taxas", "tac", maskMoneyParse(e.target.value))}
@@ -1569,6 +1638,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                           inputMode="numeric"
                           className="sigx-input mono"
                           placeholder="0,00"
+                          style={getInputStyle(extractedData.taxas?.mora_mes)}
                           value={maskPercentInputDisplay(extractedData.taxas?.mora_mes)}
                           onChange={e => updateNested("taxas", "mora_mes", maskPercentInputParse(e.target.value))}
                         />
@@ -1580,6 +1650,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                           inputMode="numeric"
                           className="sigx-input mono"
                           placeholder="0,00"
+                          style={getInputStyle(extractedData.taxas?.multa_atraso)}
                           value={maskPercentInputDisplay(extractedData.taxas?.multa_atraso)}
                           onChange={e => updateNested("taxas", "multa_atraso", maskPercentInputParse(e.target.value))}
                         />
@@ -1594,6 +1665,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                           inputMode="numeric"
                           className="sigx-input mono"
                           placeholder="0,00"
+                          style={getInputStyle(extractedData.taxas?.honorarios)}
                           value={maskPercentInputDisplay(extractedData.taxas?.honorarios)}
                           onChange={e => updateNested("taxas", "honorarios", maskPercentInputParse(e.target.value))}
                         />
@@ -1633,7 +1705,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                   };
 
                   return (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 14, ...(isTabInvalid("fiadores") ? { padding: 12, border: "1px solid #fca5a5", borderRadius: 8, background: "#fef2f2" } : {}) }}>
                       <div style={{ display: "flex", gap: 0, borderRadius: 6, overflow: "hidden" }}>
                         <button
                           type="button"
@@ -1679,7 +1751,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                 {/* TAB 6: GARANTIAS — tabela compacta + AssetQuickCreateModal
                     (mesmo padrão visual da aba de Garantias em Contracts.tsx). */}
                 {activeReviewTab === "garantias" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14, ...(isTabInvalid("garantias") ? { padding: 12, border: "1px solid #fca5a5", borderRadius: 8, background: "#fef2f2" } : {}) }}>
                     <div style={{ display: "flex", gap: 8 }}>
                       <button
                         type="button"
@@ -1714,19 +1786,30 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                           ) : selectedAssets.map((a, idx) => {
                             const isVehicle = a.assetType === "vehicle";
                             const Icon = isVehicle ? Car : Home;
+                            const missing = getAssetEmptyFieldLabels(a);
+                            const invalid = missing.length > 0;
                             return (
-                              <tr key={a.localId} style={{ background: idx % 2 === 1 ? "#fafafa" : "white" }}>
+                              <tr key={a.localId} style={{ background: invalid ? "#fef2f2" : idx % 2 === 1 ? "#fafafa" : "white", borderLeft: invalid ? "3px solid #ef4444" : undefined }}>
                                 <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9" }}>
                                   <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 4, fontSize: 9, fontWeight: 700, background: isVehicle ? "#ecfdf5" : "#eff6ff", color: isVehicle ? "#065f46" : "#1e40af" }}>
                                     <Icon size={10} />
                                     {isVehicle ? "Veículo" : "Imóvel"}
                                   </span>
                                 </td>
-                                <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", fontWeight: 600, color: "#0f172a" }}>
+                                <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", fontWeight: 600, color: invalid && isVehicle && missing.includes("Marca") && missing.includes("Modelo") ? "#ef4444" : "#0f172a" }}>
                                   {formatAssetTitle(a)}
                                 </td>
                                 <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", color: "#475569" }}>
-                                  {formatAssetDetail(a)}
+                                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                    <span>{formatAssetDetail(a)}</span>
+                                    {missing.length > 0 && (
+                                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                                        {missing.map((label) => (
+                                          <span key={label} style={missingFieldBadgeStyle}>{label} ausente</span>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
                                 </td>
                                 <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", textAlign: "center" }}>
                                   <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
@@ -1766,6 +1849,11 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
 
                     <div className="keep-case" style={{ fontSize: 10.5, color: "#64748b", lineHeight: 1.5 }}>
                       Bens (veículos e imóveis) são gravados junto com o contrato em uma única transação.
+                      {selectedAssets.some(isAssetItemIncomplete) && (
+                        <span style={{ display: "block", marginTop: 6, color: "#991b1b", fontWeight: 600 }}>
+                          Itens com campos ausentes estão destacados em vermelho — clique em editar para completar os dados.
+                        </span>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1784,6 +1872,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                       </label>
                       <input
                         className="sigx-input"
+                        style={getInputStyle(extractedData.regras?.foro)}
                         value={extractedData.regras?.foro || ""}
                         onChange={e => handleUpdateRule("foro", e.target.value)}
                         placeholder="Ex: Belo Horizonte / MG"
@@ -1848,7 +1937,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
                 }}
               >
                 <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>
-                  Os campos marcados com <b style={{ color: "#ef4444" }}>*</b> são obrigatórios para gravar o contrato
+                  Campos vazios ou zerados aparecem em vermelho. Os marcados com <b style={{ color: "#ef4444" }}>*</b> são obrigatórios para gravar o contrato
                 </span>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button
@@ -1893,6 +1982,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
         open={quickModalState.open}
         mode={quickModalState.mode}
         initialValue={quickModalState.initialValue}
+        highlightEmpty
         onClose={() => setQuickModalState({ open: false, mode: "create", target: vinculoTabActive })}
         onConfirm={async (values) => {
           const target = quickModalState.target;
@@ -1978,6 +2068,7 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
         open={assetModalState.open}
         mode={assetModalState.mode}
         initialValue={assetModalState.initialValue}
+        highlightEmpty
         onClose={() => setAssetModalState({ open: false, mode: "create" })}
         onConfirm={(values) => {
           if (
@@ -1993,6 +2084,11 @@ export default function AiIngestion({ contractTypes, existingClients, consignors
           }
           setAssetModalState({ open: false, mode: "create" });
         }}
+      />
+      <ConsignorFormModal
+        open={consignorModalOpen}
+        onClose={() => setConsignorModalOpen(false)}
+        onSaved={handleConsignorSaved}
       />
     </UnyPayLayout>
   );

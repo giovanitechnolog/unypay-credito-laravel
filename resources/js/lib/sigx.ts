@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { isEmptyFieldValue } from "./formValidation";
 import { toast } from "sonner";
 import { api, extractFirstError } from "./api";
 
@@ -120,8 +121,7 @@ export function notifySigxFailure(result: SigxLookupResult): void {
  */
 export function getRedHighlight(value: any, active: boolean): CSSProperties {
   if (!active) return {};
-  const empty = value === undefined || value === null || value === "" || value === 0;
-  if (!empty) return {};
+  if (!isEmptyFieldValue(value)) return {};
   return {
     borderColor: "#ef4444",
     backgroundColor: "#fef2f2",
