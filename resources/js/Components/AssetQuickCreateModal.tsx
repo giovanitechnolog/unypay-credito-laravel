@@ -28,6 +28,8 @@ interface Props {
   initialValue?: Partial<AssetFormValues>;
   onClose: () => void;
   onConfirm: (values: AssetFormValues) => void;
+  /** Destaca campos vazios em vermelho no formulário. */
+  highlightEmpty?: boolean;
 }
 
 const TITLES: Record<AssetModalMode, string> = {
@@ -54,6 +56,7 @@ export default function AssetQuickCreateModal({
   initialValue,
   onClose,
   onConfirm,
+  highlightEmpty = false,
 }: Props) {
   const [form, setForm] = useState<AssetFormValues>(EMPTY_ASSET_FORM);
 
@@ -203,6 +206,7 @@ export default function AssetQuickCreateModal({
             onChange={setForm}
             readOnly={isReadOnly}
             lockTypeSwitch={lockTypeSwitch}
+            highlightEmpty={highlightEmpty && !isReadOnly}
           />
         </div>
 

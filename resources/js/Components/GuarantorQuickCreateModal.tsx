@@ -29,6 +29,8 @@ interface Props {
   onClose: () => void;
   /** Chamado quando o usuário clica em "Adicionar ao Contrato" / "Salvar". */
   onConfirm: (values: GuarantorFormValues) => void;
+  /** Destaca campos vazios em vermelho no formulário. */
+  highlightEmpty?: boolean;
 }
 
 const TITLES: Record<QuickCreateMode, string> = {
@@ -55,6 +57,7 @@ export default function GuarantorQuickCreateModal({
   initialValue,
   onClose,
   onConfirm,
+  highlightEmpty = false,
 }: Props) {
   const [form, setForm] = useState<GuarantorFormValues>(EMPTY_GUARANTOR_FORM);
 
@@ -206,6 +209,7 @@ export default function GuarantorQuickCreateModal({
             value={form}
             onChange={setForm}
             readOnly={isReadOnly}
+            highlightEmpty={highlightEmpty && !isReadOnly}
           />
         </div>
 

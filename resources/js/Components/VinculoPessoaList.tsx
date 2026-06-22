@@ -1,6 +1,7 @@
 import { Plus, Search, Users, Building2, User as UserIcon, Edit2, Trash2, Eye, CheckCircle, Sparkles, UserPlus } from "lucide-react";
 import { GuarantorLite } from "./GuarantorSearchModal";
 import { GuarantorFormValues } from "./GuarantorFormFields";
+import { missingFieldBadgeStyle } from "../lib/formValidation";
 
 /**
  * 🚀 Componente genérico de vínculo Pessoa↔Contrato/Cliente.
@@ -53,6 +54,9 @@ interface Props {
 
   /** Texto formatado de documento (CPF/CNPJ) para a tabela. */
   formatDocument: (doc: string | null | undefined, type: "PF" | "PJ") => string;
+
+  /** Quando informado, destaca linhas/campos com dados incompletos. */
+  isItemInvalid?: (item: VinculoPessoaItem) => boolean;
 }
 
 /** Labels dependentes do papel — única fonte de strings condicionais do componente. */
@@ -118,6 +122,7 @@ export default function VinculoPessoaList({
   onOpenEditNew,
   onOpenView,
   formatDocument,
+  isItemInvalid,
 }: Props) {
   const labels = LABELS[type];
 
@@ -258,8 +263,12 @@ export default function VinculoPessoaList({
             ) : (
               data.map((g, idx) => {
                 const isPJ = g.personType === "PJ";
+                const invalid = isItemInvalid?.(g) ?? false;
+                const nameMissing = !g.name?.trim();
+                const docDisplay = formatDocument(g.document, g.personType);
+                const docMissing = !g.isFromDb && (docDisplay === "—" || invalid);
                 return (
-                  <tr key={g.localId} style={{ background: idx % 2 === 1 ? "#fafafa" : "white" }}>
+                  <tr key={g.localId} style={{ background: invalid ? "#fef2f2" : idx % 2 === 1 ? "#fafafa" : "white", borderLeft: invalid ? "3px solid #ef4444" : undefined }}>
                     <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9" }}>
                       <span
                         style={{
@@ -278,11 +287,19 @@ export default function VinculoPessoaList({
                         {g.personType}
                       </span>
                     </td>
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", fontWeight: 600, color: "#0f172a" }}>
-                      {g.name}
+                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", fontWeight: 600, color: nameMissing ? "#ef4444" : "#0f172a" }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <span>{g.name?.trim() || "—"}</span>
+                        {nameMissing && <span style={missingFieldBadgeStyle}>Nome ausente</span>}
+                      </div>
                     </td>
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: "#475569" }}>
-                      {formatDocument(g.document, g.personType)}
+                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: docMissing ? "#ef4444" : "#475569" }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <span>{docDisplay}</span>
+                        {docMissing && !nameMissing && (
+                          <span style={missingFieldBadgeStyle}>{isPJ ? "CNPJ" : "CPF"} ausente ou inválido</span>
+                        )}
+                      </div>
                     </td>
                     <td style={{ padding: "8px 10px", borderBottom: "1px solid #f1f5f9", textAlign: "center" }}>
                       <span
