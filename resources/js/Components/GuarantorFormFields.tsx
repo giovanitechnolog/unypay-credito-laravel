@@ -111,6 +111,8 @@ interface Props {
   onChange: (next: GuarantorFormValues) => void;
   /** Quando true, todos os campos viram somente-leitura (caso "Cadastrado"). */
   readOnly?: boolean;
+  /** Destaca todos os campos vazios em vermelho (revisão de importação). */
+  highlightEmpty?: boolean;
 }
 
 /**
@@ -124,7 +126,7 @@ interface Props {
  *   const [form, setForm] = useState(EMPTY_GUARANTOR_FORM);
  *   <GuarantorFormFields value={form} onChange={setForm} />
  */
-export default function GuarantorFormFields({ value, onChange, readOnly = false }: Props) {
+export default function GuarantorFormFields({ value, onChange, readOnly = false, highlightEmpty = false }: Props) {
   const set = <K extends keyof GuarantorFormValues>(key: K, v: GuarantorFormValues[K]) => {
     onChange({ ...value, [key]: v });
   };
@@ -261,7 +263,7 @@ export default function GuarantorFormFields({ value, onChange, readOnly = false 
    */
   const fieldStyle = (val: any): CSSProperties | undefined => {
     const base = readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined;
-    const highlight = getRedHighlight(val, cpfSynced && value.personType === "PF");
+    const highlight = getRedHighlight(val, highlightEmpty || (cpfSynced && value.personType === "PF"));
     if (!base && Object.keys(highlight).length === 0) return undefined;
     return { ...(base ?? {}), ...highlight };
   };

@@ -27,6 +27,7 @@ import {
   onlyDigits,
 } from "../Components/GuarantorFormFields";
 import AssetQuickCreateModal, { AssetModalMode } from "../Components/AssetQuickCreateModal";
+import ConsignorFormModal from "../Components/ConsignorFormModal";
 import {
   AssetFormValues,
   maskArea,
@@ -428,6 +429,7 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
   // contrato existente, hidratamos a partir de c.consignor (que o
   // ContractController@index já entrega completo).
   const [selectedConsignor, setSelectedConsignor] = useState<ConsignorLite | null>(null);
+  const [consignorModalOpen, setConsignorModalOpen] = useState(false);
   const [consignorList,     setConsignorList]     = useState<ConsignorLite[]>([]);
 
   // 🚀 Estados da seção "Bens em Garantia" (aba Garantias) — também em memória
@@ -1029,6 +1031,16 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
     const found = consignorList.find((c) => c.id === id) ?? null;
     setSelectedConsignor(found);
     setForm((p) => ({ ...p, consignorId: id }));
+  };
+
+  const handleConsignorSaved = (saved: { id: number; [key: string]: any }) => {
+    const lite = mapConsignorLite(saved);
+    setConsignorList(prev => {
+      const exists = prev.some(c => c.id === lite.id);
+      return exists ? prev.map(c => c.id === lite.id ? lite : c) : [...prev, lite];
+    });
+    handleSelectConsignor(lite.id);
+    setConsignorModalOpen(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1789,19 +1801,30 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
                             ({consignorList.length} disponíve{consignorList.length === 1 ? "l" : "is"})
                           </span>
                         </label>
-                        <select
-                          className="sigx-input"
-                          value={String(form.consignorId || "")}
-                          onChange={(e) => handleSelectConsignor(Number(e.target.value))}
-                        >
-                          <option value="">— Sem credor —</option>
-                          {consignorList.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                              {c.document ? ` — ${formatConsignorDocument(c.document)}` : ""}
-                            </option>
-                          ))}
-                        </select>
+                        <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+                          <select
+                            className="sigx-input"
+                            style={{ flex: 1 }}
+                            value={String(form.consignorId || "")}
+                            onChange={(e) => handleSelectConsignor(Number(e.target.value))}
+                          >
+                            <option value="">— Sem credor —</option>
+                            {consignorList.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                                {c.document ? ` — ${formatConsignorDocument(c.document)}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            onClick={() => setConsignorModalOpen(true)}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "0 14px", fontSize: 11, whiteSpace: "nowrap" }}
+                          >
+                            <Plus size={12} /> Novo Credor
+                          </button>
+                        </div>
                       </div>
 
                       {/* Dados Gerais — read-only */}
@@ -2907,6 +2930,12 @@ export default function Contracts({ contracts, clients, contractTypes = [], filt
           }
           setAssetModalState({ open: false, mode: "create" });
         }}
+      />
+
+      <ConsignorFormModal
+        open={consignorModalOpen}
+        onClose={() => setConsignorModalOpen(false)}
+        onSaved={handleConsignorSaved}
       />
     </UnyPayLayout>
   );

@@ -1,5 +1,7 @@
+import type { CSSProperties } from "react";
 import { useState } from "react";
 import { Car, Home, CheckCircle2 } from "lucide-react";
+import { getEmptyFieldStyle } from "../lib/formValidation";
 
 /**
  * Tipo do bem em garantia.
@@ -116,6 +118,8 @@ interface Props {
    * mudar o tipo invalidaria todos os campos já preenchidos.
    */
   lockTypeSwitch?: boolean;
+  /** Destaca campos vazios em vermelho (revisão de importação). */
+  highlightEmpty?: boolean;
 }
 
 /**
@@ -126,9 +130,15 @@ interface Props {
  *   const [asset, setAsset] = useState(EMPTY_ASSET_FORM);
  *   <AssetFormFields value={asset} onChange={setAsset} />
  */
-export default function AssetFormFields({ value, onChange, readOnly = false, lockTypeSwitch = false }: Props) {
+export default function AssetFormFields({ value, onChange, readOnly = false, lockTypeSwitch = false, highlightEmpty = false }: Props) {
   const set = <K extends keyof AssetFormValues>(key: K, v: AssetFormValues[K]) => {
     onChange({ ...value, [key]: v });
+  };
+
+  const inputStyle = (val: unknown): CSSProperties | undefined => {
+    if (readOnly) return { background: "#f9fafb", color: "#4b5563" };
+    if (!highlightEmpty) return undefined;
+    return getEmptyFieldStyle(val);
   };
 
   // 🚀 CEP é apenas auxiliar de UX (não persiste em contract_assets) —
@@ -279,7 +289,7 @@ export default function AssetFormFields({ value, onChange, readOnly = false, loc
                 onChange={(e) => set("brand", e.target.value)}
                 required
                 readOnly={readOnly}
-                style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+                style={inputStyle(value.brand)}
               />
             </div>
             <div>
@@ -292,7 +302,7 @@ export default function AssetFormFields({ value, onChange, readOnly = false, loc
                 onChange={(e) => set("model", e.target.value)}
                 required
                 readOnly={readOnly}
-                style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+                style={inputStyle(value.model)}
               />
             </div>
           </div>
@@ -307,7 +317,7 @@ export default function AssetFormFields({ value, onChange, readOnly = false, loc
                 value={value.manufactureYear}
                 onChange={(e) => set("manufactureYear", maskYear(e.target.value))}
                 readOnly={readOnly}
-                style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+                style={inputStyle(value.manufactureYear)}
               />
             </div>
             <div>
@@ -319,7 +329,7 @@ export default function AssetFormFields({ value, onChange, readOnly = false, loc
                 value={value.modelYear}
                 onChange={(e) => set("modelYear", maskYear(e.target.value))}
                 readOnly={readOnly}
-                style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+                style={inputStyle(value.modelYear)}
               />
             </div>
             <div>
@@ -332,7 +342,7 @@ export default function AssetFormFields({ value, onChange, readOnly = false, loc
                 onChange={(e) => set("plate", maskPlate(e.target.value))}
                 required
                 readOnly={readOnly}
-                style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+                style={inputStyle(value.plate)}
               />
             </div>
             <div>
@@ -344,7 +354,7 @@ export default function AssetFormFields({ value, onChange, readOnly = false, loc
                 value={value.renavam}
                 onChange={(e) => set("renavam", maskRenavam(e.target.value))}
                 readOnly={readOnly}
-                style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+                style={inputStyle(value.renavam)}
               />
             </div>
           </div>
@@ -363,7 +373,7 @@ export default function AssetFormFields({ value, onChange, readOnly = false, loc
               onChange={(e) => set("chassis", maskChassis(e.target.value))}
               required
               readOnly={readOnly}
-              style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+              style={inputStyle(value.chassis)}
             />
           </div>
         </>
@@ -385,7 +395,7 @@ export default function AssetFormFields({ value, onChange, readOnly = false, loc
                 value={zipCode}
                 onChange={(e) => handleCepLookup(e.target.value)}
                 readOnly={readOnly}
-                style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+                style={inputStyle(zipCode)}
               />
               {cepFeedback && (
                 <span className="keep-case" style={{ fontSize: 10, color: "#16a34a", fontWeight: 600 }}>
@@ -404,7 +414,7 @@ export default function AssetFormFields({ value, onChange, readOnly = false, loc
               value={value.description}
               onChange={(e) => set("description", e.target.value)}
               readOnly={readOnly}
-              style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+              style={inputStyle(value.description)}
             />
           </div>
 
@@ -418,7 +428,7 @@ export default function AssetFormFields({ value, onChange, readOnly = false, loc
               onChange={(e) => set("location", e.target.value)}
               required
               readOnly={readOnly}
-              style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+              style={inputStyle(value.location)}
             />
           </div>
 
@@ -433,7 +443,7 @@ export default function AssetFormFields({ value, onChange, readOnly = false, loc
                 onChange={(e) => set("registryNumber", e.target.value)}
                 required
                 readOnly={readOnly}
-                style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+                style={inputStyle(value.registryNumber)}
               />
             </div>
             <div>
@@ -446,7 +456,7 @@ export default function AssetFormFields({ value, onChange, readOnly = false, loc
                 onChange={(e) => set("totalArea", maskArea(e.target.value))}
                 required
                 readOnly={readOnly}
-                style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+                style={inputStyle(value.totalArea)}
               />
             </div>
           </div>
@@ -460,7 +470,7 @@ export default function AssetFormFields({ value, onChange, readOnly = false, loc
               value={value.boundaries}
               onChange={(e) => set("boundaries", e.target.value)}
               readOnly={readOnly}
-              style={readOnly ? { background: "#f9fafb", color: "#4b5563" } : undefined}
+              style={inputStyle(value.boundaries)}
             />
           </div>
         </>
